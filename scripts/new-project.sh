@@ -45,7 +45,7 @@ if [[ ! -d "$repo_path" ]]; then
 fi
 
 canonical_repo_path="$(cd "$repo_path" && pwd -P)"
-project_dir="$canonical_repo_path/.agent-vault"
+project_dir="$canonical_repo_path/agent-vault"
 
 if [[ -e "$project_dir" ]]; then
   echo "Error: destination already exists: $project_dir"
@@ -60,7 +60,7 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 template_root="$(cd "$script_dir/.." && pwd -P)"
-scaffold_dir="$template_root/scaffold/.agent-vault"
+scaffold_dir="$template_root/scaffold/agent-vault"
 
 if [[ ! -d "$scaffold_dir" ]]; then
   echo "Error: scaffold source not found: $scaffold_dir"
@@ -93,7 +93,7 @@ else
   cat > "$root_agents" <<'AGENTS_EOF'
 # AGENTS.md
 
-Project agent rules are defined in `.agent-vault/AGENTS.md`.
+Project agent rules are defined in `agent-vault/AGENTS.md`.
 Read that file before making changes.
 AGENTS_EOF
 fi
@@ -105,7 +105,7 @@ else
   cat > "$root_claude" <<'CLAUDE_EOF'
 # CLAUDE.md
 
-Project agent rules are defined in `.agent-vault/CLAUDE.md`.
+Project agent rules are defined in `agent-vault/CLAUDE.md`.
 Read that file before making changes.
 CLAUDE_EOF
 fi

@@ -28,8 +28,8 @@ last_updated: __DATE__
 - Next milestone:
 
 ## Working Files
-- Plan: `.agent-vault/plan.md`
-- Coding standards: `.agent-vault/coding-standards.md`
-- Context log: `.agent-vault/context-log.md`
-- Design log folder: `.agent-vault/design-log/`
-- Handoffs folder: `.agent-vault/context/handoffs/`
+- Plan: `agent-vault/plan.md`
+- Coding standards: `agent-vault/coding-standards.md`
+- Context log: `agent-vault/context-log.md`
+- Design log folder: `agent-vault/design-log/`
+- Handoffs folder: `agent-vault/context/handoffs/`

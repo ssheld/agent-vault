@@ -27,9 +27,9 @@ last_updated: __DATE__
 Create a standardized project note set for multi-agent development.
 
 #### State
-- Created project workspace in `.agent-vault/`.
+- Created project workspace in `agent-vault/`.
 - Added project home, context log, plan, coding standards, and open questions.
-- Added session tracking via `.agent-vault/design-log/`, `.agent-vault/context/handoffs/`, and `.agent-vault/context/scratchpad.md`.
+- Added session tracking via `agent-vault/design-log/`, `agent-vault/context/handoffs/`, and `agent-vault/context/scratchpad.md`.
 
 #### Decisions
 - Use this context log as the canonical cross-agent memory for this project.
@@ -39,10 +39,10 @@ Create a standardized project note set for multi-agent development.
 - None yet.
 
 #### Next Prompt
-"Read `.agent-vault/context-log.md` and continue the current implementation task."
+"Read `agent-vault/context-log.md` and continue the current implementation task."
 
 #### References
-- `.agent-vault/README.md`
-- `.agent-vault/context-log.md`
-- `.agent-vault/plan.md`
-- `.agent-vault/coding-standards.md`
+- `agent-vault/README.md`
+- `agent-vault/context-log.md`
+- `agent-vault/plan.md`
+- `agent-vault/coding-standards.md`
