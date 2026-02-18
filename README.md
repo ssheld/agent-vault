@@ -1,10 +1,34 @@
 # Agent Vault Template
 
-Public template repository for generating per-project `agent-vault/` folders.
+Public template repository for generating a per-project `agent-vault/` folder.
+
+## What This Is
+This repo is a reusable scaffold for teams using AI coding agents (for example Codex and Claude) and Obsidian.
+
+It gives each code repository a standard `agent-vault/` directory with Markdown files for:
+- shared context
+- handoffs between sessions/agents
+- open questions and decisions
+- project plan and coding standards
+
+## Problem It Solves
+When multiple agents (or humans + agents) collaborate, context often gets lost between sessions. Typical failures are:
+- repeated rediscovery of decisions
+- unclear handoffs
+- stale docs compared to implementation
+- no consistent place for unresolved questions
+
+This template standardizes where that context lives and how it is updated.
+
+## Obsidian Fit
+The generated vault is plain Markdown and works directly in Obsidian.
+- Open your project repo as an Obsidian vault.
+- Use `agent-vault/` as the project memory area.
+- Keep code in normal source folders and context in `agent-vault/`.
 
 ## Workflow
-1. Clone this repo once:
-   - `~/workspaces/agent-vault`
+1. Clone this template repo once:
+   - `git clone https://github.com/ssheld/agent-vault.git`
 2. For each project repo, run:
    - `./scripts/new-project.sh <project-name> <repo-path>`
    - Example: `./scripts/new-project.sh auto-ai ~/workspaces/auto-ai`
@@ -20,7 +44,7 @@ If you want changes to propagate to future projects, edit files under `scaffold/
 
 ## Generated Structure
 `new-project.sh` creates `<repo-path>/agent-vault/` with:
-- `AGENTS.md` and `CLAUDE.md` (full policy files)
+- `AGENTS.md` and `CLAUDE.md` (policy files)
 - `README.md`
 - `context-log.md`
 - `plan.md`
