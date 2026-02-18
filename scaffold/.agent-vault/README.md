@@ -1,7 +1,7 @@
 ---
 type: project-home
 project: __PROJECT_SLUG__
-repo_path: __REPO_PATH__
+repo_reference:
 status: active
 owner:
 last_updated: __DATE__
@@ -18,7 +18,7 @@ last_updated: __DATE__
 - Out of scope:
 
 ## Links
-- Repo: __REPO_PATH__
+- Repo:
 - Board:
 - Docs:
 

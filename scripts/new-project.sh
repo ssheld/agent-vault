@@ -86,4 +86,28 @@ while IFS= read -r -d '' file; do
   perl -0pi -e 's/__PROJECT_NAME__/$ENV{PROJECT_NAME}/g; s/__PROJECT_SLUG__/$ENV{PROJECT_SLUG}/g; s/__REPO_PATH__/$ENV{REPO_PATH}/g; s/__DATE__/$ENV{TODAY}/g; s/__DATETIME__/$ENV{NOW}/g;' "$file"
 done < <(find "$project_dir" -type f -print0)
 
+root_agents="$canonical_repo_path/AGENTS.md"
+if [[ -e "$root_agents" ]]; then
+  echo "Notice: $root_agents already exists; left unchanged." >&2
+else
+  cat > "$root_agents" <<'AGENTS_EOF'
+# AGENTS.md
+
+Project agent rules are defined in `.agent-vault/AGENTS.md`.
+Read that file before making changes.
+AGENTS_EOF
+fi
+
+root_claude="$canonical_repo_path/CLAUDE.md"
+if [[ -e "$root_claude" ]]; then
+  echo "Notice: $root_claude already exists; left unchanged." >&2
+else
+  cat > "$root_claude" <<'CLAUDE_EOF'
+# CLAUDE.md
+
+Project agent rules are defined in `.agent-vault/CLAUDE.md`.
+Read that file before making changes.
+CLAUDE_EOF
+fi
+
 echo "Created project notes at: $project_dir"
