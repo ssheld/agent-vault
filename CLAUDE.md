@@ -1,28 +1,14 @@
 # CLAUDE.md
 
-## Shared Context
-- Canonical handoff memory is per-project:
-  - `01_Projects/<project-slug>/context-log.md`
-- Before starting: read the newest entry.
-- Before finishing: append a new top entry using the same schema.
-- Also read:
-  - `01_Projects/<project-slug>/plan.md`
-  - `01_Projects/<project-slug>/coding-standards.md`
-  - recent entries in `01_Projects/<project-slug>/design-log/`
-  - recent entries in `01_Projects/<project-slug>/context/handoffs/`
+## Purpose
+This repository holds reusable scaffold files for `.agent-vault/`.
 
-## Project Discovery
-- If project notes are missing, initialize with:
-  - `./scripts/new-project.sh <project-name> <repo-path>`
+## Rules
+- Edit `scaffold/.agent-vault/` for defaults used in future project initialization.
+- Do not store project-specific context in this repository.
 
-## Required Entry Fields
-- `Goal`
-- `State`
-- `Decisions`
-- `Open Questions`
-- `Next Prompt`
-- `References`
-
-## Session Logging
-- Add a short session note in `design-log/` for each meaningful work unit.
-- Add a handoff note in `context/handoffs/` when switching sessions/agents.
+## Target Project Usage
+In generated project vaults, use:
+- `.agent-vault/context-log.md` as canonical handoff memory
+- `.agent-vault/plan.md` and `.agent-vault/coding-standards.md` as execution constraints
+- `.agent-vault/design-log/` and `.agent-vault/context/handoffs/` for session transfer

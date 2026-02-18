@@ -1,47 +1,31 @@
-# Obsidian Multi-Agent Vault Template
+# Agent Vault Template
 
-Reusable baseline vault for software projects that use multiple coding agents
-(for example Codex + Claude Code) with consistent handoffs.
+Public template repository for generating per-project `.agent-vault/` folders.
 
-## Design Goals
-- Keep project context portable across tools.
-- Support both high-level memory and session-level handoffs.
-- Keep defaults lightweight and Git-friendly.
-
-## Vault Structure
-- `00_Inbox/` quick capture
-- `01_Projects/` one folder per software project
-- `02_Knowledge/` durable technical notes
-- `03_Decisions/` cross-project architecture/product decisions
-- `04_Operations/` runbooks and process docs
-- `90_Templates/` reusable note templates
-- `99_Archive/` inactive/closed material
-
-## Per-Project Standard
-Each project under `01_Projects/<slug>/` should include:
-- `context-log.md` canonical shared memory across agents
-- `design-log/` chronological session summaries
-- `context/handoffs/` handoff notes between sessions/agents
-- `context/scratchpad.md` temporary working memory
-- `plan.md` roadmap, phases, and milestones
-- `coding-standards.md` project-specific implementation standards
-- `decisions/` one note per significant decision
-
-## Quick Start
-1. Open this folder as an Obsidian vault.
-2. Create a project area:
+## Workflow
+1. Clone this repo once:
+   - `/Users/stephensheldon/workspaces/agent-vault`
+2. For each project repo, run:
    - `./scripts/new-project.sh <project-name> <repo-path>`
-3. Ask each agent to read:
-   - `01_Projects/<slug>/README.md`
-   - `01_Projects/<slug>/context-log.md`
-   - `01_Projects/<slug>/plan.md`
-   - `01_Projects/<slug>/coding-standards.md`
-4. For every meaningful session:
-   - Update `context-log.md`
-   - Add an entry in `design-log/`
-   - Add a note in `context/handoffs/` when switching agents
+   - Example: `./scripts/new-project.sh auto-ai /Users/stephensheldon/workspaces/auto-ai`
+3. Commit generated `.agent-vault/` files in the target project repo.
 
-## Obsidian and Claude Settings
-- `.obsidian/` in this template is intentionally minimal.
-- Personal Obsidian settings and plugin-heavy setups are optional and should be layered on top.
-- `.claude/` skills or memory files are optional and not required for baseline use.
+This repo should stay template-only. Do not store project-specific session logs here.
+
+## Template Source
+- Runtime scaffold copied into projects lives at:
+  - `scaffold/.agent-vault/`
+
+If you want changes to propagate to future projects, edit files under `scaffold/.agent-vault/`.
+
+## Generated Structure
+`new-project.sh` creates `<repo-path>/.agent-vault/` with:
+- `README.md`
+- `context-log.md`
+- `plan.md`
+- `coding-standards.md`
+- `decision-log.md`
+- `open-questions.md`
+- `handoff.md`
+- `context/`, `design-log/`, `decisions/`, `_assets/`
+- `Templates/` (copied from template source)
