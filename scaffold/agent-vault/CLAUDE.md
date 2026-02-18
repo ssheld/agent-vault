@@ -5,9 +5,6 @@
 - Never propose or commit changes that break documentation consistency.
 - When asked to implement, refactor, or add a feature, always follow the Pre-Commit Checklist below before finalizing edits or commits.
 
-## MCP Nudges
-- Always use Context7 MCP when library/API documentation, code generation, setup steps, or configuration details are needed.
-
 ## Code Style
 - Prefer TypeScript over JavaScript.
 - Use meaningful variable names and avoid abbreviations.
@@ -16,6 +13,19 @@
 ## Git
 - Write concise commit messages in imperative mood.
 - Keep commits atomic: one logical change per commit.
+
+## Session Start - Required
+- Read `agent-vault/context-log.md`.
+- Read `agent-vault/plan.md`.
+- Read `agent-vault/coding-standards.md`.
+- Read recent notes in `agent-vault/design-log/`.
+- Read recent notes in `agent-vault/context/handoffs/`.
+
+## Session End - Required
+- Update `agent-vault/context-log.md`.
+- Add a session note in `agent-vault/design-log/`.
+- Update `agent-vault/open-questions.md` when unresolved items exist.
+- If handing off, add a note in `agent-vault/context/handoffs/`.
 
 ## Pre-Commit Checklist - MUST follow before every commit or patch application
 Before considering any change complete and before running git commit:
