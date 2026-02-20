@@ -60,6 +60,15 @@ If you want changes to propagate to future projects, edit files under `scaffold/
 When a managed file changes, the script backs up the previous version under:
 - `<repo>/agent-vault/context/updates/<timestamp>/...`
 
+Both scripts also ensure root `.gitignore` includes Obsidian-safe ignore entries (added only when missing):
+- `.obsidian/workspace.json`
+- `.obsidian/app.json`
+- `.obsidian/appearance.json`
+- `.obsidian/workspace-mobile.json`
+- `.obsidian/cache/`
+- `.obsidian/backup/`
+- `.obsidian/plugins/*/data.json`
+
 ## Generated Structure
 `new-project.sh` creates `<repo-path>/agent-vault/` with:
 - `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` (policy files)
