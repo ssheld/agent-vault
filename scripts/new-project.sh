@@ -62,8 +62,26 @@ ensure_obsidian_gitignore() {
     : > "$gitignore_path"
   fi
 
+  gitignore_has_line() {
+    local file_path="$1"
+    local target_line="$2"
+
+    awk -v target="$target_line" '
+      {
+        sub(/\r$/, "", $0)
+        if ($0 == target) {
+          found = 1
+          exit
+        }
+      }
+      END {
+        exit found ? 0 : 1
+      }
+    ' "$file_path"
+  }
+
   for line in "${OBSIDIAN_GITIGNORE_LINES[@]}"; do
-    if grep -Fxq "$line" "$gitignore_path"; then
+    if gitignore_has_line "$gitignore_path" "$line"; then
       continue
     fi
 

@@ -133,6 +133,24 @@ preflight_symlink_checks() {
   assert_not_symlink "$canonical_repo_path/.gitignore" ".gitignore"
 }
 
+gitignore_has_line() {
+  local file_path="$1"
+  local target_line="$2"
+
+  awk -v target="$target_line" '
+    {
+      sub(/\r$/, "", $0)
+      if ($0 == target) {
+        found = 1
+        exit
+      }
+    }
+    END {
+      exit found ? 0 : 1
+    }
+  ' "$file_path"
+}
+
 sync_managed_file() {
   local src="$1"
   local dest="$2"
@@ -184,15 +202,15 @@ ensure_obsidian_gitignore() {
   local gitignore_path="$repo_root/.gitignore"
   local -a missing_lines=()
   local line
+  local backup_path
+  local existed="false"
 
-  if [[ -L "$gitignore_path" ]]; then
-    echo "Error: .gitignore is a symlink, refusing to update: .gitignore" >&2
-    echo "Replace it with a regular file and rerun update-project.sh." >&2
-    exit 1
+  if [[ -e "$gitignore_path" ]]; then
+    existed="true"
   fi
 
   for line in "${OBSIDIAN_GITIGNORE_LINES[@]}"; do
-    if [[ -e "$gitignore_path" ]] && grep -Fxq "$line" "$gitignore_path"; then
+    if [[ -e "$gitignore_path" ]] && gitignore_has_line "$gitignore_path" "$line"; then
       continue
     fi
 
@@ -201,27 +219,42 @@ ensure_obsidian_gitignore() {
 
   if [[ ${#missing_lines[@]} -eq 0 ]]; then
     echo "Unchanged: .gitignore (Obsidian ignore entries present)"
+    unchanged=$((unchanged + 1))
     return
   fi
 
   if [[ "$dry_run" == "true" ]]; then
-    if [[ ! -e "$gitignore_path" ]]; then
-      echo "Create: .gitignore"
+    if [[ "$existed" == "true" ]]; then
+      echo "Update: .gitignore (backup -> agent-vault/context/updates/$timestamp/.gitignore)"
+      updated=$((updated + 1))
+      backed_up=$((backed_up + 1))
+    else
+      echo "Create: .gitignore (add ${#missing_lines[@]} Obsidian ignore entries)"
+      created=$((created + 1))
     fi
-    echo "Update: .gitignore (add ${#missing_lines[@]} Obsidian ignore entries)"
     return
   fi
 
-  if [[ ! -e "$gitignore_path" ]]; then
+  if [[ "$existed" == "true" ]]; then
+    backup_path="$backup_dir/.gitignore"
+    mkdir -p "$(dirname "$backup_path")"
+    cp -p "$gitignore_path" "$backup_path"
+    backed_up=$((backed_up + 1))
+  else
     : > "$gitignore_path"
-    echo "Created: .gitignore"
   fi
 
   for line in "${missing_lines[@]}"; do
     printf '%s\n' "$line" >> "$gitignore_path"
   done
 
-  echo "Updated: .gitignore (added ${#missing_lines[@]} Obsidian ignore entries)"
+  if [[ "$existed" == "true" ]]; then
+    echo "Updated: .gitignore (added ${#missing_lines[@]} Obsidian ignore entries)"
+    updated=$((updated + 1))
+  else
+    echo "Created: .gitignore (added ${#missing_lines[@]} Obsidian ignore entries)"
+    created=$((created + 1))
+  fi
 }
 
 preflight_symlink_checks
