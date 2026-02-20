@@ -34,6 +34,50 @@ expand_path() {
   esac
 }
 
+OBSIDIAN_GITIGNORE_LINES=(
+  "# Obsidian -- machine-specific & volatile files (ignore these)"
+  ".obsidian/workspace.json"
+  ".obsidian/app.json"
+  ".obsidian/appearance.json"
+  ".obsidian/workspace-mobile.json"
+  ".obsidian/cache/"
+  ".obsidian/backup/"
+  "# Plugin data (can contain API keys or large caches)"
+  ".obsidian/plugins/*/data.json"
+)
+
+ensure_obsidian_gitignore() {
+  local repo_root="$1"
+  local gitignore_path="$repo_root/.gitignore"
+  local added_count=0
+  local line
+
+  if [[ -L "$gitignore_path" ]]; then
+    echo "Error: .gitignore is a symlink, refusing to update: .gitignore" >&2
+    echo "Replace it with a regular file and rerun new-project.sh." >&2
+    exit 1
+  fi
+
+  if [[ ! -e "$gitignore_path" ]]; then
+    : > "$gitignore_path"
+  fi
+
+  for line in "${OBSIDIAN_GITIGNORE_LINES[@]}"; do
+    if grep -Fxq "$line" "$gitignore_path"; then
+      continue
+    fi
+
+    printf '%s\n' "$line" >> "$gitignore_path"
+    added_count=$((added_count + 1))
+  done
+
+  if [[ "$added_count" -gt 0 ]]; then
+    echo "Updated: .gitignore (added $added_count Obsidian ignore entries)"
+  else
+    echo "Unchanged: .gitignore (Obsidian ignore entries already present)"
+  fi
+}
+
 repo_path="$(expand_path "$repo_path_input")"
 if [[ "$repo_path_input" == /~/* ]]; then
   echo "Warning: interpreted '$repo_path_input' as '$repo_path'." >&2
@@ -49,6 +93,12 @@ project_dir="$canonical_repo_path/agent-vault"
 
 if [[ -e "$project_dir" ]]; then
   echo "Error: destination already exists: $project_dir"
+  exit 1
+fi
+
+if [[ -L "$canonical_repo_path/.gitignore" ]]; then
+  echo "Error: .gitignore is a symlink, refusing to update: $canonical_repo_path/.gitignore" >&2
+  echo "Replace it with a regular file and rerun new-project.sh." >&2
   exit 1
 fi
 
@@ -119,5 +169,7 @@ if [[ -e "$root_gemini" ]]; then
 else
   cp "$root_scaffold_dir/GEMINI.md" "$root_gemini"
 fi
+
+ensure_obsidian_gitignore "$canonical_repo_path"
 
 echo "Created project notes at: $project_dir"

@@ -26,6 +26,18 @@ expand_path() {
   esac
 }
 
+OBSIDIAN_GITIGNORE_LINES=(
+  "# Obsidian -- machine-specific & volatile files (ignore these)"
+  ".obsidian/workspace.json"
+  ".obsidian/app.json"
+  ".obsidian/appearance.json"
+  ".obsidian/workspace-mobile.json"
+  ".obsidian/cache/"
+  ".obsidian/backup/"
+  "# Plugin data (can contain API keys or large caches)"
+  ".obsidian/plugins/*/data.json"
+)
+
 repo_path_input=""
 dry_run="false"
 
@@ -100,6 +112,27 @@ updated=0
 unchanged=0
 backed_up=0
 
+assert_not_symlink() {
+  local path="$1"
+  local rel="$2"
+
+  if [[ -L "$path" ]]; then
+    echo "Error: managed file is a symlink, refusing to update: $rel" >&2
+    echo "Resolve the symlink to a regular file and rerun update-project.sh." >&2
+    exit 1
+  fi
+}
+
+preflight_symlink_checks() {
+  assert_not_symlink "$canonical_repo_path/AGENTS.md" "AGENTS.md"
+  assert_not_symlink "$canonical_repo_path/CLAUDE.md" "CLAUDE.md"
+  assert_not_symlink "$canonical_repo_path/GEMINI.md" "GEMINI.md"
+  assert_not_symlink "$project_dir/AGENTS.md" "agent-vault/AGENTS.md"
+  assert_not_symlink "$project_dir/CLAUDE.md" "agent-vault/CLAUDE.md"
+  assert_not_symlink "$project_dir/GEMINI.md" "agent-vault/GEMINI.md"
+  assert_not_symlink "$canonical_repo_path/.gitignore" ".gitignore"
+}
+
 sync_managed_file() {
   local src="$1"
   local dest="$2"
@@ -111,11 +144,7 @@ sync_managed_file() {
     rel="$dest"
   fi
 
-  if [[ -L "$dest" ]]; then
-    echo "Error: managed file is a symlink, refusing to update: $rel" >&2
-    echo "Resolve the symlink to a regular file and rerun update-project.sh." >&2
-    exit 1
-  fi
+  assert_not_symlink "$dest" "$rel"
 
   if [[ ! -e "$dest" ]]; then
     if [[ "$dry_run" == "true" ]]; then
@@ -150,12 +179,60 @@ sync_managed_file() {
   updated=$((updated + 1))
 }
 
+ensure_obsidian_gitignore() {
+  local repo_root="$1"
+  local gitignore_path="$repo_root/.gitignore"
+  local -a missing_lines=()
+  local line
+
+  if [[ -L "$gitignore_path" ]]; then
+    echo "Error: .gitignore is a symlink, refusing to update: .gitignore" >&2
+    echo "Replace it with a regular file and rerun update-project.sh." >&2
+    exit 1
+  fi
+
+  for line in "${OBSIDIAN_GITIGNORE_LINES[@]}"; do
+    if [[ -e "$gitignore_path" ]] && grep -Fxq "$line" "$gitignore_path"; then
+      continue
+    fi
+
+    missing_lines+=("$line")
+  done
+
+  if [[ ${#missing_lines[@]} -eq 0 ]]; then
+    echo "Unchanged: .gitignore (Obsidian ignore entries present)"
+    return
+  fi
+
+  if [[ "$dry_run" == "true" ]]; then
+    if [[ ! -e "$gitignore_path" ]]; then
+      echo "Create: .gitignore"
+    fi
+    echo "Update: .gitignore (add ${#missing_lines[@]} Obsidian ignore entries)"
+    return
+  fi
+
+  if [[ ! -e "$gitignore_path" ]]; then
+    : > "$gitignore_path"
+    echo "Created: .gitignore"
+  fi
+
+  for line in "${missing_lines[@]}"; do
+    printf '%s\n' "$line" >> "$gitignore_path"
+  done
+
+  echo "Updated: .gitignore (added ${#missing_lines[@]} Obsidian ignore entries)"
+}
+
+preflight_symlink_checks
+
 sync_managed_file "$root_scaffold_dir/AGENTS.md" "$canonical_repo_path/AGENTS.md"
 sync_managed_file "$root_scaffold_dir/CLAUDE.md" "$canonical_repo_path/CLAUDE.md"
 sync_managed_file "$root_scaffold_dir/GEMINI.md" "$canonical_repo_path/GEMINI.md"
 sync_managed_file "$vault_scaffold_dir/AGENTS.md" "$project_dir/AGENTS.md"
 sync_managed_file "$vault_scaffold_dir/CLAUDE.md" "$project_dir/CLAUDE.md"
 sync_managed_file "$vault_scaffold_dir/GEMINI.md" "$project_dir/GEMINI.md"
+ensure_obsidian_gitignore "$canonical_repo_path"
 
 echo
 echo "Summary:"
