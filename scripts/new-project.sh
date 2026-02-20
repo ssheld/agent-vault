@@ -211,4 +211,17 @@ Read that file before making changes.
 CLAUDE_EOF
 fi
 
+root_gemini="$canonical_repo_path/GEMINI.md"
+if [[ -e "$root_gemini" ]]; then
+  echo "Notice: $root_gemini already exists; left unchanged." >&2
+else
+  cat > "$root_gemini" <<'GEMINI_EOF'
+# GEMINI.md
+
+Project agent rules are imported from `agent-vault/GEMINI.md`.
+
+@./agent-vault/GEMINI.md
+GEMINI_EOF
+fi
+
 echo "Created project notes at: $project_dir"

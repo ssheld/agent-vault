@@ -3,7 +3,7 @@
 Public template repository for generating a per-project `agent-vault/` folder.
 
 ## What This Is
-This repo is a reusable scaffold for teams using AI coding agents (for example Codex and Claude) and Obsidian.
+This repo is a reusable scaffold for teams using AI coding agents (for example Codex, Claude, and Gemini CLI) and Obsidian.
 
 It gives each code repository a standard `agent-vault/` directory with Markdown files for:
 - shared context
@@ -44,7 +44,7 @@ If you want changes to propagate to future projects, edit files under `scaffold/
 
 ## Generated Structure
 `new-project.sh` creates `<repo-path>/agent-vault/` with:
-- `AGENTS.md` and `CLAUDE.md` (policy files)
+- `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` (policy files)
 - `README.md`
 - `context-log.md`
 - `plan.md`
@@ -58,5 +58,6 @@ If you want changes to propagate to future projects, edit files under `scaffold/
 It also creates project-root wrappers when missing:
 - `<repo-path>/AGENTS.md` -> contains PR review guidance for Codex GitHub reviews and points workflow execution to `agent-vault/AGENTS.md`
 - `<repo-path>/CLAUDE.md` -> points to `agent-vault/CLAUDE.md`
+- `<repo-path>/GEMINI.md` -> imports `agent-vault/GEMINI.md`
 
 If root files already exist, the script leaves them unchanged and prints a notice.
