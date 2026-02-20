@@ -56,7 +56,7 @@ If you want changes to propagate to future projects, edit files under `scaffold/
 - `Templates/` (copied from template source)
 
 It also creates project-root wrappers when missing:
-- `<repo-path>/AGENTS.md` -> points to `agent-vault/AGENTS.md`
+- `<repo-path>/AGENTS.md` -> contains PR review guidance for Codex GitHub reviews and points workflow execution to `agent-vault/AGENTS.md`
 - `<repo-path>/CLAUDE.md` -> points to `agent-vault/CLAUDE.md`
 - `<repo-path>/GEMINI.md` -> imports `agent-vault/GEMINI.md`
 

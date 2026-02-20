@@ -1,4 +1,8 @@
-# AGENTS.md - House Rules for Codex Agents in this Repository
+# AGENTS.md - Workflow Rules for Codex Agents in this Repository
+
+## Scope
+- This file defines implementation workflow and handoff behavior.
+- PR review policy lives in the project-root `AGENTS.md`.
 
 ## Core Principles
 - Treat documentation as source code: code and docs must always stay in sync.
