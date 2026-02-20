@@ -111,6 +111,12 @@ sync_managed_file() {
     rel="$dest"
   fi
 
+  if [[ -L "$dest" ]]; then
+    echo "Error: managed file is a symlink, refusing to update: $rel" >&2
+    echo "Resolve the symlink to a regular file and rerun update-project.sh." >&2
+    exit 1
+  fi
+
   if [[ ! -e "$dest" ]]; then
     if [[ "$dry_run" == "true" ]]; then
       echo "Create: $rel"
