@@ -29,18 +29,36 @@ The generated vault is plain Markdown and works directly in Obsidian.
 ## Workflow
 1. Clone this template repo once:
    - `git clone https://github.com/ssheld/agent-vault.git`
-2. For each project repo, run:
+2. For a new project repo, run:
    - `./scripts/new-project.sh <project-name> <repo-path>`
    - Example: `./scripts/new-project.sh auto-ai ~/workspaces/auto-ai`
-3. Commit generated files in the target project repo.
+3. For an existing project repo, run:
+   - `./scripts/update-project.sh <repo-path> --dry-run`
+   - `./scripts/update-project.sh <repo-path>`
+   - Example: `./scripts/update-project.sh ~/workspaces/harrier`
+4. Commit generated or updated files in the target project repo.
 
 This repo should stay template-only. Do not store project-specific session logs here.
 
 ## Template Source
 - Runtime scaffold copied into projects lives at:
   - `scaffold/agent-vault/`
+- Root wrapper templates copied into project repos live at:
+  - `scaffold/root/`
 
-If you want changes to propagate to future projects, edit files under `scaffold/agent-vault/`.
+If you want changes to propagate to future projects, edit files under `scaffold/agent-vault/` and `scaffold/root/`.
+
+## Updating Existing Repos
+`update-project.sh` updates only managed policy files:
+- `<repo>/AGENTS.md`
+- `<repo>/CLAUDE.md`
+- `<repo>/GEMINI.md`
+- `<repo>/agent-vault/AGENTS.md`
+- `<repo>/agent-vault/CLAUDE.md`
+- `<repo>/agent-vault/GEMINI.md`
+
+When a managed file changes, the script backs up the previous version under:
+- `<repo>/agent-vault/context/updates/<timestamp>/...`
 
 ## Generated Structure
 `new-project.sh` creates `<repo-path>/agent-vault/` with:
