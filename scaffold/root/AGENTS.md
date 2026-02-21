@@ -1,4 +1,5 @@
 # AGENTS.md
+<!-- agent-vault-managed: root-wrapper; file=AGENTS.md -->
 
 ## Scope
 - These review guidelines apply only when performing pull request code review.
