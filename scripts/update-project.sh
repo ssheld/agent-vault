@@ -38,6 +38,10 @@ OBSIDIAN_GITIGNORE_LINES=(
   ".obsidian/plugins/*/data.json"
 )
 
+ROOT_AGENTS_MARKER="<!-- agent-vault-managed: root-wrapper; file=AGENTS.md -->"
+ROOT_CLAUDE_MARKER="<!-- agent-vault-managed: root-wrapper; file=CLAUDE.md -->"
+ROOT_GEMINI_MARKER="<!-- agent-vault-managed: root-wrapper; file=GEMINI.md -->"
+
 repo_path_input=""
 dry_run="false"
 
@@ -111,6 +115,17 @@ created=0
 updated=0
 unchanged=0
 backed_up=0
+skipped=0
+
+repo_relative_path() {
+  local path="$1"
+
+  if [[ "$path" == "$canonical_repo_path/"* ]]; then
+    printf '%s\n' "${path#$canonical_repo_path/}"
+  else
+    printf '%s\n' "$path"
+  fi
+}
 
 assert_not_symlink() {
   local path="$1"
@@ -124,16 +139,14 @@ assert_not_symlink() {
 }
 
 preflight_symlink_checks() {
-  assert_not_symlink "$canonical_repo_path/AGENTS.md" "AGENTS.md"
-  assert_not_symlink "$canonical_repo_path/CLAUDE.md" "CLAUDE.md"
-  assert_not_symlink "$canonical_repo_path/GEMINI.md" "GEMINI.md"
+  # agent-vault policy files and .gitignore are always managed.
   assert_not_symlink "$project_dir/AGENTS.md" "agent-vault/AGENTS.md"
   assert_not_symlink "$project_dir/CLAUDE.md" "agent-vault/CLAUDE.md"
   assert_not_symlink "$project_dir/GEMINI.md" "agent-vault/GEMINI.md"
   assert_not_symlink "$canonical_repo_path/.gitignore" ".gitignore"
 }
 
-gitignore_has_line() {
+has_exact_line() {
   local file_path="$1"
   local target_line="$2"
 
@@ -151,16 +164,27 @@ gitignore_has_line() {
   ' "$file_path"
 }
 
+gitignore_has_line() {
+  local file_path="$1"
+  local target_line="$2"
+
+  has_exact_line "$file_path" "$target_line"
+}
+
+is_managed_root_wrapper() {
+  local file_path="$1"
+  local marker="$2"
+
+  [[ -f "$file_path" ]] || return 1
+  has_exact_line "$file_path" "$marker"
+}
+
 sync_managed_file() {
   local src="$1"
   local dest="$2"
   local rel
 
-  if [[ "$dest" == "$canonical_repo_path/"* ]]; then
-    rel="${dest#$canonical_repo_path/}"
-  else
-    rel="$dest"
-  fi
+  rel="$(repo_relative_path "$dest")"
 
   assert_not_symlink "$dest" "$rel"
 
@@ -195,6 +219,34 @@ sync_managed_file() {
   fi
 
   updated=$((updated + 1))
+}
+
+sync_root_wrapper_if_managed() {
+  local src="$1"
+  local dest="$2"
+  local marker="$3"
+  local rel
+
+  rel="$(repo_relative_path "$dest")"
+
+  if [[ -L "$dest" ]]; then
+    echo "Skip: $rel (symlink files are not auto-managed)"
+    skipped=$((skipped + 1))
+    return
+  fi
+
+  if [[ ! -e "$dest" ]]; then
+    sync_managed_file "$src" "$dest"
+    return
+  fi
+
+  if is_managed_root_wrapper "$dest" "$marker"; then
+    sync_managed_file "$src" "$dest"
+    return
+  fi
+
+  echo "Skip: $rel (existing file is not an agent-vault managed wrapper)"
+  skipped=$((skipped + 1))
 }
 
 ensure_obsidian_gitignore() {
@@ -259,9 +311,10 @@ ensure_obsidian_gitignore() {
 
 preflight_symlink_checks
 
-sync_managed_file "$root_scaffold_dir/AGENTS.md" "$canonical_repo_path/AGENTS.md"
-sync_managed_file "$root_scaffold_dir/CLAUDE.md" "$canonical_repo_path/CLAUDE.md"
-sync_managed_file "$root_scaffold_dir/GEMINI.md" "$canonical_repo_path/GEMINI.md"
+sync_root_wrapper_if_managed "$root_scaffold_dir/AGENTS.md" "$canonical_repo_path/AGENTS.md" "$ROOT_AGENTS_MARKER"
+sync_root_wrapper_if_managed "$root_scaffold_dir/CLAUDE.md" "$canonical_repo_path/CLAUDE.md" "$ROOT_CLAUDE_MARKER"
+sync_root_wrapper_if_managed "$root_scaffold_dir/GEMINI.md" "$canonical_repo_path/GEMINI.md" "$ROOT_GEMINI_MARKER"
+
 sync_managed_file "$vault_scaffold_dir/AGENTS.md" "$project_dir/AGENTS.md"
 sync_managed_file "$vault_scaffold_dir/CLAUDE.md" "$project_dir/CLAUDE.md"
 sync_managed_file "$vault_scaffold_dir/GEMINI.md" "$project_dir/GEMINI.md"
@@ -272,6 +325,7 @@ echo "Summary:"
 echo "- created: $created"
 echo "- updated: $updated"
 echo "- unchanged: $unchanged"
+echo "- skipped: $skipped"
 echo "- backups: $backed_up"
 
 if [[ "$dry_run" == "true" ]]; then
