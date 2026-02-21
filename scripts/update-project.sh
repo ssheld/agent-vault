@@ -229,14 +229,14 @@ sync_root_wrapper_if_managed() {
 
   rel="$(repo_relative_path "$dest")"
 
-  if [[ ! -e "$dest" ]]; then
-    sync_managed_file "$src" "$dest"
-    return
-  fi
-
   if [[ -L "$dest" ]]; then
     echo "Skip: $rel (symlink files are not auto-managed)"
     skipped=$((skipped + 1))
+    return
+  fi
+
+  if [[ ! -e "$dest" ]]; then
+    sync_managed_file "$src" "$dest"
     return
   fi
 
