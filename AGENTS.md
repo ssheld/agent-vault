@@ -159,3 +159,9 @@ Confidence tags are optional for clear-cut findings (Critical severity almost al
   - Merge recommendation: Approve / Approve with Changes / Request Changes
   - Top risks (1-3 bullets)
   - Suggested additional tests (if any)
+
+### Review State Fallback
+If the platform or API blocks the intended formal review state (e.g., permission restrictions, self-review limitations, role constraints):
+- Submit a `COMMENT` review instead.
+- Keep the same textual merge recommendation in the review body (`Approve`, `Approve with Changes`, or `Request Changes`).
+- Add a one-line note: `Formal review state unavailable: <reason>`.
