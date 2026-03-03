@@ -20,6 +20,7 @@
 - Read `agent-vault/coding-standards.md`.
 - Read recent notes in `agent-vault/design-log/`.
 - Read recent notes in `agent-vault/context/handoffs/`.
+- After completing the reads above, confirm by listing which files were read and briefly summarize the current project state (active plan, recent decisions, open questions).
 
 ## Session End - Required
 - Update `agent-vault/context-log.md`.
