@@ -90,6 +90,7 @@ When running `new-project.sh` with `--migrate-existing-root-md`:
   - `<repo>/AGENTS.md`
   - `<repo>/CLAUDE.md`
   - `<repo>/GEMINI.md`
+- The `CLAUDE.md` and `GEMINI.md` root wrappers include `agent-vault/CLAUDE.md` and `agent-vault/GEMINI.md` so migrated legacy guidance remains part of root entrypoint context.
 
 Without this flag, `new-project.sh` leaves pre-existing root files unchanged and prints a notice.
 
@@ -97,7 +98,7 @@ Without this flag, `new-project.sh` leaves pre-existing root files unchanged and
 `new-project.sh` creates `<repo-path>/agent-vault/` with:
 - `shared-rules.md` (single source of truth for implementation rules)
 - `review-policy.md` (single source of truth for PR review guidelines)
-- `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` (policy files; CLAUDE.md and GEMINI.md import shared files, AGENTS.md inlines them)
+- `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` (policy files; `agent-vault/CLAUDE.md` and `agent-vault/GEMINI.md` import `shared-rules.md`, root wrappers import `review-policy.md`, and `AGENTS.md` inlines review guidance)
 - `README.md`
 - `context-log.md`
 - `plan.md`
@@ -111,7 +112,7 @@ Without this flag, `new-project.sh` leaves pre-existing root files unchanged and
 
 It also creates project-root wrappers when missing:
 - `<repo-path>/AGENTS.md` -> contains PR review guidance (inline) for Codex GitHub reviews and points workflow execution to `agent-vault/AGENTS.md`
-- `<repo-path>/CLAUDE.md` -> imports `agent-vault/shared-rules.md` and `agent-vault/review-policy.md`
-- `<repo-path>/GEMINI.md` -> imports `agent-vault/shared-rules.md` and `agent-vault/review-policy.md`
+- `<repo-path>/CLAUDE.md` -> imports `agent-vault/CLAUDE.md` and `agent-vault/review-policy.md`
+- `<repo-path>/GEMINI.md` -> imports `agent-vault/GEMINI.md` and `agent-vault/review-policy.md`
 
 If root files already exist, the script leaves them unchanged unless `--migrate-existing-root-md` is provided.
