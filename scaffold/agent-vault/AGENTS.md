@@ -9,6 +9,8 @@
 - Treat documentation as source code: code and docs must always stay in sync.
 - Never propose or commit changes that break documentation consistency.
 - When asked to implement, refactor, or add a feature, always follow the Pre-Commit Checklist below before finalizing edits or commits.
+- Find root causes. No temporary fixes or workarounds unless explicitly agreed with the user and tracked in `agent-vault/open-questions.md`.
+- For non-trivial tasks (3+ steps or architectural decisions), outline a plan before implementing. Use `agent-vault/plan.md` for milestone-level planning. If implementation diverges significantly from the plan, stop and re-plan.
 
 ## Code Style
 - Prefer TypeScript over JavaScript.
@@ -25,6 +27,7 @@
 - Read `agent-vault/coding-standards.md`.
 - Read recent notes in `agent-vault/design-log/`.
 - Read recent notes in `agent-vault/context/handoffs/`.
+- Read `agent-vault/lessons.md` (if it exists).
 - After completing the reads above, confirm by listing which files were read and briefly summarize the current project state (active plan, recent decisions, open questions).
 
 ## Session End - Required
@@ -32,6 +35,14 @@
 - Add a session note in `agent-vault/design-log/`.
 - Update `agent-vault/open-questions.md` when unresolved items exist.
 - If handing off, add a note in `agent-vault/context/handoffs/`.
+- If the user corrected a mistake during this session, add an entry to `agent-vault/lessons.md` describing the mistake pattern and a preventive rule.
+
+## Completion Verification - MUST follow before marking any task done
+Before reporting a task as finished:
+1. Prove it works: run relevant tests, check logs, or demonstrate the changed behavior.
+2. Diff against the base branch to confirm only intended changes are included.
+3. Ask yourself: "Would a senior engineer approve this?" If not, fix it first.
+4. If verification is not possible (no test suite, no runnable environment), explicitly state what was checked and what remains unverified.
 
 ## Pre-Commit Checklist - MUST follow before every commit or patch application
 Before considering any change complete and before running git commit:
