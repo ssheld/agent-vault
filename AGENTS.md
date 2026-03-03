@@ -1,4 +1,5 @@
 # AGENTS.md
+<!-- Keep review policy in sync with scaffold/agent-vault/review-policy.md -->
 
 ## Repository Purpose
 This repository is a template source, not project memory.
@@ -99,11 +100,61 @@ This repository uses AI agents and LLM-assisted development. Treat agent outputs
 - Avoid hidden global state causing nondeterministic behavior.
 
 ## Comment Style
+
+### Attribution (REQUIRED)
+All PR review comments are posted under the repository owner's GitHub account.
+To avoid confusion, every agent MUST clearly identify itself.
+
+**Review summary** (the top-level review body) must begin with:
+```
+> 🤖 **Review by {Model Name}** · via {Client Tool}
+```
+Example:
+```
+> 🤖 **Review by Claude Opus 4.6** · via Claude Code
+```
+
+**Inline review comments** on specific lines must begin with:
+```
+🤖 `{Model Name}`
+```
+Example:
+```
+🤖 `Codex 5.3`
+
+**Critical** — This query is vulnerable to SQL injection ...
+```
+
+Rules:
+- Use your actual model name and version (e.g., Claude Opus 4.6, Codex 5.3, Gemini 2.5 Pro).
+- Include the client tool when known (e.g., Claude Code, Codex CLI, Gemini CLI).
+- Never present review feedback as if it is the human account owner's personal opinion.
+- If you are uncertain of your exact model version, use the best identifier you have (e.g., "Claude" or "Codex").
+
+### Severity Labels
 When generating review comments:
 - Use clear labels:
   - Critical - must fix before merge
   - Recommended - strong improvement
   - Optional - minor suggestion
+
+### Confidence Indicators
+For non-obvious findings, append a confidence tag to help readers triage:
+- **High confidence** — certain this is a bug or vulnerability
+- **Medium confidence** — likely an issue, but context-dependent
+- **Low confidence** — stylistic or speculative; reviewer discretion advised
+
+Example:
+```
+🤖 `Claude Opus 4.6`
+
+**Recommended** · High confidence — This error is silently swallowed.
+The catch block on line 42 discards the exception without logging.
+```
+
+Confidence tags are optional for clear-cut findings (Critical severity almost always implies high confidence). Use them when the finding involves judgment or ambiguity.
+
+### Review Summary Format
 - End each review with:
   - Merge recommendation: Approve / Approve with Changes / Request Changes
   - Top risks (1-3 bullets)

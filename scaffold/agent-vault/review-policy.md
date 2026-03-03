@@ -1,14 +1,4 @@
-# AGENTS.md
-<!-- agent-vault-managed: root-wrapper; file=AGENTS.md -->
-<!-- Keep review policy in sync with agent-vault/review-policy.md -->
-
-## Scope
-- These review guidelines apply only when performing pull request code review.
-- For implementation workflow, handoffs, and shared project memory, also follow `agent-vault/AGENTS.md`.
-
-## Local Agent Workflow
-Project agent rules are defined in `agent-vault/AGENTS.md`.
-Read that file before making changes.
+<!-- This file is managed by agent-vault. Do not edit in target projects. -->
 
 ## Review Guidelines (for automated code review agents)
 When performing a code review on this repository, behave like a senior backend engineer responsible for production reliability, security, maintainability, and operability.
