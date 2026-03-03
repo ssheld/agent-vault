@@ -112,7 +112,7 @@ Without this flag, `new-project.sh` leaves pre-existing root files unchanged and
 
 It also creates project-root wrappers when missing:
 - `<repo-path>/AGENTS.md` -> contains PR review guidance (inline) for Codex GitHub reviews and points workflow execution to `agent-vault/AGENTS.md`
-- `<repo-path>/CLAUDE.md` -> imports `agent-vault/CLAUDE.md`, `agent-vault/shared-rules.md`, and `agent-vault/review-policy.md`
-- `<repo-path>/GEMINI.md` -> imports `agent-vault/GEMINI.md`, `agent-vault/shared-rules.md`, and `agent-vault/review-policy.md`
+- `<repo-path>/CLAUDE.md` -> imports `agent-vault/CLAUDE.md` and `agent-vault/review-policy.md`
+- `<repo-path>/GEMINI.md` -> imports `agent-vault/GEMINI.md` and `agent-vault/review-policy.md`
 
 If root files already exist, the script leaves them unchanged unless `--migrate-existing-root-md` is provided.
