@@ -38,6 +38,8 @@ The generated vault is plain Markdown and works directly in Obsidian.
    - `./scripts/update-project.sh <repo-path> --dry-run`
    - `./scripts/update-project.sh <repo-path>`
    - Example: `./scripts/update-project.sh ~/workspaces/harrier`
+   - To migrate unmanaged root wrappers to managed versions:
+     - `./scripts/update-project.sh <repo-path> --migrate-root`
 4. Commit generated or updated files in the target project repo.
 
 This repo should stay template-only. Do not store project-specific session logs here.
@@ -53,6 +55,8 @@ If you want changes to propagate to future projects, edit files under `scaffold/
 ## Updating Existing Repos
 `update-project.sh` updates these managed policy files:
 - Always managed:
+  - `<repo>/agent-vault/shared-rules.md`
+  - `<repo>/agent-vault/review-policy.md`
   - `<repo>/agent-vault/AGENTS.md`
   - `<repo>/agent-vault/CLAUDE.md`
   - `<repo>/agent-vault/GEMINI.md`
@@ -61,7 +65,10 @@ If you want changes to propagate to future projects, edit files under `scaffold/
   - `<repo>/CLAUDE.md`
   - `<repo>/GEMINI.md`
 
-If an existing root policy file does not have the managed marker, `update-project.sh` leaves it unchanged and reports a skip notice.
+If an existing root policy file does not have the managed marker, `update-project.sh` leaves it unchanged and reports a skip notice suggesting `--migrate-root`.
+
+### Migrating Root Wrappers (`--migrate-root`)
+When running `update-project.sh` with `--migrate-root`, unmanaged root wrappers (those missing the `agent-vault-managed` marker) are backed up and replaced with the current scaffold versions. This is useful for workspaces created before root wrapper management was introduced.
 
 When a managed file changes, the script backs up the previous version under:
 - `<repo>/agent-vault/context/updates/<timestamp>/...`
@@ -88,7 +95,9 @@ Without this flag, `new-project.sh` leaves pre-existing root files unchanged and
 
 ## Generated Structure
 `new-project.sh` creates `<repo-path>/agent-vault/` with:
-- `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` (policy files)
+- `shared-rules.md` (single source of truth for implementation rules)
+- `review-policy.md` (single source of truth for PR review guidelines)
+- `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` (policy files; CLAUDE.md and GEMINI.md import shared files, AGENTS.md inlines them)
 - `README.md`
 - `context-log.md`
 - `plan.md`
@@ -100,8 +109,8 @@ Without this flag, `new-project.sh` leaves pre-existing root files unchanged and
 - `Templates/` (copied from template source)
 
 It also creates project-root wrappers when missing:
-- `<repo-path>/AGENTS.md` -> contains PR review guidance for Codex GitHub reviews and points workflow execution to `agent-vault/AGENTS.md`
-- `<repo-path>/CLAUDE.md` -> points to `agent-vault/CLAUDE.md`
-- `<repo-path>/GEMINI.md` -> imports `agent-vault/GEMINI.md`
+- `<repo-path>/AGENTS.md` -> contains PR review guidance (inline) for Codex GitHub reviews and points workflow execution to `agent-vault/AGENTS.md`
+- `<repo-path>/CLAUDE.md` -> imports `agent-vault/shared-rules.md` and `agent-vault/review-policy.md`
+- `<repo-path>/GEMINI.md` -> imports `agent-vault/shared-rules.md` and `agent-vault/review-policy.md`
 
 If root files already exist, the script leaves them unchanged unless `--migrate-existing-root-md` is provided.
