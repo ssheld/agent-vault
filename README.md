@@ -98,7 +98,7 @@ Without this flag, `new-project.sh` leaves pre-existing root files unchanged and
 `new-project.sh` creates `<repo-path>/agent-vault/` with:
 - `shared-rules.md` (single source of truth for implementation rules)
 - `review-policy.md` (single source of truth for PR review guidelines)
-- `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` (policy files; CLAUDE.md and GEMINI.md import their agent-specific file plus shared and review policy files, AGENTS.md inlines review guidance)
+- `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` (policy files; `agent-vault/CLAUDE.md` and `agent-vault/GEMINI.md` import `shared-rules.md`, root wrappers import `review-policy.md`, and `AGENTS.md` inlines review guidance)
 - `README.md`
 - `context-log.md`
 - `plan.md`
