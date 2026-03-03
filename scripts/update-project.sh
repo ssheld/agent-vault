@@ -110,7 +110,8 @@ for required in \
   "$vault_scaffold_dir/CLAUDE.md" \
   "$vault_scaffold_dir/GEMINI.md" \
   "$vault_scaffold_dir/shared-rules.md" \
-  "$vault_scaffold_dir/review-policy.md"
+  "$vault_scaffold_dir/review-policy.md" \
+  "$vault_scaffold_dir/lessons.md"
 do
   if [[ ! -f "$required" ]]; then
     echo "Error: missing scaffold file: $required"
@@ -239,6 +240,12 @@ seed_if_missing() {
   local rel
 
   rel="$(repo_relative_path "$dest")"
+
+  if [[ -L "$dest" ]]; then
+    echo "Skip: $rel (symlink — not seeding)"
+    skipped=$((skipped + 1))
+    return
+  fi
 
   if [[ -e "$dest" ]]; then
     return
