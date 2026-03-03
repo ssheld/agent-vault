@@ -110,7 +110,8 @@ for required in \
   "$vault_scaffold_dir/CLAUDE.md" \
   "$vault_scaffold_dir/GEMINI.md" \
   "$vault_scaffold_dir/shared-rules.md" \
-  "$vault_scaffold_dir/review-policy.md"
+  "$vault_scaffold_dir/review-policy.md" \
+  "$vault_scaffold_dir/lessons.md"
 do
   if [[ ! -f "$required" ]]; then
     echo "Error: missing scaffold file: $required"
@@ -233,6 +234,33 @@ sync_managed_file() {
   updated=$((updated + 1))
 }
 
+seed_if_missing() {
+  local src="$1"
+  local dest="$2"
+  local rel
+
+  rel="$(repo_relative_path "$dest")"
+
+  if [[ -L "$dest" ]]; then
+    echo "Skip: $rel (symlink — not seeding)"
+    skipped=$((skipped + 1))
+    return
+  fi
+
+  if [[ -e "$dest" ]]; then
+    return
+  fi
+
+  if [[ "$dry_run" == "true" ]]; then
+    echo "Seed: $rel (new template)"
+  else
+    mkdir -p "$(dirname "$dest")"
+    cp "$src" "$dest"
+    echo "Seeded: $rel (new template)"
+  fi
+  created=$((created + 1))
+}
+
 sync_root_wrapper_if_managed() {
   local src="$1"
   local dest="$2"
@@ -339,6 +367,9 @@ sync_managed_file "$vault_scaffold_dir/review-policy.md" "$project_dir/review-po
 sync_managed_file "$vault_scaffold_dir/AGENTS.md" "$project_dir/AGENTS.md"
 sync_managed_file "$vault_scaffold_dir/CLAUDE.md" "$project_dir/CLAUDE.md"
 sync_managed_file "$vault_scaffold_dir/GEMINI.md" "$project_dir/GEMINI.md"
+
+seed_if_missing "$vault_scaffold_dir/lessons.md" "$project_dir/lessons.md"
+
 ensure_obsidian_gitignore "$canonical_repo_path"
 
 echo

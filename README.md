@@ -104,6 +104,7 @@ Without this flag, `new-project.sh` leaves pre-existing root files unchanged and
 - `coding-standards.md`
 - `decision-log.md`
 - `open-questions.md`
+- `lessons.md`
 - `handoff.md`
 - `context/`, `design-log/`, `decisions/`, `_assets/`
 - `Templates/` (copied from template source)
