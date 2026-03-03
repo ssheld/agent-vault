@@ -1,18 +1,4 @@
-# AGENTS.md
-<!-- Keep review policy in sync with scaffold/agent-vault/review-policy.md -->
-
-## Repository Purpose
-This repository is a template source, not project memory.
-
-## Template Maintenance Rules
-- Keep reusable defaults in `scaffold/agent-vault/`.
-- Do not add project-specific notes or logs to this repository.
-- Generate project context only via `scripts/new-project.sh`.
-- When updating generated-project behavior, modify scaffold files and script templates together.
-
-## Scope
-- These review guidelines apply only when performing pull request code review.
-- For generated projects, workflow and handoff behavior is defined in `scaffold/agent-vault/AGENTS.md`.
+<!-- This file is managed by agent-vault. Do not edit in target projects. -->
 
 ## Review Guidelines (for automated code review agents)
 When performing a code review on this repository, behave like a senior backend engineer responsible for production reliability, security, maintainability, and operability.

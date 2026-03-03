@@ -3,8 +3,12 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 <repo-path> [--dry-run]"
+  echo "Usage: $0 <repo-path> [--dry-run] [--migrate-root]"
   echo "Example: $0 ~/workspaces/harrier --dry-run"
+  echo ""
+  echo "Options:"
+  echo "  --dry-run       Show what would change without writing files"
+  echo "  --migrate-root  Replace unmanaged root wrappers with managed versions (backs up originals)"
 }
 
 expand_path() {
@@ -44,11 +48,15 @@ ROOT_GEMINI_MARKER="<!-- agent-vault-managed: root-wrapper; file=GEMINI.md -->"
 
 repo_path_input=""
 dry_run="false"
+migrate_root="false"
 
 for arg in "$@"; do
   case "$arg" in
     --dry-run)
       dry_run="true"
+      ;;
+    --migrate-root)
+      migrate_root="true"
       ;;
     -h|--help)
       usage
@@ -100,7 +108,9 @@ for required in \
   "$root_scaffold_dir/GEMINI.md" \
   "$vault_scaffold_dir/AGENTS.md" \
   "$vault_scaffold_dir/CLAUDE.md" \
-  "$vault_scaffold_dir/GEMINI.md"
+  "$vault_scaffold_dir/GEMINI.md" \
+  "$vault_scaffold_dir/shared-rules.md" \
+  "$vault_scaffold_dir/review-policy.md"
 do
   if [[ ! -f "$required" ]]; then
     echo "Error: missing scaffold file: $required"
@@ -143,6 +153,8 @@ preflight_symlink_checks() {
   assert_not_symlink "$project_dir/AGENTS.md" "agent-vault/AGENTS.md"
   assert_not_symlink "$project_dir/CLAUDE.md" "agent-vault/CLAUDE.md"
   assert_not_symlink "$project_dir/GEMINI.md" "agent-vault/GEMINI.md"
+  assert_not_symlink "$project_dir/shared-rules.md" "agent-vault/shared-rules.md"
+  assert_not_symlink "$project_dir/review-policy.md" "agent-vault/review-policy.md"
   assert_not_symlink "$canonical_repo_path/.gitignore" ".gitignore"
 }
 
@@ -245,7 +257,14 @@ sync_root_wrapper_if_managed() {
     return
   fi
 
-  echo "Skip: $rel (existing file is not an agent-vault managed wrapper)"
+  # File exists but lacks the managed marker
+  if [[ "$migrate_root" == "true" ]]; then
+    echo "Migrating: $rel (unmanaged → managed wrapper)"
+    sync_managed_file "$src" "$dest"
+    return
+  fi
+
+  echo "Skip: $rel (unmanaged root file; use --migrate-root to replace)"
   skipped=$((skipped + 1))
 }
 
@@ -315,6 +334,8 @@ sync_root_wrapper_if_managed "$root_scaffold_dir/AGENTS.md" "$canonical_repo_pat
 sync_root_wrapper_if_managed "$root_scaffold_dir/CLAUDE.md" "$canonical_repo_path/CLAUDE.md" "$ROOT_CLAUDE_MARKER"
 sync_root_wrapper_if_managed "$root_scaffold_dir/GEMINI.md" "$canonical_repo_path/GEMINI.md" "$ROOT_GEMINI_MARKER"
 
+sync_managed_file "$vault_scaffold_dir/shared-rules.md" "$project_dir/shared-rules.md"
+sync_managed_file "$vault_scaffold_dir/review-policy.md" "$project_dir/review-policy.md"
 sync_managed_file "$vault_scaffold_dir/AGENTS.md" "$project_dir/AGENTS.md"
 sync_managed_file "$vault_scaffold_dir/CLAUDE.md" "$project_dir/CLAUDE.md"
 sync_managed_file "$vault_scaffold_dir/GEMINI.md" "$project_dir/GEMINI.md"

@@ -1,9 +1,4 @@
-# AGENTS.md - Workflow Rules for Codex Agents in this Repository
-<!-- Keep shared rules in sync with agent-vault/shared-rules.md -->
-
-## Scope
-- This file defines implementation workflow and handoff behavior.
-- PR review policy lives in the project-root `AGENTS.md`.
+<!-- This file is managed by agent-vault. Do not edit in target projects. -->
 
 ## Core Principles
 - Treat documentation as source code: code and docs must always stay in sync.
