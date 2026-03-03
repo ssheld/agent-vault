@@ -25,6 +25,7 @@
 - Read `agent-vault/context-log.md`.
 - Read `agent-vault/plan.md`.
 - Read `agent-vault/coding-standards.md`.
+- Read `agent-vault/README.md`.
 - Read recent notes in `agent-vault/design-log/`.
 - Read recent notes in `agent-vault/context/handoffs/`.
 - Read `agent-vault/lessons.md` (if it exists).
