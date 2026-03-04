@@ -26,6 +26,27 @@ expand_path() {
   esac
 }
 
+validate_write_path() {
+  local destination_path="$1"
+  local current_path="$destination_path"
+
+  case "$destination_path" in
+    "$canonical_repo_path"|"$canonical_repo_path"/*) ;;
+    *)
+      return 2
+      ;;
+  esac
+
+  while [[ "$current_path" != "$canonical_repo_path" ]]; do
+    if [[ -L "$current_path" ]]; then
+      return 1
+    fi
+    current_path="$(dirname "$current_path")"
+  done
+
+  return 0
+}
+
 infer_repo_reference() {
   local repo_root="$1"
   local remote_url=""
@@ -337,10 +358,16 @@ seed_root_file_if_missing() {
   local source_path="$1"
   local destination_path="$2"
   local destination_rel="${destination_path#$canonical_repo_path/}"
+  local path_status=0
 
-  if [[ -L "$destination_path" ]]; then
-    echo "Notice: $destination_rel is a symlink; left unchanged." >&2
+  validate_write_path "$destination_path" || path_status=$?
+  if [[ "$path_status" -eq 1 ]]; then
+    echo "Notice: $destination_rel has a symlinked path component; template seed skipped." >&2
     return
+  fi
+  if [[ "$path_status" -eq 2 ]]; then
+    echo "Error: refusing to write outside repo root: $destination_rel" >&2
+    exit 1
   fi
 
   if [[ -e "$destination_path" ]]; then
