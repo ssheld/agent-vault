@@ -22,6 +22,8 @@ extract_from_heading() {
       echo "Error: heading must start with markdown # characters: $heading" >&2
       return 1
     fi
+  else
+    heading_level=0
   fi
 
   awk -v heading="$heading" -v range_mode="$range_mode" -v heading_level="$heading_level" '
