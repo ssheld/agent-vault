@@ -57,6 +57,7 @@ This repository intentionally keeps three mirrored policy blocks for compatibili
 - `AGENTS.md` mirrors the review section from `scaffold/agent-vault/review-policy.md` (with a repo-local path alias normalization in the check).
 - `scaffold/root/AGENTS.md` mirrors the review section from `scaffold/agent-vault/review-policy.md`.
 - `scaffold/agent-vault/AGENTS.md` mirrors shared workflow rules from `scaffold/agent-vault/shared-rules.md`.
+- Each check compares its mirrored block from the start heading through EOF, covering all mirrored top-level sections.
 
 To prevent accidental drift, run:
 - `bash scripts/check-policy-mirrors.sh`
