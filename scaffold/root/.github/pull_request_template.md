@@ -1,6 +1,10 @@
 <!-- agent-vault-managed: root-wrapper; file=.github/pull_request_template.md -->
 
-> 🤖 Prepared by {Model Name} · via {Client Tool}
+## Authorship
+- PR type: Human-only / Agent-only / Mixed
+- Human contributors: @username (or `None`)
+- Agent contributors: `{Model Name}` via `{Client Tool}` (repeat as needed; use `None` if no agent contributed)
+- Remove any unused placeholder text before submitting.
 
 ## Summary
 - Problem:

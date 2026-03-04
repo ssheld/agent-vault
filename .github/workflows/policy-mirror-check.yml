@@ -1,0 +1,31 @@
+name: Policy Mirror Check
+
+on:
+  pull_request:
+    paths:
+      - "scaffold/root/AGENTS.md"
+      - "scaffold/agent-vault/review-policy.md"
+      - "scaffold/agent-vault/AGENTS.md"
+      - "scaffold/agent-vault/shared-rules.md"
+      - "scripts/check-policy-mirrors.sh"
+      - ".github/workflows/policy-mirror-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "scaffold/root/AGENTS.md"
+      - "scaffold/agent-vault/review-policy.md"
+      - "scaffold/agent-vault/AGENTS.md"
+      - "scaffold/agent-vault/shared-rules.md"
+      - "scripts/check-policy-mirrors.sh"
+      - ".github/workflows/policy-mirror-check.yml"
+  workflow_dispatch:
+
+jobs:
+  mirror-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Verify mirrored policy sections are in sync
+        run: bash scripts/check-policy-mirrors.sh
