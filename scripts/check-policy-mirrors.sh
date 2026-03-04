@@ -8,15 +8,23 @@ repo_root="$(cd "$script_dir/.." && pwd -P)"
 extract_from_heading() {
   local file_path="$1"
   local heading="$2"
+  local range_mode="${3:-section}"
   local heading_level=""
 
-  heading_level="$(printf '%s\n' "$heading" | sed -E 's/^(#+).*/\1/' | awk '{ print length($0) }')"
-  if [[ "$heading_level" -le 0 ]]; then
-    echo "Error: heading must start with markdown # characters: $heading" >&2
+  if [[ "$range_mode" != "section" && "$range_mode" != "to_eof" ]]; then
+    echo "Error: unknown heading extraction mode: $range_mode" >&2
     return 1
   fi
 
-  awk -v heading="$heading" -v heading_level="$heading_level" '
+  if [[ "$range_mode" == "section" ]]; then
+    heading_level="$(printf '%s\n' "$heading" | sed -E 's/^(#+).*/\1/' | awk '{ print length($0) }')"
+    if [[ "$heading_level" -le 0 ]]; then
+      echo "Error: heading must start with markdown # characters: $heading" >&2
+      return 1
+    fi
+  fi
+
+  awk -v heading="$heading" -v range_mode="$range_mode" -v heading_level="$heading_level" '
     {
       sub(/\r$/, "", $0)
     }
@@ -26,7 +34,7 @@ extract_from_heading() {
       next
     }
     capture {
-      if ($0 ~ /^#+[[:space:]]/) {
+      if (range_mode == "section" && $0 ~ /^#+[[:space:]]/) {
         heading_marks = $0
         sub(/[[:space:]].*$/, "", heading_marks)
         if (length(heading_marks) <= heading_level) {
@@ -62,7 +70,8 @@ compare_mirrored_sections() {
   local left_heading="$3"
   local right_rel_path="$4"
   local right_heading="$5"
-  local normalization_mode="${6:-none}"
+  local extraction_mode="${6:-section}"
+  local normalization_mode="${7:-none}"
   local left_file="$repo_root/$left_rel_path"
   local right_file="$repo_root/$right_rel_path"
   local left_block=""
@@ -81,8 +90,8 @@ compare_mirrored_sections() {
     return 1
   fi
 
-  left_block="$(extract_from_heading "$left_file" "$left_heading")"
-  right_block="$(extract_from_heading "$right_file" "$right_heading")"
+  left_block="$(extract_from_heading "$left_file" "$left_heading" "$extraction_mode")"
+  right_block="$(extract_from_heading "$right_file" "$right_heading" "$extraction_mode")"
 
   if [[ -z "$left_block" ]]; then
     echo "Error: heading '$left_heading' not found in $left_rel_path" >&2
@@ -109,25 +118,28 @@ compare_mirrored_sections() {
 status=0
 
 compare_mirrored_sections \
-  "scaffold/root/AGENTS.md review policy block mirrors scaffold/agent-vault/review-policy.md" \
+  "scaffold/root/AGENTS.md review policy block mirrors scaffold/agent-vault/review-policy.md (full mirrored range)" \
   "scaffold/root/AGENTS.md" \
   "## Review Guidelines (for automated code review agents)" \
   "scaffold/agent-vault/review-policy.md" \
-  "## Review Guidelines (for automated code review agents)" || status=1
+  "## Review Guidelines (for automated code review agents)" \
+  "to_eof" || status=1
 
 compare_mirrored_sections \
-  "scaffold/agent-vault/AGENTS.md shared workflow block mirrors scaffold/agent-vault/shared-rules.md" \
+  "scaffold/agent-vault/AGENTS.md shared workflow block mirrors scaffold/agent-vault/shared-rules.md (full mirrored range)" \
   "scaffold/agent-vault/AGENTS.md" \
   "## PR Feedback Response" \
   "scaffold/agent-vault/shared-rules.md" \
-  "## PR Feedback Response" || status=1
+  "## PR Feedback Response" \
+  "to_eof" || status=1
 
 compare_mirrored_sections \
-  "AGENTS.md review policy block mirrors scaffold/agent-vault/review-policy.md (normalized for repo-local path alias)" \
+  "AGENTS.md review policy block mirrors scaffold/agent-vault/review-policy.md (full mirrored range; normalized for repo-local path alias)" \
   "AGENTS.md" \
   "## Review Guidelines (for automated code review agents)" \
   "scaffold/agent-vault/review-policy.md" \
   "## Review Guidelines (for automated code review agents)" \
+  "to_eof" \
   "review_policy_path_alias" || status=1
 
 if [[ "$status" -ne 0 ]]; then
