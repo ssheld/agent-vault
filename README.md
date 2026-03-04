@@ -127,7 +127,7 @@ It also creates project-root wrappers when missing:
 - `<repo-path>/AGENTS.md` -> contains PR review guidance (inline) for Codex GitHub reviews and points workflow execution to `agent-vault/AGENTS.md`
 - `<repo-path>/CLAUDE.md` -> imports `agent-vault/CLAUDE.md` and `agent-vault/review-policy.md`
 - `<repo-path>/GEMINI.md` -> imports `agent-vault/GEMINI.md` and `agent-vault/review-policy.md`
-- `<repo-path>/.github/pull_request_template.md` -> standardized PR body template with explicit authorship fields for human-only, agent-only, and mixed PRs
+- `<repo-path>/.github/pull_request_template.md` -> standardized agent PR body template
 - Bootstrap behavior: `new-project.sh` hydrates project metadata placeholders (`repo_reference`, active branch, dates) and seeds non-empty baseline content in required session-start docs (`agent-vault/README.md`, `plan.md`, `coding-standards.md`, `context-log.md`, and `design-log/README.md`).
 
 If root files already exist, the script leaves them unchanged unless `--migrate-existing-root-md` is provided.
