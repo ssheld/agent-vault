@@ -64,6 +64,8 @@ If you want changes to propagate to future projects, edit files under `scaffold/
   - `<repo>/AGENTS.md`
   - `<repo>/CLAUDE.md`
   - `<repo>/GEMINI.md`
+- Seeded if missing:
+  - `<repo>/.github/pull_request_template.md`
 
 If an existing root policy file does not have the managed marker, `update-project.sh` leaves it unchanged and reports a skip notice suggesting `--migrate-root`.
 
@@ -97,8 +99,9 @@ Without this flag, `new-project.sh` leaves pre-existing root files unchanged and
 ## Generated Structure
 `new-project.sh` creates `<repo-path>/agent-vault/` with:
 - `shared-rules.md` (single source of truth for implementation rules)
-- `review-policy.md` (single source of truth for PR review guidelines)
+- `review-policy.md` (single source of truth for PR review guidelines, including required format for responding to review feedback)
 - `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` (policy files; `agent-vault/CLAUDE.md` and `agent-vault/GEMINI.md` import `shared-rules.md`, root wrappers import `review-policy.md`, and `AGENTS.md` inlines review guidance)
+- Compatibility note: `AGENTS.md` files intentionally inline mirrored policy content for Codex review-path compatibility; this duplication is expected, but mirrored files should stay synchronized.
 - `README.md`
 - `context-log.md`
 - `plan.md`
@@ -114,5 +117,7 @@ It also creates project-root wrappers when missing:
 - `<repo-path>/AGENTS.md` -> contains PR review guidance (inline) for Codex GitHub reviews and points workflow execution to `agent-vault/AGENTS.md`
 - `<repo-path>/CLAUDE.md` -> imports `agent-vault/CLAUDE.md` and `agent-vault/review-policy.md`
 - `<repo-path>/GEMINI.md` -> imports `agent-vault/GEMINI.md` and `agent-vault/review-policy.md`
+- `<repo-path>/.github/pull_request_template.md` -> standardized agent PR body template
+- Bootstrap behavior: `new-project.sh` hydrates project metadata placeholders (`repo_reference`, active branch, dates) and seeds non-empty baseline content in required session-start docs (`agent-vault/README.md`, `plan.md`, `coding-standards.md`, `context-log.md`, and `design-log/README.md`).
 
 If root files already exist, the script leaves them unchanged unless `--migrate-existing-root-md` is provided.

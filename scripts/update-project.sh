@@ -106,6 +106,7 @@ for required in \
   "$root_scaffold_dir/AGENTS.md" \
   "$root_scaffold_dir/CLAUDE.md" \
   "$root_scaffold_dir/GEMINI.md" \
+  "$root_scaffold_dir/.github/pull_request_template.md" \
   "$vault_scaffold_dir/AGENTS.md" \
   "$vault_scaffold_dir/CLAUDE.md" \
   "$vault_scaffold_dir/GEMINI.md" \
@@ -136,6 +137,27 @@ repo_relative_path() {
   else
     printf '%s\n' "$path"
   fi
+}
+
+validate_write_path() {
+  local destination_path="$1"
+  local current_path="$destination_path"
+
+  case "$destination_path" in
+    "$canonical_repo_path"|"$canonical_repo_path"/*) ;;
+    *)
+      return 2
+      ;;
+  esac
+
+  while [[ "$current_path" != "$canonical_repo_path" ]]; do
+    if [[ -L "$current_path" ]]; then
+      return 1
+    fi
+    current_path="$(dirname "$current_path")"
+  done
+
+  return 0
 }
 
 assert_not_symlink() {
@@ -196,8 +218,20 @@ sync_managed_file() {
   local src="$1"
   local dest="$2"
   local rel
+  local path_status=0
 
   rel="$(repo_relative_path "$dest")"
+
+  validate_write_path "$dest" || path_status=$?
+  if [[ "$path_status" -eq 1 ]]; then
+    echo "Error: refusing to update $rel because a path component is a symlink." >&2
+    echo "Replace symlinked path components with regular directories/files and rerun update-project.sh." >&2
+    exit 1
+  fi
+  if [[ "$path_status" -eq 2 ]]; then
+    echo "Error: refusing to update path outside repository root: $rel" >&2
+    exit 1
+  fi
 
   assert_not_symlink "$dest" "$rel"
 
@@ -238,13 +272,19 @@ seed_if_missing() {
   local src="$1"
   local dest="$2"
   local rel
+  local path_status=0
 
   rel="$(repo_relative_path "$dest")"
 
-  if [[ -L "$dest" ]]; then
-    echo "Skip: $rel (symlink — not seeding)"
+  validate_write_path "$dest" || path_status=$?
+  if [[ "$path_status" -eq 1 ]]; then
+    echo "Skip: $rel (path component symlink — not seeding)"
     skipped=$((skipped + 1))
     return
+  fi
+  if [[ "$path_status" -eq 2 ]]; then
+    echo "Error: refusing to seed path outside repository root: $rel" >&2
+    exit 1
   fi
 
   if [[ -e "$dest" ]]; then
@@ -361,6 +401,7 @@ preflight_symlink_checks
 sync_root_wrapper_if_managed "$root_scaffold_dir/AGENTS.md" "$canonical_repo_path/AGENTS.md" "$ROOT_AGENTS_MARKER"
 sync_root_wrapper_if_managed "$root_scaffold_dir/CLAUDE.md" "$canonical_repo_path/CLAUDE.md" "$ROOT_CLAUDE_MARKER"
 sync_root_wrapper_if_managed "$root_scaffold_dir/GEMINI.md" "$canonical_repo_path/GEMINI.md" "$ROOT_GEMINI_MARKER"
+seed_if_missing "$root_scaffold_dir/.github/pull_request_template.md" "$canonical_repo_path/.github/pull_request_template.md"
 
 sync_managed_file "$vault_scaffold_dir/shared-rules.md" "$project_dir/shared-rules.md"
 sync_managed_file "$vault_scaffold_dir/review-policy.md" "$project_dir/review-policy.md"

@@ -5,6 +5,16 @@
 - This file defines implementation workflow and handoff behavior.
 - PR review policy lives in the project-root `AGENTS.md`.
 
+## Compatibility Note
+- `agent-vault/AGENTS.md` intentionally mirrors `agent-vault/shared-rules.md` for Codex compatibility.
+- `agent-vault/CLAUDE.md` and `agent-vault/GEMINI.md` import `shared-rules.md`.
+- Do not flag duplication itself; only flag drift between mirrored policy files.
+
+## PR Feedback Response
+- When posting a PR comment that addresses reviewer feedback, follow `agent-vault/review-policy.md` under `Responding to Review Feedback`.
+- Map every finding to a status (`Resolved`, `Partially Resolved`, or `Not Changed`) with concrete evidence.
+- If pushing back, explain technical rationale and risk/tradeoff explicitly.
+
 ## Core Principles
 - Treat documentation as source code: code and docs must always stay in sync.
 - Never propose or commit changes that break documentation consistency.
@@ -20,6 +30,20 @@
 ## Git
 - Write concise commit messages in imperative mood.
 - Keep commits atomic: one logical change per commit.
+
+## PR Authoring Standards
+- When creating a pull request, include a complete PR body; do not open with a one-line summary only.
+- Use an imperative, outcome-focused title that reflects the actual change scope.
+- Keep PR scope coherent; split unrelated work into separate PRs.
+- Prefer opening as draft until validation is complete, unless the user asks otherwise.
+- PR body must include:
+  - Summary of problem and approach.
+  - Files/areas changed with concise rationale.
+  - Validation evidence (commands run and outcomes).
+  - Risks, rollback considerations, and any residual gaps.
+  - Explicit docs consistency note (`design.md`/`README.md` updated or no impact).
+- If tests/checks were not run, explicitly state why and what remains unverified.
+- If the PR addresses review feedback, include itemized mapping per `review-policy.md` (`Responding to Review Feedback`).
 
 ## Session Start - Required
 - Read `agent-vault/context-log.md`.

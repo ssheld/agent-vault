@@ -26,6 +26,59 @@ expand_path() {
   esac
 }
 
+validate_write_path() {
+  local destination_path="$1"
+  local current_path="$destination_path"
+
+  case "$destination_path" in
+    "$canonical_repo_path"|"$canonical_repo_path"/*) ;;
+    *)
+      return 2
+      ;;
+  esac
+
+  while [[ "$current_path" != "$canonical_repo_path" ]]; do
+    if [[ -L "$current_path" ]]; then
+      return 1
+    fi
+    current_path="$(dirname "$current_path")"
+  done
+
+  return 0
+}
+
+infer_repo_reference() {
+  local repo_root="$1"
+  local remote_url=""
+
+  if git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    remote_url="$(git -C "$repo_root" remote get-url origin 2>/dev/null || true)"
+  fi
+
+  if [[ -n "$remote_url" ]]; then
+    printf '%s\n' "$remote_url"
+    return
+  fi
+
+  printf '%s\n' "$repo_root"
+}
+
+infer_active_branch() {
+  local repo_root="$1"
+  local branch=""
+
+  if git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    branch="$(git -C "$repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$branch" || "$branch" == "HEAD" ]]; then
+    printf 'main\n'
+    return
+  fi
+
+  printf '%s\n' "$branch"
+}
+
 find_existing_root_file() {
   local repo_root="$1"
   local canonical_name="$2"
@@ -179,6 +232,8 @@ if [[ ! -d "$repo_path" ]]; then
 fi
 
 canonical_repo_path="$(cd "$repo_path" && pwd -P)"
+repo_reference="$(infer_repo_reference "$canonical_repo_path")"
+active_branch="$(infer_active_branch "$canonical_repo_path")"
 project_dir="$canonical_repo_path/agent-vault"
 
 if [[ -e "$project_dir" ]]; then
@@ -220,6 +275,11 @@ for root_file in AGENTS.md CLAUDE.md GEMINI.md; do
   fi
 done
 
+if [[ ! -f "$root_scaffold_dir/.github/pull_request_template.md" ]]; then
+  echo "Error: missing root scaffold file: $root_scaffold_dir/.github/pull_request_template.md"
+  exit 1
+fi
+
 cp -R "$scaffold_dir" "$project_dir"
 
 today="$(date '+%Y-%m-%d')"
@@ -230,6 +290,8 @@ migration_backup_dir="$project_dir/context/updates/$migration_timestamp"
 export PROJECT_NAME="$project_name"
 export PROJECT_SLUG="$slug"
 export REPO_PATH="$canonical_repo_path"
+export REPO_REFERENCE="$repo_reference"
+export ACTIVE_BRANCH="$active_branch"
 export TODAY="$today"
 export NOW="$now"
 
@@ -238,7 +300,7 @@ while IFS= read -r -d '' file; do
     continue
   fi
 
-  perl -0pi -e 's/__PROJECT_NAME__/$ENV{PROJECT_NAME}/g; s/__PROJECT_SLUG__/$ENV{PROJECT_SLUG}/g; s/__REPO_PATH__/$ENV{REPO_PATH}/g; s/__DATE__/$ENV{TODAY}/g; s/__DATETIME__/$ENV{NOW}/g;' "$file"
+  perl -0pi -e 's/__PROJECT_NAME__/$ENV{PROJECT_NAME}/g; s/__PROJECT_SLUG__/$ENV{PROJECT_SLUG}/g; s/__REPO_PATH__/$ENV{REPO_PATH}/g; s/__REPO_REFERENCE__/$ENV{REPO_REFERENCE}/g; s/__ACTIVE_BRANCH__/$ENV{ACTIVE_BRANCH}/g; s/__DATE__/$ENV{TODAY}/g; s/__DATETIME__/$ENV{NOW}/g;' "$file"
 done < <(find "$project_dir" -type f -print0)
 
 process_root_policy_file() {
@@ -292,9 +354,36 @@ process_root_policy_file() {
   cp "$scaffold_source" "$canonical_dest"
 }
 
+seed_root_file_if_missing() {
+  local source_path="$1"
+  local destination_path="$2"
+  local destination_rel="${destination_path#$canonical_repo_path/}"
+  local path_status=0
+
+  validate_write_path "$destination_path" || path_status=$?
+  if [[ "$path_status" -eq 1 ]]; then
+    echo "Notice: $destination_rel has a symlinked path component; template seed skipped." >&2
+    return
+  fi
+  if [[ "$path_status" -eq 2 ]]; then
+    echo "Error: refusing to write outside repo root: $destination_rel" >&2
+    exit 1
+  fi
+
+  if [[ -e "$destination_path" ]]; then
+    echo "Notice: $destination_rel already exists; left unchanged." >&2
+    return
+  fi
+
+  mkdir -p "$(dirname "$destination_path")"
+  cp "$source_path" "$destination_path"
+  echo "Created: $destination_rel"
+}
+
 process_root_policy_file "AGENTS.md" "$project_dir/AGENTS.md" "$ROOT_AGENTS_MARKER"
 process_root_policy_file "CLAUDE.md" "$project_dir/CLAUDE.md" "$ROOT_CLAUDE_MARKER"
 process_root_policy_file "GEMINI.md" "$project_dir/GEMINI.md" "$ROOT_GEMINI_MARKER"
+seed_root_file_if_missing "$root_scaffold_dir/.github/pull_request_template.md" "$canonical_repo_path/.github/pull_request_template.md"
 
 ensure_obsidian_gitignore "$canonical_repo_path"
 

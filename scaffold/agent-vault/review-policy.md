@@ -61,6 +61,7 @@ When performing a code review on this repository, behave like a senior backend e
 - Minor naming disagreements that do not affect clarity
 - TODOs already tracked in issues
 - Changes in files outside the PR diff
+- Intentional policy duplication between root `AGENTS.md` and `agent-vault/review-policy.md` (Codex compatibility); flag only if files drift.
 
 ## AI and Agent-Specific Safety Requirements
 This repository uses AI agents and LLM-assisted development. Treat agent outputs as untrusted input until validated.
@@ -151,3 +152,38 @@ If the platform or API blocks the intended formal review state (e.g., permission
 - Submit a `COMMENT` review instead.
 - Keep the same textual merge recommendation in the review body (`Approve`, `Approve with Changes`, or `Request Changes`).
 - Add a one-line note: `Formal review state unavailable: <reason>`.
+
+## Responding to Review Feedback
+When asked to address review feedback in a PR comment, use a complete, itemized response.
+
+### Required Coverage
+- Address every finding from the review being responded to; do not collapse multiple findings into one vague bullet.
+- For each finding, mark one status: `Resolved`, `Partially Resolved`, or `Not Changed`.
+- If a finding is `Partially Resolved` or `Not Changed`, explain exactly what remains and why.
+
+### Evidence Requirements
+- For every `Resolved` or `Partially Resolved` item, include concrete evidence:
+  - Commit SHA (short SHA is acceptable)
+  - File path(s) changed
+  - Short note describing what changed
+- Avoid generic statements like "completed remediation pass" without per-item mapping.
+
+### Pushback Requirements
+- If choosing not to apply feedback, explicitly provide:
+  - Technical rationale
+  - Risk/tradeoff analysis
+  - What decision is needed from the owner (if applicable)
+- Disagreement is acceptable when justified; omission is not.
+
+### Recommended Response Template
+```md
+> 🤖 **Feedback response by {Model Name}** · via {Client Tool}
+
+| # | Finding | Status | Evidence / Rationale |
+|---|---------|--------|----------------------|
+| 1 | ... | Resolved | `abc1234`; `path/to/file`; what changed |
+| 2 | ... | Not Changed | why, risk/tradeoff, decision needed |
+
+## Remaining Items
+- ...
+```
