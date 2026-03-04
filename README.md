@@ -53,7 +53,8 @@ This repo should stay template-only. Do not store project-specific session logs 
 If you want changes to propagate to future projects, edit files under `scaffold/agent-vault/` and `scaffold/root/`.
 
 ## Policy Mirror Drift Checks
-This repository intentionally keeps two mirrored policy blocks for compatibility:
+This repository intentionally keeps three mirrored policy blocks for compatibility:
+- `AGENTS.md` mirrors the review section from `scaffold/agent-vault/review-policy.md` (with a repo-local path alias normalization in the check).
 - `scaffold/root/AGENTS.md` mirrors the review section from `scaffold/agent-vault/review-policy.md`.
 - `scaffold/agent-vault/AGENTS.md` mirrors shared workflow rules from `scaffold/agent-vault/shared-rules.md`.
 
