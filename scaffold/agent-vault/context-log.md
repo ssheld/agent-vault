@@ -15,9 +15,9 @@ last_updated: __DATE__
 
 ## Current Snapshot
 - Project: __PROJECT_NAME__
-- Primary goal:
-- Current status:
-- Active branch:
+- Primary goal: Deliver milestones with clear scope, verification, and reliable handoffs.
+- Current status: Baseline project memory scaffold is initialized; project-specific priorities should be refined next.
+- Active branch: `__ACTIVE_BRANCH__`
 - Last updated: __DATE__
 
 ## Entries

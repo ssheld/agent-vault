@@ -106,6 +106,7 @@ for required in \
   "$root_scaffold_dir/AGENTS.md" \
   "$root_scaffold_dir/CLAUDE.md" \
   "$root_scaffold_dir/GEMINI.md" \
+  "$root_scaffold_dir/.github/pull_request_template.md" \
   "$vault_scaffold_dir/AGENTS.md" \
   "$vault_scaffold_dir/CLAUDE.md" \
   "$vault_scaffold_dir/GEMINI.md" \
@@ -361,6 +362,7 @@ preflight_symlink_checks
 sync_root_wrapper_if_managed "$root_scaffold_dir/AGENTS.md" "$canonical_repo_path/AGENTS.md" "$ROOT_AGENTS_MARKER"
 sync_root_wrapper_if_managed "$root_scaffold_dir/CLAUDE.md" "$canonical_repo_path/CLAUDE.md" "$ROOT_CLAUDE_MARKER"
 sync_root_wrapper_if_managed "$root_scaffold_dir/GEMINI.md" "$canonical_repo_path/GEMINI.md" "$ROOT_GEMINI_MARKER"
+seed_if_missing "$root_scaffold_dir/.github/pull_request_template.md" "$canonical_repo_path/.github/pull_request_template.md"
 
 sync_managed_file "$vault_scaffold_dir/shared-rules.md" "$project_dir/shared-rules.md"
 sync_managed_file "$vault_scaffold_dir/review-policy.md" "$project_dir/review-policy.md"
