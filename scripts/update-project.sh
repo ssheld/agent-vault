@@ -120,6 +120,9 @@ for required in \
   "$vault_scaffold_dir/review-policy.md" \
   "$vault_scaffold_dir/handoff.md" \
   "$vault_scaffold_dir/lessons.md" \
+  "$vault_scaffold_dir/design-log/README.md" \
+  "$vault_scaffold_dir/context/handoffs/README.md" \
+  "$vault_scaffold_dir/decisions/README.md" \
   "$vault_scaffold_dir/daily/README.md"
 do
   if [[ ! -f "$required" ]]; then
@@ -187,6 +190,10 @@ preflight_symlink_checks() {
   assert_not_symlink "$project_dir/shared-rules.md" "agent-vault/shared-rules.md"
   assert_not_symlink "$project_dir/review-policy.md" "agent-vault/review-policy.md"
   assert_not_symlink "$project_dir/handoff.md" "agent-vault/handoff.md"
+  assert_not_symlink "$project_dir/design-log/README.md" "agent-vault/design-log/README.md"
+  assert_not_symlink "$project_dir/context/handoffs/README.md" "agent-vault/context/handoffs/README.md"
+  assert_not_symlink "$project_dir/decisions/README.md" "agent-vault/decisions/README.md"
+  assert_not_symlink "$project_dir/daily/README.md" "agent-vault/daily/README.md"
   assert_not_symlink "$canonical_repo_path/.gitignore" ".gitignore"
 }
 
@@ -437,9 +444,12 @@ sync_managed_file "$vault_scaffold_dir/AGENTS.md" "$project_dir/AGENTS.md"
 sync_managed_file "$vault_scaffold_dir/CLAUDE.md" "$project_dir/CLAUDE.md"
 sync_managed_file "$vault_scaffold_dir/GEMINI.md" "$project_dir/GEMINI.md"
 sync_managed_file "$vault_scaffold_dir/handoff.md" "$project_dir/handoff.md"
+sync_managed_file "$vault_scaffold_dir/design-log/README.md" "$project_dir/design-log/README.md"
+sync_managed_file "$vault_scaffold_dir/context/handoffs/README.md" "$project_dir/context/handoffs/README.md"
+sync_managed_file "$vault_scaffold_dir/decisions/README.md" "$project_dir/decisions/README.md"
+sync_managed_file "$vault_scaffold_dir/daily/README.md" "$project_dir/daily/README.md"
 
 seed_if_missing "$vault_scaffold_dir/lessons.md" "$project_dir/lessons.md"
-seed_if_missing "$vault_scaffold_dir/daily/README.md" "$project_dir/daily/README.md"
 sync_template_files "$vault_scaffold_dir/Templates" "$project_dir/Templates"
 
 ensure_obsidian_gitignore "$canonical_repo_path"

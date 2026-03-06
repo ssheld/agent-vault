@@ -290,6 +290,21 @@ if [[ ! -f "$scaffold_dir/handoff.md" ]]; then
   exit 1
 fi
 
+if [[ ! -f "$scaffold_dir/design-log/README.md" ]]; then
+  echo "Error: missing scaffold file: $scaffold_dir/design-log/README.md"
+  exit 1
+fi
+
+if [[ ! -f "$scaffold_dir/context/handoffs/README.md" ]]; then
+  echo "Error: missing scaffold file: $scaffold_dir/context/handoffs/README.md"
+  exit 1
+fi
+
+if [[ ! -f "$scaffold_dir/decisions/README.md" ]]; then
+  echo "Error: missing scaffold file: $scaffold_dir/decisions/README.md"
+  exit 1
+fi
+
 if [[ ! -f "$scaffold_dir/daily/README.md" ]]; then
   echo "Error: missing scaffold file: $scaffold_dir/daily/README.md"
   exit 1
