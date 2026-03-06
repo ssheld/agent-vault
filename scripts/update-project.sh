@@ -118,6 +118,7 @@ for required in \
   "$vault_scaffold_dir/GEMINI.md" \
   "$vault_scaffold_dir/shared-rules.md" \
   "$vault_scaffold_dir/review-policy.md" \
+  "$vault_scaffold_dir/handoff.md" \
   "$vault_scaffold_dir/lessons.md" \
   "$vault_scaffold_dir/daily/README.md"
 do
@@ -179,12 +180,13 @@ assert_not_symlink() {
 }
 
 preflight_symlink_checks() {
-  # agent-vault policy files and .gitignore are always managed.
+  # agent-vault scaffold-owned files and .gitignore are always managed.
   assert_not_symlink "$project_dir/AGENTS.md" "agent-vault/AGENTS.md"
   assert_not_symlink "$project_dir/CLAUDE.md" "agent-vault/CLAUDE.md"
   assert_not_symlink "$project_dir/GEMINI.md" "agent-vault/GEMINI.md"
   assert_not_symlink "$project_dir/shared-rules.md" "agent-vault/shared-rules.md"
   assert_not_symlink "$project_dir/review-policy.md" "agent-vault/review-policy.md"
+  assert_not_symlink "$project_dir/handoff.md" "agent-vault/handoff.md"
   assert_not_symlink "$canonical_repo_path/.gitignore" ".gitignore"
 }
 
@@ -434,6 +436,7 @@ sync_managed_file "$vault_scaffold_dir/review-policy.md" "$project_dir/review-po
 sync_managed_file "$vault_scaffold_dir/AGENTS.md" "$project_dir/AGENTS.md"
 sync_managed_file "$vault_scaffold_dir/CLAUDE.md" "$project_dir/CLAUDE.md"
 sync_managed_file "$vault_scaffold_dir/GEMINI.md" "$project_dir/GEMINI.md"
+sync_managed_file "$vault_scaffold_dir/handoff.md" "$project_dir/handoff.md"
 
 seed_if_missing "$vault_scaffold_dir/lessons.md" "$project_dir/lessons.md"
 seed_if_missing "$vault_scaffold_dir/daily/README.md" "$project_dir/daily/README.md"

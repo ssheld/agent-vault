@@ -70,13 +70,14 @@ To prevent accidental drift, run:
 CI also enforces this via `.github/workflows/policy-mirror-check.yml` on pull requests and pushes to `main`.
 
 ## Updating Existing Repos
-`update-project.sh` updates these managed policy files:
+`update-project.sh` updates these managed scaffold files:
 - Always managed:
   - `<repo>/agent-vault/shared-rules.md`
   - `<repo>/agent-vault/review-policy.md`
   - `<repo>/agent-vault/AGENTS.md`
   - `<repo>/agent-vault/CLAUDE.md`
   - `<repo>/agent-vault/GEMINI.md`
+  - `<repo>/agent-vault/handoff.md`
 - Root wrappers (managed only when the root file has the `agent-vault-managed` marker):
   - `<repo>/AGENTS.md`
   - `<repo>/CLAUDE.md`
