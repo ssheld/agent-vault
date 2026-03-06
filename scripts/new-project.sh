@@ -285,6 +285,11 @@ if [[ ! -f "$root_scaffold_dir/docs/design.md" ]]; then
   exit 1
 fi
 
+if [[ ! -f "$scaffold_dir/handoff.md" ]]; then
+  echo "Error: missing scaffold file: $scaffold_dir/handoff.md"
+  exit 1
+fi
+
 if [[ ! -f "$scaffold_dir/daily/README.md" ]]; then
   echo "Error: missing scaffold file: $scaffold_dir/daily/README.md"
   exit 1
