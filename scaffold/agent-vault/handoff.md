@@ -12,16 +12,18 @@ Use this when switching between agents or pausing with meaningful unfinished wor
 ## Suggested Next Prompt
 ```
 You are continuing work on __PROJECT_NAME__.
-Start with:
+Start with the core files:
 - agent-vault/README.md
 - agent-vault/context-log.md
 - agent-vault/plan.md
 - agent-vault/coding-standards.md
-- agent-vault/open-questions.md
-- agent-vault/decision-log.md
 
-If `agent-vault/context-log.md` references a handoff note or decision record, read those next.
-Read today's note in `agent-vault/daily/` if it exists.
+Then:
+- skim `agent-vault/open-questions.md` for blockers relevant to this task
+- skim `agent-vault/decision-log.md` for active decisions relevant to this task
+- read the handoff note or decision record referenced by the latest `agent-vault/context-log.md` entry
+- read today's note in `agent-vault/daily/` if it exists
+- read recent `agent-vault/design-log/` notes if more implementation context is needed
 
 Task:
 <what needs to be done now>

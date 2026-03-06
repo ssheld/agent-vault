@@ -11,9 +11,6 @@ scope:
 
 # Decision: <title>
 
-## Status
-- Proposed / Accepted / Superseded / Deprecated
-
 ## Context
 
 ## Decision

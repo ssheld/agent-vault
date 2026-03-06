@@ -67,17 +67,20 @@
 - Use `agent-vault/context/scratchpad.md` only for temporary notes. Move durable state, decisions, and open questions into canonical files before finishing.
 
 ## Session Start - Required
-- Read `agent-vault/README.md`.
-- Read `agent-vault/context-log.md`.
-- Read `agent-vault/plan.md`.
-- Read `agent-vault/coding-standards.md`.
-- Read `agent-vault/open-questions.md`.
-- Read `agent-vault/decision-log.md`.
+- Read the core files before substantive work:
+  - `agent-vault/README.md`
+  - `agent-vault/context-log.md`
+  - `agent-vault/plan.md`
+  - `agent-vault/coding-standards.md`
+- Skim `agent-vault/open-questions.md` for active blockers relevant to the task.
+- Skim `agent-vault/decision-log.md` for active decisions relevant to the task.
 - Read `agent-vault/lessons.md` (if it exists).
-- Read the most recent 3 notes in `agent-vault/design-log/`.
-- Read the handoff note referenced by the latest `agent-vault/context-log.md` entry when one is referenced. Otherwise read the most recent note in `agent-vault/context/handoffs/` if one exists.
-- Read today's note in `agent-vault/daily/` if it exists.
-- If `agent-vault/decision-log.md` references active decisions, read those decision records. Otherwise read the most recent 1-3 accepted or proposed decision records if they exist.
+- When continuing existing work or taking on a substantive task, expand context with:
+  - the most recent 3 notes in `agent-vault/design-log/`
+  - the handoff note referenced by the latest `agent-vault/context-log.md` entry, or the most recent note in `agent-vault/context/handoffs/` when no note is referenced
+  - today's note in `agent-vault/daily/` if it exists
+  - the decision records referenced by `agent-vault/decision-log.md`, or the most recent 1-3 accepted or proposed decision records when no records are referenced and they appear relevant
+- For trivial one-off tasks, a lighter session start is acceptable: core files plus any directly referenced handoff or decision artifact.
 - After completing the reads above, confirm by listing which files were read and briefly summarize the current project state (active plan, recent decisions, open questions, current handoff state).
 
 ## Session End - Required

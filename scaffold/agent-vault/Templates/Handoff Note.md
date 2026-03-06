@@ -32,17 +32,6 @@ topic:
 - 
 
 ## Suggested Next Prompt
-```text
-You are continuing work on <project>.
-Start with:
-- agent-vault/README.md
-- agent-vault/context-log.md
-- agent-vault/plan.md
-- agent-vault/coding-standards.md
-- agent-vault/open-questions.md
-- agent-vault/decision-log.md
-- agent-vault/context/handoffs/<this-note>.md
-
-Task:
-<what needs to happen now>
-```
+- Start from the canonical prompt in `agent-vault/handoff.md`.
+- Tailor `Task`, `Constraints`, and any handoff-specific files before passing work on.
+- Make sure this handoff note is referenced from the latest `agent-vault/context-log.md` entry.
