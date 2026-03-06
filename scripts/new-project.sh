@@ -280,6 +280,11 @@ if [[ ! -f "$root_scaffold_dir/.github/pull_request_template.md" ]]; then
   exit 1
 fi
 
+if [[ ! -f "$scaffold_dir/daily/README.md" ]]; then
+  echo "Error: missing scaffold file: $scaffold_dir/daily/README.md"
+  exit 1
+fi
+
 cp -R "$scaffold_dir" "$project_dir"
 
 today="$(date '+%Y-%m-%d')"

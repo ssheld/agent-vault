@@ -1,29 +1,16 @@
 ---
 type: handoff-prompt
 project:
+source_handoff:
 ---
 
 # Agent Handoff Prompt
 
-Use this prompt when switching between agents:
+Use this only when a human explicitly wants a copy-paste prompt for another agent.
 
-```
-You are continuing work on <project>.
-Read these files first:
-- agent-vault/README.md
-- agent-vault/context-log.md
-- agent-vault/plan.md
-- agent-vault/coding-standards.md
-- agent-vault/open-questions.md
+The canonical handoff remains the latest `context-log.md` entry plus the handoff note in `agent-vault/context/handoffs/`.
 
-Task:
-<what needs to be done now>
-
-Constraints:
-<technical, product, and timeline constraints>
-
-Before finishing:
-- Update context-log with Goal, State, Decisions, Open Questions, Next Prompt, References.
-- Add a design-log entry under agent-vault/design-log/.
-- If handing off, add a handoff note under agent-vault/context/handoffs/.
-```
+## How To Use
+- Start from the canonical prompt in `agent-vault/handoff.md`.
+- Tailor it using `source_handoff`, the current task, the active constraints, and any additional files the next agent should read.
+- Keep the handoff note and latest `context-log.md` entry as the source of truth.

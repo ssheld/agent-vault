@@ -45,20 +45,55 @@
 - If tests/checks were not run, explicitly state why and what remains unverified.
 - If the PR addresses review feedback, include itemized mapping per `review-policy.md` (`Responding to Review Feedback`).
 
+## Artifact Locations and Naming
+- `agent-vault/Templates/` is template source only. Do not store completed project notes there.
+- Canonical always-on files:
+  - `agent-vault/README.md` - project home
+  - `agent-vault/plan.md` - milestone plan
+  - `agent-vault/coding-standards.md` - project conventions
+  - `agent-vault/context-log.md` - canonical cross-session memory
+  - `agent-vault/open-questions.md` - unresolved questions
+  - `agent-vault/decision-log.md` - decision index
+  - `agent-vault/lessons.md` - recurring mistake-prevention rules
+- Canonical runtime note locations:
+  - `agent-vault/daily/YYYY-MM-DD.md` - one daily note per local day
+  - `agent-vault/design-log/YYYY-MM-DD-HHMM-<topic>.md` - one session note per substantive work session
+  - `agent-vault/context/handoffs/YYYY-MM-DD-HHMM-<from>-to-<to>-<topic>.md` - handoff note when transferring work
+  - `agent-vault/decisions/DEC-###-<slug>.md` - decision record
+- `agent-vault/context/scratchpad.md` is temporary working memory only. Move lasting information into canonical files before finishing.
+
+## Template Usage Rules
+- Use the bootstrap files in place. Do not create duplicate `README.md`, `plan.md`, `coding-standards.md`, `context-log.md`, `open-questions.md`, or `decision-log.md` notes elsewhere.
+- Create or update `agent-vault/daily/YYYY-MM-DD.md` on the first substantive work session of each local day. Reuse the same file for later sessions that day. Skip daily notes for trivial one-off requests.
+- Add a design-log note for every substantive work session.
+- When a durable decision is made about architecture, workflow, API shape, data model, deployment, or tool policy, create a decision record in `agent-vault/decisions/` and add it to `agent-vault/decision-log.md`.
+- When handing off or pausing with meaningful unfinished work, create a handoff note in `agent-vault/context/handoffs/`, include a `Suggested Next Prompt`, and reference that note from `agent-vault/context-log.md`.
+- Use the standalone handoff prompt template only when a human explicitly asks for a copy-paste prompt. Otherwise keep the prompt inside the handoff note and the latest `context-log.md` entry.
+- Use `agent-vault/context/scratchpad.md` only for temporary notes. Move durable state, decisions, and open questions into canonical files before finishing.
+
 ## Session Start - Required
-- Read `agent-vault/context-log.md`.
-- Read `agent-vault/plan.md`.
-- Read `agent-vault/coding-standards.md`.
-- Read `agent-vault/README.md`.
-- Read recent notes in `agent-vault/design-log/`.
-- Read recent notes in `agent-vault/context/handoffs/`.
+- Read the core files before substantive work:
+  - `agent-vault/README.md`
+  - `agent-vault/context-log.md`
+  - `agent-vault/plan.md`
+  - `agent-vault/coding-standards.md`
+- Skim `agent-vault/open-questions.md` for active blockers relevant to the task.
+- Skim `agent-vault/decision-log.md` for active decisions relevant to the task.
 - Read `agent-vault/lessons.md` (if it exists).
-- After completing the reads above, confirm by listing which files were read and briefly summarize the current project state (active plan, recent decisions, open questions).
+- When continuing existing work or taking on a substantive task, expand context with:
+  - the most recent 3 notes in `agent-vault/design-log/`
+  - the handoff note referenced by the latest `agent-vault/context-log.md` entry, or the most recent note in `agent-vault/context/handoffs/` when no note is referenced
+  - today's note in `agent-vault/daily/` if it exists
+  - the decision records referenced by `agent-vault/decision-log.md`, or the most recent 1-3 accepted or proposed decision records when no records are referenced and they appear relevant
+- For trivial one-off tasks, a lighter session start is acceptable: core files plus any directly referenced handoff or decision artifact.
+- After completing the reads above, confirm by listing which files were read and briefly summarize the current project state (active plan, recent decisions, open questions, current handoff state).
 
 ## Session End - Required
 - Update `agent-vault/context-log.md`.
+- Create or update today's note in `agent-vault/daily/` when the session was substantive.
 - Add a session note in `agent-vault/design-log/`.
 - Update `agent-vault/open-questions.md` when unresolved items exist.
+- If a durable decision was made, create or update the corresponding decision record and `agent-vault/decision-log.md`.
 - If handing off, add a note in `agent-vault/context/handoffs/`.
 - If the user corrected a mistake during this session, add an entry to `agent-vault/lessons.md` describing the mistake pattern and a preventive rule.
 

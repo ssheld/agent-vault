@@ -3,8 +3,10 @@ type: decision-record
 id:
 status: proposed
 date:
+updated:
 project:
 owners:
+scope:
 ---
 
 # Decision: <title>
@@ -23,4 +25,4 @@ owners:
 
 ## Follow-Up
 - [ ] Task 1
-- [ ] Task 2
+- [ ] Update `agent-vault/decision-log.md`

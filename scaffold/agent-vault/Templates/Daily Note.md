@@ -1,6 +1,10 @@
 ---
-type: daily
+type: daily-note
+project:
 date:
+branch:
+focus:
+last_updated:
 ---
 
 # Daily Note - {{date}}
@@ -12,12 +16,12 @@ date:
 ## Work Log
 - HH:MM - 
 
-## Decisions Made
+## Decisions / Key Updates
 - 
 
-## Open Questions
+## Open Questions / Risks
 - 
 
-## End of Day Handoff
+## Carry Forward
 - Next step:
 - Suggested next prompt:
