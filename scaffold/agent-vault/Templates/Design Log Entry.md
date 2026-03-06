@@ -3,6 +3,7 @@ type: design-log-entry
 project:
 agent:
 date:
+branch:
 scope:
 ---
 
@@ -14,7 +15,10 @@ scope:
 
 ## Open Issues
 
-## Notes
+## Related Artifacts
+- `agent-vault/daily/...`
+- `agent-vault/decisions/...`
+- `agent-vault/context/handoffs/...`
 
 ## References
 - 

@@ -3,12 +3,13 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 <repo-path> [--dry-run] [--migrate-root]"
-  echo "Example: $0 ~/workspaces/harrier --dry-run"
+  echo "Usage: $0 <repo-path> [--dry-run] [--migrate-root] [--sync-templates]"
+  echo "Example: $0 ~/workspaces/harrier --dry-run --sync-templates"
   echo ""
   echo "Options:"
   echo "  --dry-run       Show what would change without writing files"
   echo "  --migrate-root  Replace unmanaged root wrappers with managed versions (backs up originals)"
+  echo "  --sync-templates  Refresh agent-vault/Templates/ from scaffold (backs up existing files)"
 }
 
 expand_path() {
@@ -49,6 +50,7 @@ ROOT_GEMINI_MARKER="<!-- agent-vault-managed: root-wrapper; file=GEMINI.md -->"
 repo_path_input=""
 dry_run="false"
 migrate_root="false"
+sync_templates="false"
 
 for arg in "$@"; do
   case "$arg" in
@@ -57,6 +59,9 @@ for arg in "$@"; do
       ;;
     --migrate-root)
       migrate_root="true"
+      ;;
+    --sync-templates)
+      sync_templates="true"
       ;;
     -h|--help)
       usage
@@ -112,7 +117,8 @@ for required in \
   "$vault_scaffold_dir/GEMINI.md" \
   "$vault_scaffold_dir/shared-rules.md" \
   "$vault_scaffold_dir/review-policy.md" \
-  "$vault_scaffold_dir/lessons.md"
+  "$vault_scaffold_dir/lessons.md" \
+  "$vault_scaffold_dir/daily/README.md"
 do
   if [[ ! -f "$required" ]]; then
     echo "Error: missing scaffold file: $required"
@@ -301,6 +307,24 @@ seed_if_missing() {
   created=$((created + 1))
 }
 
+sync_template_files() {
+  local src_root="$1"
+  local dest_root="$2"
+  local src_file=""
+  local rel=""
+  local dest=""
+
+  if [[ "$sync_templates" != "true" ]]; then
+    return
+  fi
+
+  while IFS= read -r -d '' src_file; do
+    rel="${src_file#$src_root/}"
+    dest="$dest_root/$rel"
+    sync_managed_file "$src_file" "$dest"
+  done < <(find "$src_root" -type f -print0)
+}
+
 sync_root_wrapper_if_managed() {
   local src="$1"
   local dest="$2"
@@ -410,6 +434,8 @@ sync_managed_file "$vault_scaffold_dir/CLAUDE.md" "$project_dir/CLAUDE.md"
 sync_managed_file "$vault_scaffold_dir/GEMINI.md" "$project_dir/GEMINI.md"
 
 seed_if_missing "$vault_scaffold_dir/lessons.md" "$project_dir/lessons.md"
+seed_if_missing "$vault_scaffold_dir/daily/README.md" "$project_dir/daily/README.md"
+sync_template_files "$vault_scaffold_dir/Templates" "$project_dir/Templates"
 
 ensure_obsidian_gitignore "$canonical_repo_path"
 

@@ -37,6 +37,9 @@ The generated vault is plain Markdown and works directly in Obsidian.
 3. For an existing project repo, run:
    - `./scripts/update-project.sh <repo-path> --dry-run`
    - `./scripts/update-project.sh <repo-path>`
+   - Optional template refresh:
+     - `./scripts/update-project.sh <repo-path> --dry-run --sync-templates`
+     - `./scripts/update-project.sh <repo-path> --sync-templates`
    - Example: `./scripts/update-project.sh ~/workspaces/harrier`
    - To migrate unmanaged root wrappers to managed versions:
      - `./scripts/update-project.sh <repo-path> --migrate-root`
@@ -78,8 +81,14 @@ CI also enforces this via `.github/workflows/policy-mirror-check.yml` on pull re
   - `<repo>/GEMINI.md`
 - Seeded if missing:
   - `<repo>/.github/pull_request_template.md`
+  - `<repo>/agent-vault/lessons.md`
+  - `<repo>/agent-vault/daily/README.md`
 
 If an existing root policy file does not have the managed marker, `update-project.sh` leaves it unchanged and reports a skip notice suggesting `--migrate-root`.
+
+Template refresh is opt-in:
+- `./scripts/update-project.sh <repo-path> --sync-templates` updates `agent-vault/Templates/` from the scaffold and backs up replaced files under `agent-vault/context/updates/<timestamp>/`.
+- Without `--sync-templates`, project-local template customizations are left alone.
 
 ### Migrating Root Wrappers (`--migrate-root`)
 When running `update-project.sh` with `--migrate-root`, unmanaged root wrappers (those missing the `agent-vault-managed` marker) are backed up and replaced with the current scaffold versions. This is useful for workspaces created before root wrapper management was introduced.
@@ -122,8 +131,8 @@ Without this flag, `new-project.sh` leaves pre-existing root files unchanged and
 - `open-questions.md`
 - `lessons.md`
 - `handoff.md`
-- `context/`, `design-log/`, `decisions/`, `_assets/`
-- `Templates/` (copied from template source)
+- `daily/`, `context/`, `design-log/`, `decisions/`, `_assets/`
+- `Templates/` (copied from template source; instantiated notes belong outside this folder)
 
 It also creates project-root wrappers when missing:
 - `<repo-path>/AGENTS.md` -> contains PR review guidance (inline) for Codex GitHub reviews and points workflow execution to `agent-vault/AGENTS.md`

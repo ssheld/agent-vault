@@ -12,6 +12,7 @@ last_updated:
 - Reference files and PRs instead of pasting long diffs.
 - Pair each major update with a design-log entry.
 - Add a handoff note when transferring work between agents/sessions.
+- Reference the active handoff note or decision record when one changes current work.
 
 ## Current Snapshot
 - Project:

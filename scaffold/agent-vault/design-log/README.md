@@ -10,7 +10,9 @@
   - `agent-vault/open-questions.md`
   - `agent-vault/context-log.md`
 
-Add one short note per meaningful work session.
+Add one short note per substantive work session.
+- Read the newest 3 notes first during session start.
+- When a session produces a handoff note or decision record, link it from the session note.
 
 Suggested filename:
-- `YYYY-MM-DD-<topic>.md`
+- `YYYY-MM-DD-HHMM-<topic>.md`

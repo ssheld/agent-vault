@@ -3,11 +3,16 @@ type: decision-record
 id:
 status: proposed
 date:
+updated:
 project:
 owners:
+scope:
 ---
 
 # Decision: <title>
+
+## Status
+- Proposed / Accepted / Superseded / Deprecated
 
 ## Context
 
@@ -23,4 +28,4 @@ owners:
 
 ## Follow-Up
 - [ ] Task 1
-- [ ] Task 2
+- [ ] Update `agent-vault/decision-log.md`

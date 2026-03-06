@@ -14,7 +14,8 @@ Deliver project milestones with clear scope, verifiable outcomes, and reliable h
 
 ## Success Criteria
 - Milestone 1 scope and exit criteria are documented in `agent-vault/plan.md`.
-- Current priorities, decisions, and open questions are current in `context-log.md`.
+- Current priorities and session state are current in `agent-vault/context-log.md`.
+- Active decisions and open questions are current in `agent-vault/decision-log.md` and `agent-vault/open-questions.md`.
 - Completion checks are defined before implementation starts.
 
 ## Scope
@@ -28,7 +29,7 @@ Deliver project milestones with clear scope, verifiable outcomes, and reliable h
 ## Links
 - Repo: __REPO_REFERENCE__
 - Board: TBD
-- Docs: `agent-vault/plan.md`, `agent-vault/open-questions.md`, `agent-vault/context-log.md`
+- Docs: `agent-vault/plan.md`, `agent-vault/context-log.md`, `agent-vault/open-questions.md`, `agent-vault/decision-log.md`
 
 ## Active Work
 - Current focus: Define milestone scope and begin implementation backlog.
@@ -39,5 +40,8 @@ Deliver project milestones with clear scope, verifiable outcomes, and reliable h
 - Plan: `agent-vault/plan.md`
 - Coding standards: `agent-vault/coding-standards.md`
 - Context log: `agent-vault/context-log.md`
+- Open questions: `agent-vault/open-questions.md`
+- Decision log: `agent-vault/decision-log.md`
+- Daily notes folder: `agent-vault/daily/`
 - Design log folder: `agent-vault/design-log/`
 - Handoffs folder: `agent-vault/context/handoffs/`
