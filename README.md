@@ -150,6 +150,6 @@ It also creates project-root files when missing:
 - `<repo-path>/GEMINI.md` -> imports `agent-vault/GEMINI.md` and `agent-vault/review-policy.md`
 - `<repo-path>/docs/design.md` -> starter architecture/design document with embedded Mermaid diagrams
 - `<repo-path>/.github/pull_request_template.md` -> standardized agent PR body template
-- Bootstrap behavior: `new-project.sh` hydrates project metadata placeholders (`repo_reference`, active branch, dates) and seeds non-empty baseline content in required session-start docs (`agent-vault/README.md`, `plan.md`, `coding-standards.md`, `context-log.md`, `design-log/README.md`, and `docs/design.md`).
+- Bootstrap behavior: `new-project.sh` hydrates project metadata placeholders (`repo_reference`, active branch, dates) in the baseline `agent-vault/` docs, seeds non-empty baseline content in required session-start docs (`agent-vault/README.md`, `plan.md`, `coding-standards.md`, `context-log.md`, and `design-log/README.md`), and seeds `docs/design.md` as a starter design document.
 
 If root files already exist, the script leaves them unchanged unless `--migrate-existing-root-md` is provided.
