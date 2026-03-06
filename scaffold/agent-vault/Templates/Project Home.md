@@ -15,6 +15,7 @@ last_updated:
 - Milestone scope and exit criteria are documented in `plan.md`.
 - Current priorities and session state are current in `context-log.md`.
 - Active decisions and open questions are current in `decision-log.md` and `open-questions.md`.
+- Architecture and key flows are current in `docs/design.md`.
 - Completion checks are defined before implementation starts.
 
 ## Scope
@@ -24,7 +25,7 @@ last_updated:
 ## Links
 - Repo:
 - Board:
-- Docs: `plan.md`, `context-log.md`, `open-questions.md`, `decision-log.md`
+- Docs: `docs/design.md`, `plan.md`, `context-log.md`, `open-questions.md`, `decision-log.md`
 
 ## Active Work
 - Current focus:
@@ -32,6 +33,7 @@ last_updated:
 - Next milestone:
 
 ## Working Files
+- Design doc: `docs/design.md`
 - Plan: `plan.md`
 - Coding standards: `coding-standards.md`
 - Context log: `context-log.md`

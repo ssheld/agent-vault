@@ -71,6 +71,13 @@
 - Use the standalone handoff prompt template only when a human explicitly asks for a copy-paste prompt. Otherwise keep the prompt inside the handoff note and the latest `context-log.md` entry.
 - Use `agent-vault/context/scratchpad.md` only for temporary notes. Move durable state, decisions, and open questions into canonical files before finishing.
 
+## Design Docs and Diagrams
+- `docs/design.md` is the default architecture and design document unless the project clearly uses a different canonical path.
+- Prefer Mermaid fenced code blocks embedded directly in Markdown for architecture, workflow, and data-flow diagrams.
+- Keep diagrams grounded in code and documented behavior. Do not invent services, queues, APIs, or responsibilities that are not present or explicitly planned.
+- Keep diagrams concise and readable: short labels, clear edges, and no unnecessary node sprawl unless the task explicitly needs a larger diagram.
+- Default to embedded Mermaid in Markdown. Do not introduce separate `.mmd` sources, generated SVG/PNG artifacts, or Mermaid-specific build steps unless the project already uses them or the user asks for them.
+
 ## Session Start - Required
 - Read the core files before substantive work:
   - `agent-vault/README.md`
@@ -111,6 +118,7 @@ Before considering any change complete and before running git commit:
 - Read `docs/design.md` (or the project's main architecture/design document if named differently).
 - Determine whether the proposed changes modify, add to, or invalidate any component, layer, data flow, boundary, interface, or architectural invariant described there.
 - If yes: automatically propose and apply the corresponding updates to `docs/design.md` so it accurately reflects the new reality.
+- When diagrams are needed or updated, prefer Mermaid blocks in the Markdown document rather than screenshots or external image assets unless the project already uses another documented approach.
 - If no: explicitly state in your reasoning: "No impact on docs/design.md detected."
 
 2. README.md / User-Facing Documentation Check

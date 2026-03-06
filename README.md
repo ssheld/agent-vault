@@ -50,7 +50,7 @@ This repo should stay template-only. Do not store project-specific session logs 
 ## Template Source
 - Runtime scaffold copied into projects lives at:
   - `scaffold/agent-vault/`
-- Root wrapper templates copied into project repos live at:
+- Project-root scaffold copied into project repos lives at:
   - `scaffold/root/`
 
 If you want changes to propagate to future projects, edit files under `scaffold/agent-vault/` and `scaffold/root/`.
@@ -83,6 +83,7 @@ CI also enforces this via `.github/workflows/policy-mirror-check.yml` on pull re
   - `<repo>/GEMINI.md`
 - Seeded if missing:
   - `<repo>/.github/pull_request_template.md`
+  - `<repo>/docs/design.md`
   - `<repo>/agent-vault/lessons.md`
   - `<repo>/agent-vault/daily/README.md`
 
@@ -119,6 +120,13 @@ When running `new-project.sh` with `--migrate-existing-root-md`:
 
 Without this flag, `new-project.sh` leaves pre-existing root files unchanged and prints a notice.
 
+## Design Docs and Diagrams
+Generated projects get a starter `docs/design.md` that uses Mermaid fenced code blocks as the default diagram format.
+- GitHub renders Mermaid in Markdown natively.
+- Obsidian renders Mermaid in Markdown natively.
+- No Mermaid-specific install is required for agents to create or update the diagrams.
+- Add Mermaid CLI, separate `.mmd` files, or rendered SVG/PNG artifacts only if a specific project later needs validation or exported assets.
+
 ## Generated Structure
 `new-project.sh` creates `<repo-path>/agent-vault/` with:
 - `shared-rules.md` (single source of truth for implementation rules)
@@ -136,11 +144,12 @@ Without this flag, `new-project.sh` leaves pre-existing root files unchanged and
 - `daily/`, `context/`, `design-log/`, `decisions/`, `_assets/`
 - `Templates/` (copied from template source; instantiated notes belong outside this folder)
 
-It also creates project-root wrappers when missing:
+It also creates project-root files when missing:
 - `<repo-path>/AGENTS.md` -> contains PR review guidance (inline) for Codex GitHub reviews and points workflow execution to `agent-vault/AGENTS.md`
 - `<repo-path>/CLAUDE.md` -> imports `agent-vault/CLAUDE.md` and `agent-vault/review-policy.md`
 - `<repo-path>/GEMINI.md` -> imports `agent-vault/GEMINI.md` and `agent-vault/review-policy.md`
+- `<repo-path>/docs/design.md` -> starter architecture/design document with embedded Mermaid diagrams
 - `<repo-path>/.github/pull_request_template.md` -> standardized agent PR body template
-- Bootstrap behavior: `new-project.sh` hydrates project metadata placeholders (`repo_reference`, active branch, dates) and seeds non-empty baseline content in required session-start docs (`agent-vault/README.md`, `plan.md`, `coding-standards.md`, `context-log.md`, and `design-log/README.md`).
+- Bootstrap behavior: `new-project.sh` hydrates project metadata placeholders (`repo_reference`, active branch, dates) in the baseline `agent-vault/` docs, seeds non-empty baseline content in required session-start docs (`agent-vault/README.md`, `plan.md`, `coding-standards.md`, `context-log.md`, and `design-log/README.md`), and seeds `docs/design.md` as a starter design document.
 
 If root files already exist, the script leaves them unchanged unless `--migrate-existing-root-md` is provided.

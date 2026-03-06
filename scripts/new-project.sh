@@ -280,6 +280,11 @@ if [[ ! -f "$root_scaffold_dir/.github/pull_request_template.md" ]]; then
   exit 1
 fi
 
+if [[ ! -f "$root_scaffold_dir/docs/design.md" ]]; then
+  echo "Error: missing root scaffold file: $root_scaffold_dir/docs/design.md"
+  exit 1
+fi
+
 if [[ ! -f "$scaffold_dir/daily/README.md" ]]; then
   echo "Error: missing scaffold file: $scaffold_dir/daily/README.md"
   exit 1
@@ -389,6 +394,7 @@ process_root_policy_file "AGENTS.md" "$project_dir/AGENTS.md" "$ROOT_AGENTS_MARK
 process_root_policy_file "CLAUDE.md" "$project_dir/CLAUDE.md" "$ROOT_CLAUDE_MARKER"
 process_root_policy_file "GEMINI.md" "$project_dir/GEMINI.md" "$ROOT_GEMINI_MARKER"
 seed_root_file_if_missing "$root_scaffold_dir/.github/pull_request_template.md" "$canonical_repo_path/.github/pull_request_template.md"
+seed_root_file_if_missing "$root_scaffold_dir/docs/design.md" "$canonical_repo_path/docs/design.md"
 
 ensure_obsidian_gitignore "$canonical_repo_path"
 
