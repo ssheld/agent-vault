@@ -61,6 +61,8 @@ This repository intentionally keeps three mirrored policy blocks for compatibili
 - `scaffold/root/AGENTS.md` mirrors the review section from `scaffold/agent-vault/review-policy.md`.
 - `scaffold/agent-vault/AGENTS.md` mirrors shared workflow rules from `scaffold/agent-vault/shared-rules.md`.
 - Each check compares its mirrored block from the start heading through EOF, covering all mirrored top-level sections.
+- Root `CLAUDE.md` and `GEMINI.md` in this template repo are lightweight repo-local helper docs and are not drift-checked.
+- `scaffold/root/CLAUDE.md` and `scaffold/root/GEMINI.md` remain thin wrappers over `agent-vault/*.md` plus `review-policy.md`; no additional drift enforcement is added for them.
 
 To prevent accidental drift, run:
 - `bash scripts/check-policy-mirrors.sh`
