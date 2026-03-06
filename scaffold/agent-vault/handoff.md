@@ -11,7 +11,7 @@ Use this when switching between agents or pausing with meaningful unfinished wor
 
 ## Suggested Next Prompt
 ```
-You are continuing work on __PROJECT_NAME__.
+You are continuing work on this repository.
 Start with the core files:
 - agent-vault/README.md
 - agent-vault/context-log.md
