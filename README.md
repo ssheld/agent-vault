@@ -78,6 +78,10 @@ CI also enforces this via `.github/workflows/policy-mirror-check.yml` on pull re
   - `<repo>/agent-vault/CLAUDE.md`
   - `<repo>/agent-vault/GEMINI.md`
   - `<repo>/agent-vault/handoff.md`
+  - `<repo>/agent-vault/design-log/README.md`
+  - `<repo>/agent-vault/context/handoffs/README.md`
+  - `<repo>/agent-vault/decisions/README.md`
+  - `<repo>/agent-vault/daily/README.md`
 - Root wrappers (managed only when the root file has the `agent-vault-managed` marker):
   - `<repo>/AGENTS.md`
   - `<repo>/CLAUDE.md`
@@ -86,7 +90,6 @@ CI also enforces this via `.github/workflows/policy-mirror-check.yml` on pull re
   - `<repo>/.github/pull_request_template.md`
   - `<repo>/docs/design.md`
   - `<repo>/agent-vault/lessons.md`
-  - `<repo>/agent-vault/daily/README.md`
 
 If an existing root policy file does not have the managed marker, `update-project.sh` leaves it unchanged and reports a skip notice suggesting `--migrate-root`.
 
@@ -151,6 +154,6 @@ It also creates project-root files when missing:
 - `<repo-path>/GEMINI.md` -> imports `agent-vault/GEMINI.md` and `agent-vault/review-policy.md`
 - `<repo-path>/docs/design.md` -> starter architecture/design document with embedded Mermaid diagrams
 - `<repo-path>/.github/pull_request_template.md` -> standardized agent PR body template
-- Bootstrap behavior: `new-project.sh` hydrates project metadata placeholders (`repo_reference`, active branch, dates) in the baseline `agent-vault/` docs, seeds non-empty baseline content in required session-start docs (`agent-vault/README.md`, `plan.md`, `coding-standards.md`, `context-log.md`, and `design-log/README.md`), and seeds `docs/design.md` as a starter design document.
+- Bootstrap behavior: `new-project.sh` hydrates project metadata placeholders (`repo_reference`, active branch, dates) in the baseline `agent-vault/` docs, seeds non-empty baseline content in required core docs (`agent-vault/README.md`, `plan.md`, `coding-standards.md`, and `context-log.md`), and copies scaffold helper docs such as `agent-vault/design-log/README.md` plus `docs/design.md`.
 
 If root files already exist, the script leaves them unchanged unless `--migrate-existing-root-md` is provided.
