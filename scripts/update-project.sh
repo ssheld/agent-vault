@@ -31,7 +31,7 @@ expand_path() {
   esac
 }
 
-OBSIDIAN_GITIGNORE_LINES=(
+MANAGED_GITIGNORE_LINES=(
   "# Obsidian -- machine-specific & volatile files (ignore these)"
   ".obsidian/workspace.json"
   ".obsidian/app.json"
@@ -41,6 +41,8 @@ OBSIDIAN_GITIGNORE_LINES=(
   ".obsidian/backup/"
   "# Plugin data (can contain API keys or large caches)"
   ".obsidian/plugins/*/data.json"
+  "# Agent Vault -- local sync and migration backups (ignore these)"
+  "/agent-vault/context/updates/"
 )
 
 ROOT_AGENTS_MARKER="<!-- agent-vault-managed: root-wrapper; file=AGENTS.md -->"
@@ -370,7 +372,7 @@ sync_root_wrapper_if_managed() {
   skipped=$((skipped + 1))
 }
 
-ensure_obsidian_gitignore() {
+ensure_managed_gitignore_entries() {
   local repo_root="$1"
   local gitignore_path="$repo_root/.gitignore"
   local -a missing_lines=()
@@ -382,7 +384,7 @@ ensure_obsidian_gitignore() {
     existed="true"
   fi
 
-  for line in "${OBSIDIAN_GITIGNORE_LINES[@]}"; do
+  for line in "${MANAGED_GITIGNORE_LINES[@]}"; do
     if [[ -e "$gitignore_path" ]] && gitignore_has_line "$gitignore_path" "$line"; then
       continue
     fi
@@ -391,7 +393,7 @@ ensure_obsidian_gitignore() {
   done
 
   if [[ ${#missing_lines[@]} -eq 0 ]]; then
-    echo "Unchanged: .gitignore (Obsidian ignore entries present)"
+    echo "Unchanged: .gitignore (managed ignore entries present)"
     unchanged=$((unchanged + 1))
     return
   fi
@@ -402,7 +404,7 @@ ensure_obsidian_gitignore() {
       updated=$((updated + 1))
       backed_up=$((backed_up + 1))
     else
-      echo "Create: .gitignore (add ${#missing_lines[@]} Obsidian ignore entries)"
+      echo "Create: .gitignore (add ${#missing_lines[@]} managed ignore entries)"
       created=$((created + 1))
     fi
     return
@@ -422,10 +424,10 @@ ensure_obsidian_gitignore() {
   done
 
   if [[ "$existed" == "true" ]]; then
-    echo "Updated: .gitignore (added ${#missing_lines[@]} Obsidian ignore entries)"
+    echo "Updated: .gitignore (added ${#missing_lines[@]} managed ignore entries)"
     updated=$((updated + 1))
   else
-    echo "Created: .gitignore (added ${#missing_lines[@]} Obsidian ignore entries)"
+    echo "Created: .gitignore (added ${#missing_lines[@]} managed ignore entries)"
     created=$((created + 1))
   fi
 }
@@ -452,7 +454,7 @@ sync_managed_file "$vault_scaffold_dir/daily/README.md" "$project_dir/daily/READ
 seed_if_missing "$vault_scaffold_dir/lessons.md" "$project_dir/lessons.md"
 sync_template_files "$vault_scaffold_dir/Templates" "$project_dir/Templates"
 
-ensure_obsidian_gitignore "$canonical_repo_path"
+ensure_managed_gitignore_entries "$canonical_repo_path"
 
 echo
 echo "Summary:"

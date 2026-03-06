@@ -123,7 +123,7 @@ append_migrated_root_content() {
   } >> "$destination_path"
 }
 
-OBSIDIAN_GITIGNORE_LINES=(
+MANAGED_GITIGNORE_LINES=(
   "# Obsidian -- machine-specific & volatile files (ignore these)"
   ".obsidian/workspace.json"
   ".obsidian/app.json"
@@ -133,13 +133,15 @@ OBSIDIAN_GITIGNORE_LINES=(
   ".obsidian/backup/"
   "# Plugin data (can contain API keys or large caches)"
   ".obsidian/plugins/*/data.json"
+  "# Agent Vault -- local sync and migration backups (ignore these)"
+  "/agent-vault/context/updates/"
 )
 
 ROOT_AGENTS_MARKER="<!-- agent-vault-managed: root-wrapper; file=AGENTS.md -->"
 ROOT_CLAUDE_MARKER="<!-- agent-vault-managed: root-wrapper; file=CLAUDE.md -->"
 ROOT_GEMINI_MARKER="<!-- agent-vault-managed: root-wrapper; file=GEMINI.md -->"
 
-ensure_obsidian_gitignore() {
+ensure_managed_gitignore_entries() {
   local repo_root="$1"
   local gitignore_path="$repo_root/.gitignore"
   local added_count=0
@@ -173,7 +175,7 @@ ensure_obsidian_gitignore() {
     ' "$file_path"
   }
 
-  for line in "${OBSIDIAN_GITIGNORE_LINES[@]}"; do
+  for line in "${MANAGED_GITIGNORE_LINES[@]}"; do
     if gitignore_has_line "$gitignore_path" "$line"; then
       continue
     fi
@@ -183,9 +185,9 @@ ensure_obsidian_gitignore() {
   done
 
   if [[ "$added_count" -gt 0 ]]; then
-    echo "Updated: .gitignore (added $added_count Obsidian ignore entries)"
+    echo "Updated: .gitignore (added $added_count managed ignore entries)"
   else
-    echo "Unchanged: .gitignore (Obsidian ignore entries already present)"
+    echo "Unchanged: .gitignore (managed ignore entries already present)"
   fi
 }
 
@@ -416,6 +418,6 @@ process_root_policy_file "GEMINI.md" "$project_dir/GEMINI.md" "$ROOT_GEMINI_MARK
 seed_root_file_if_missing "$root_scaffold_dir/.github/pull_request_template.md" "$canonical_repo_path/.github/pull_request_template.md"
 seed_root_file_if_missing "$root_scaffold_dir/docs/design.md" "$canonical_repo_path/docs/design.md"
 
-ensure_obsidian_gitignore "$canonical_repo_path"
+ensure_managed_gitignore_entries "$canonical_repo_path"
 
 echo "Created project notes at: $project_dir"

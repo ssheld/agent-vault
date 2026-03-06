@@ -103,7 +103,7 @@ When running `update-project.sh` with `--migrate-root`, unmanaged root wrappers 
 When a managed file changes, the script backs up the previous version under:
 - `<repo>/agent-vault/context/updates/<timestamp>/...`
 
-Both scripts also ensure root `.gitignore` includes Obsidian-safe ignore entries (added only when missing):
+Both scripts also ensure root `.gitignore` includes managed local-only ignore entries (added only when missing):
 - `.obsidian/workspace.json`
 - `.obsidian/app.json`
 - `.obsidian/appearance.json`
@@ -111,6 +111,7 @@ Both scripts also ensure root `.gitignore` includes Obsidian-safe ignore entries
 - `.obsidian/cache/`
 - `.obsidian/backup/`
 - `.obsidian/plugins/*/data.json`
+- `/agent-vault/context/updates/`
 
 ## Migrating Existing Root Policy Files
 When running `new-project.sh` with `--migrate-existing-root-md`:
