@@ -21,4 +21,5 @@ scope:
 - `agent-vault/context/handoffs/...`
 
 ## References
-- 
+<!-- External docs, APIs, blog posts: cite inline as [description](URL) and list here. See shared-rules.md "Research and Citations". -->
+-

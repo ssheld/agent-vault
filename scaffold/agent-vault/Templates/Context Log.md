@@ -42,3 +42,4 @@ last_updated:
 #### References
 - <file/path>
 - <PR/issue/link>
+- <external doc/URL>

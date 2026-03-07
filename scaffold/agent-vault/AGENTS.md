@@ -78,6 +78,26 @@
 - Keep diagrams concise and readable: short labels, clear edges, and no unnecessary node sprawl unless the task explicitly needs a larger diagram.
 - Default to embedded Mermaid in Markdown. Do not introduce separate `.mmd` sources, generated SVG/PNG artifacts, or Mermaid-specific build steps unless the project already uses them or the user asks for them.
 
+## Research and Citations
+When performing research or writing research-oriented documentation (design-log notes, decision records, open questions, or any artifact that references external tools, APIs, libraries, or concepts):
+
+### Citation Requirements
+- Include a source URL for every factual claim drawn from external documentation, blog posts, official references, or community sources.
+- Format citations inline as `[description](URL)`. For documents with many references, also collect them in a **Sources** section at the bottom.
+- When a URL is unavailable (e.g., information comes from training data rather than a fetched page), state the source explicitly (e.g., "per the Express.js v4 documentation" or "based on the AWS SDK v3 API reference") so the reader can verify independently.
+- Never present external claims without attribution. If you cannot cite a source, say so.
+
+### Write for a Context-Free Reader
+- Assume the reader has no prior familiarity with the specific tools, APIs, libraries, or features being discussed.
+- On first mention of any external API, library, service, or domain-specific concept, include a one-sentence explanation of what it is and what it does.
+- Do not assume familiarity with version-specific features, configuration options, or behavioral nuances. State the version and explain the relevant behavior.
+- Spell out acronyms on first use unless they are universally understood in software engineering (e.g., HTTP, JSON, SQL are fine; CDK, ECS, SWR need expansion).
+
+### Research Document Structure
+- Lead with a brief summary of the research question and the conclusion before diving into details.
+- Organize findings by theme or option, not by the order they were discovered.
+- When comparing alternatives, use a table or side-by-side format with clear evaluation criteria.
+
 ## Session Start - Required
 - Read the core files before substantive work:
   - `agent-vault/README.md`
