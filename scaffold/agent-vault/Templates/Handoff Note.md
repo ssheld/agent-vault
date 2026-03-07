@@ -21,6 +21,7 @@ topic:
 -
 
 ## Context You Need
+<!-- Explain external tools, APIs, and services on first mention. See shared-rules.md "Write for a Context-Free Reader". -->
 
 ## Relevant Files
 - 
