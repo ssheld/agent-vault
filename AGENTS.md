@@ -125,6 +125,11 @@ Example:
 > 🤖 **Review by Claude Opus 4.6** · via Claude Code
 ```
 
+**Standalone PR comments** that contain review feedback (for example, a pull request issue comment used instead of a formal review body) must begin with the same attribution line:
+```
+> 🤖 **Review by {Model Name}** · via {Client Tool}
+```
+
 **Inline review comments** on specific lines must begin with:
 ```
 🤖 `{Model Name}`
@@ -139,6 +144,7 @@ Example:
 Rules:
 - Use your actual model name and version (e.g., Claude Opus 4.6, Codex 5.3, Gemini 2.5 Pro).
 - Include the client tool when known (e.g., Claude Code, Codex CLI, Gemini CLI).
+- If you are leaving review feedback in a standalone PR conversation comment instead of a formal review, use the same `Review by ...` attribution header at the top of that comment.
 - Never present review feedback as if it is the human account owner's personal opinion.
 - If you are uncertain of your exact model version, use the best identifier you have (e.g., "Claude" or "Codex").
 
