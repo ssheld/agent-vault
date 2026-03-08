@@ -2,6 +2,9 @@
 
 Public template repository for generating a per-project `agent-vault/` folder.
 
+## License
+Apache-2.0. See `LICENSE`.
+
 ## What This Is
 This repo is a reusable scaffold for teams using AI coding agents (for example Codex, Claude, and Gemini CLI) and Obsidian.
 
