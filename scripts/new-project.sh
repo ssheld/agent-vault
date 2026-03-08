@@ -123,23 +123,83 @@ append_migrated_root_content() {
   } >> "$destination_path"
 }
 
-MANAGED_GITIGNORE_LINES=(
-  "# Obsidian -- machine-specific & volatile files (ignore these)"
-  ".obsidian/workspace.json"
-  ".obsidian/app.json"
-  ".obsidian/appearance.json"
-  ".obsidian/workspace-mobile.json"
-  ".obsidian/cache/"
-  ".obsidian/backup/"
-  "# Plugin data (can contain API keys or large caches)"
-  ".obsidian/plugins/*/data.json"
-  "# Agent Vault -- local sync and migration backups (ignore these)"
-  "/agent-vault/context/updates/"
+# Contract: each block starts with a human-readable comment line followed by
+# one or more ignore patterns. collect_missing_managed_gitignore_lines relies
+# on that shape when deciding whether to add the block comment.
+MANAGED_GITIGNORE_BLOCKS=(
+  $'# Obsidian -- machine-specific & volatile files (ignore these)\n.obsidian/workspace.json\n.obsidian/app.json\n.obsidian/appearance.json\n.obsidian/workspace-mobile.json\n.obsidian/cache/\n.obsidian/backup/'
+  $'# Plugin data (can contain API keys or large caches)\n.obsidian/plugins/*/data.json'
+  $'# Agent Vault -- local sync and migration backups (ignore these)\n/agent-vault/context/updates/'
 )
 
 ROOT_AGENTS_MARKER="<!-- agent-vault-managed: root-wrapper; file=AGENTS.md -->"
 ROOT_CLAUDE_MARKER="<!-- agent-vault-managed: root-wrapper; file=CLAUDE.md -->"
 ROOT_GEMINI_MARKER="<!-- agent-vault-managed: root-wrapper; file=GEMINI.md -->"
+
+gitignore_has_line() {
+  local file_path="$1"
+  local target_line="$2"
+
+  awk -v target="$target_line" '
+    {
+      sub(/\r$/, "", $0)
+      if ($0 == target) {
+        found = 1
+        exit
+      }
+    }
+    END {
+      exit found ? 0 : 1
+    }
+  ' "$file_path"
+}
+
+collect_missing_managed_gitignore_lines() {
+  local file_path="$1"
+  local block
+  local line
+  local comment_line
+  local line_number
+  local missing_pattern_count
+  local -a missing_lines=()
+  local -a missing_block_lines=()
+
+  for block in "${MANAGED_GITIGNORE_BLOCKS[@]}"; do
+    comment_line=""
+    line_number=0
+    missing_pattern_count=0
+    missing_block_lines=()
+
+    while IFS= read -r line; do
+      line_number=$((line_number + 1))
+
+      if [[ "$line_number" -eq 1 ]]; then
+        comment_line="$line"
+        continue
+      fi
+
+      if [[ -e "$file_path" ]] && gitignore_has_line "$file_path" "$line"; then
+        continue
+      fi
+
+      missing_block_lines+=("$line")
+      missing_pattern_count=$((missing_pattern_count + 1))
+    done <<< "$block"
+
+    # Skip orphaned comments when the ignore patterns already exist.
+    if [[ "$missing_pattern_count" -eq 0 ]]; then
+      continue
+    fi
+
+    if [[ ! -e "$file_path" ]] || ! gitignore_has_line "$file_path" "$comment_line"; then
+      missing_lines+=("$comment_line")
+    fi
+
+    missing_lines+=("${missing_block_lines[@]}")
+  done
+
+  printf '%s\n' "${missing_lines[@]}"
+}
 
 ensure_managed_gitignore_entries() {
   local repo_root="$1"
@@ -157,32 +217,11 @@ ensure_managed_gitignore_entries() {
     : > "$gitignore_path"
   fi
 
-  gitignore_has_line() {
-    local file_path="$1"
-    local target_line="$2"
-
-    awk -v target="$target_line" '
-      {
-        sub(/\r$/, "", $0)
-        if ($0 == target) {
-          found = 1
-          exit
-        }
-      }
-      END {
-        exit found ? 0 : 1
-      }
-    ' "$file_path"
-  }
-
-  for line in "${MANAGED_GITIGNORE_LINES[@]}"; do
-    if gitignore_has_line "$gitignore_path" "$line"; then
-      continue
-    fi
-
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
     printf '%s\n' "$line" >> "$gitignore_path"
     added_count=$((added_count + 1))
-  done
+  done < <(collect_missing_managed_gitignore_lines "$gitignore_path")
 
   if [[ "$added_count" -gt 0 ]]; then
     echo "Updated: .gitignore (added $added_count managed ignore entries)"
