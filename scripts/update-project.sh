@@ -31,18 +31,10 @@ expand_path() {
   esac
 }
 
-MANAGED_GITIGNORE_LINES=(
-  "# Obsidian -- machine-specific & volatile files (ignore these)"
-  ".obsidian/workspace.json"
-  ".obsidian/app.json"
-  ".obsidian/appearance.json"
-  ".obsidian/workspace-mobile.json"
-  ".obsidian/cache/"
-  ".obsidian/backup/"
-  "# Plugin data (can contain API keys or large caches)"
-  ".obsidian/plugins/*/data.json"
-  "# Agent Vault -- local sync and migration backups (ignore these)"
-  "/agent-vault/context/updates/"
+MANAGED_GITIGNORE_BLOCKS=(
+  $'# Obsidian -- machine-specific & volatile files (ignore these)\n.obsidian/workspace.json\n.obsidian/app.json\n.obsidian/appearance.json\n.obsidian/workspace-mobile.json\n.obsidian/cache/\n.obsidian/backup/'
+  $'# Plugin data (can contain API keys or large caches)\n.obsidian/plugins/*/data.json'
+  $'# Agent Vault -- local sync and migration backups (ignore these)\n/agent-vault/context/updates/'
 )
 
 ROOT_AGENTS_MARKER="<!-- agent-vault-managed: root-wrapper; file=AGENTS.md -->"
@@ -224,6 +216,53 @@ gitignore_has_line() {
   has_exact_line "$file_path" "$target_line"
 }
 
+collect_missing_managed_gitignore_lines() {
+  local file_path="$1"
+  local block
+  local line
+  local comment_line
+  local line_number
+  local missing_pattern_count
+  local -a missing_lines=()
+  local -a missing_block_lines=()
+
+  for block in "${MANAGED_GITIGNORE_BLOCKS[@]}"; do
+    comment_line=""
+    line_number=0
+    missing_pattern_count=0
+    missing_block_lines=()
+
+    while IFS= read -r line; do
+      line_number=$((line_number + 1))
+
+      if [[ "$line_number" -eq 1 ]]; then
+        comment_line="$line"
+        continue
+      fi
+
+      if [[ -e "$file_path" ]] && gitignore_has_line "$file_path" "$line"; then
+        continue
+      fi
+
+      missing_block_lines+=("$line")
+      missing_pattern_count=$((missing_pattern_count + 1))
+    done <<< "$block"
+
+    # Skip orphaned comments when the ignore patterns already exist.
+    if [[ "$missing_pattern_count" -eq 0 ]]; then
+      continue
+    fi
+
+    if [[ ! -e "$file_path" ]] || ! gitignore_has_line "$file_path" "$comment_line"; then
+      missing_lines+=("$comment_line")
+    fi
+
+    missing_lines+=("${missing_block_lines[@]}")
+  done
+
+  printf '%s\n' "${missing_lines[@]}"
+}
+
 is_managed_root_wrapper() {
   local file_path="$1"
   local marker="$2"
@@ -384,13 +423,10 @@ ensure_managed_gitignore_entries() {
     existed="true"
   fi
 
-  for line in "${MANAGED_GITIGNORE_LINES[@]}"; do
-    if [[ -e "$gitignore_path" ]] && gitignore_has_line "$gitignore_path" "$line"; then
-      continue
-    fi
-
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
     missing_lines+=("$line")
-  done
+  done < <(collect_missing_managed_gitignore_lines "$gitignore_path")
 
   if [[ ${#missing_lines[@]} -eq 0 ]]; then
     echo "Unchanged: .gitignore (managed ignore entries present)"
