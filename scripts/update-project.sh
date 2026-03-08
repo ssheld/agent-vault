@@ -31,6 +31,9 @@ expand_path() {
   esac
 }
 
+# Contract: each block starts with a human-readable comment line followed by
+# one or more ignore patterns. collect_missing_managed_gitignore_lines relies
+# on that shape when deciding whether to add the block comment.
 MANAGED_GITIGNORE_BLOCKS=(
   $'# Obsidian -- machine-specific & volatile files (ignore these)\n.obsidian/workspace.json\n.obsidian/app.json\n.obsidian/appearance.json\n.obsidian/workspace-mobile.json\n.obsidian/cache/\n.obsidian/backup/'
   $'# Plugin data (can contain API keys or large caches)\n.obsidian/plugins/*/data.json'
