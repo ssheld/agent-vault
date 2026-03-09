@@ -12,6 +12,16 @@ cleanup() {
 
 trap cleanup EXIT
 
+assert_output_not_contains() {
+  local output="$1"
+  local unexpected_text="$2"
+
+  if [[ "$output" == *"$unexpected_text"* ]]; then
+    echo "Unexpected text found in command output: $unexpected_text" >&2
+    exit 1
+  fi
+}
+
 assert_has_line() {
   local file_path="$1"
   local expected_line="$2"
@@ -107,6 +117,24 @@ write_partial_obsidian_gitignore() {
 EOF
 }
 
+write_managed_gitignore() {
+  local repo_path="$1"
+
+  cat <<'EOF' > "$repo_path/.gitignore"
+# Obsidian -- machine-specific & volatile files (ignore these)
+.obsidian/workspace.json
+.obsidian/app.json
+.obsidian/appearance.json
+.obsidian/workspace-mobile.json
+.obsidian/cache/
+.obsidian/backup/
+# Plugin data (can contain API keys or large caches)
+.obsidian/plugins/*/data.json
+# Agent Vault -- local sync and migration backups (ignore these)
+/agent-vault/context/updates/
+EOF
+}
+
 assert_no_dangling_comment_append() {
   local file_path="$1"
 
@@ -140,6 +168,14 @@ write_partial_obsidian_gitignore "$new_project_partial_repo"
 "$repo_root/scripts/new-project.sh" "gitignore-test" "$new_project_partial_repo" >/dev/null
 assert_grouped_partial_block_insert "$new_project_partial_repo/.gitignore"
 
+new_project_managed_repo="$tmp_root/new-project-managed-patterns"
+init_repo "$new_project_managed_repo"
+write_managed_gitignore "$new_project_managed_repo"
+new_project_output="$("$repo_root/scripts/new-project.sh" "gitignore-test" "$new_project_managed_repo" 2>&1)"
+assert_output_not_contains "$new_project_output" "unbound variable"
+assert_output_not_contains "$new_project_output" "missing_lines[@]"
+assert_has_line "$new_project_managed_repo/.gitignore" "# Agent Vault -- local sync and migration backups (ignore these)"
+
 update_project_repo="$tmp_root/update-project-existing-patterns"
 init_repo "$update_project_repo"
 "$repo_root/scripts/new-project.sh" "gitignore-test" "$update_project_repo" >/dev/null
@@ -153,5 +189,14 @@ init_repo "$update_project_partial_repo"
 write_partial_obsidian_gitignore "$update_project_partial_repo"
 "$repo_root/scripts/update-project.sh" "$update_project_partial_repo" >/dev/null
 assert_grouped_partial_block_insert "$update_project_partial_repo/.gitignore"
+
+update_project_managed_repo="$tmp_root/update-project-managed-patterns"
+init_repo "$update_project_managed_repo"
+"$repo_root/scripts/new-project.sh" "gitignore-test" "$update_project_managed_repo" >/dev/null
+write_managed_gitignore "$update_project_managed_repo"
+update_project_output="$("$repo_root/scripts/update-project.sh" "$update_project_managed_repo" --dry-run --sync-templates 2>&1)"
+assert_output_not_contains "$update_project_output" "unbound variable"
+assert_output_not_contains "$update_project_output" "missing_lines[@]"
+assert_has_line "$update_project_managed_repo/.gitignore" "# Agent Vault -- local sync and migration backups (ignore these)"
 
 echo "gitignore management regression checks passed."

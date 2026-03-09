@@ -263,7 +263,9 @@ collect_missing_managed_gitignore_lines() {
     missing_lines+=("${missing_block_lines[@]}")
   done
 
-  printf '%s\n' "${missing_lines[@]}"
+  if [[ "${#missing_lines[@]}" -gt 0 ]]; then
+    printf '%s\n' "${missing_lines[@]}"
+  fi
 }
 
 is_managed_root_wrapper() {
