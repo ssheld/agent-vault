@@ -311,47 +311,31 @@ if [[ ! -d "$root_scaffold_dir" ]]; then
   exit 1
 fi
 
-for root_file in AGENTS.md CLAUDE.md GEMINI.md; do
-  if [[ ! -f "$root_scaffold_dir/$root_file" ]]; then
-    echo "Error: missing root scaffold file: $root_scaffold_dir/$root_file"
+for required in \
+  "$root_scaffold_dir/AGENTS.md" \
+  "$root_scaffold_dir/CLAUDE.md" \
+  "$root_scaffold_dir/GEMINI.md" \
+  "$root_scaffold_dir/.github/pull_request_template.md" \
+  "$root_scaffold_dir/docs/design.md"
+do
+  if [[ ! -f "$required" ]]; then
+    echo "Error: missing root scaffold file: $required"
     exit 1
   fi
 done
 
-if [[ ! -f "$root_scaffold_dir/.github/pull_request_template.md" ]]; then
-  echo "Error: missing root scaffold file: $root_scaffold_dir/.github/pull_request_template.md"
-  exit 1
-fi
-
-if [[ ! -f "$root_scaffold_dir/docs/design.md" ]]; then
-  echo "Error: missing root scaffold file: $root_scaffold_dir/docs/design.md"
-  exit 1
-fi
-
-if [[ ! -f "$scaffold_dir/handoff.md" ]]; then
-  echo "Error: missing scaffold file: $scaffold_dir/handoff.md"
-  exit 1
-fi
-
-if [[ ! -f "$scaffold_dir/design-log/README.md" ]]; then
-  echo "Error: missing scaffold file: $scaffold_dir/design-log/README.md"
-  exit 1
-fi
-
-if [[ ! -f "$scaffold_dir/context/handoffs/README.md" ]]; then
-  echo "Error: missing scaffold file: $scaffold_dir/context/handoffs/README.md"
-  exit 1
-fi
-
-if [[ ! -f "$scaffold_dir/decisions/README.md" ]]; then
-  echo "Error: missing scaffold file: $scaffold_dir/decisions/README.md"
-  exit 1
-fi
-
-if [[ ! -f "$scaffold_dir/daily/README.md" ]]; then
-  echo "Error: missing scaffold file: $scaffold_dir/daily/README.md"
-  exit 1
-fi
+for required in \
+  "$scaffold_dir/handoff.md" \
+  "$scaffold_dir/design-log/README.md" \
+  "$scaffold_dir/context/handoffs/README.md" \
+  "$scaffold_dir/decisions/README.md" \
+  "$scaffold_dir/daily/README.md"
+do
+  if [[ ! -f "$required" ]]; then
+    echo "Error: missing scaffold file: $required"
+    exit 1
+  fi
+done
 
 cp -R "$scaffold_dir" "$project_dir"
 
