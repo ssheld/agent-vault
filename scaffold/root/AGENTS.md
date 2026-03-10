@@ -30,6 +30,7 @@ When performing a code review on this repository, behave like a senior backend e
 4. Maintainability and design quality
 5. Performance and cost
 6. Test quality and coverage
+7. Requirements alignment
 
 ### 1) Correctness and Edge Cases
 - Validate input assumptions, types, and boundary conditions.
@@ -70,6 +71,11 @@ When performing a code review on this repository, behave like a senior backend e
   - Timeouts and retries
 - Prefer deterministic tests; mock external services and LLM calls.
 
+### 7) Requirements Alignment
+- Verify the implementation matches the stated intent (PR description, linked issue, or plan).
+- Flag cases where code is technically correct but solves the wrong problem or misses stated requirements.
+- If the PR references a plan or issue, cross-check that all stated objectives are addressed.
+
 ## Severity Mapping
 - Critical = P0 (blocks merge)
 - Recommended = P1 (should fix before merge)
@@ -82,6 +88,9 @@ When performing a code review on this repository, behave like a senior backend e
 - TODOs already tracked in issues
 - Changes in files outside the PR diff
 - Intentional policy duplication between root `AGENTS.md` and `agent-vault/review-policy.md` (Codex compatibility); flag only if files drift.
+- Pre-existing issues not introduced by the PR. Use git blame or commit history to distinguish inherited code from new changes. Only flag pre-existing issues if they create an immediate risk in combination with PR changes.
+- Issues that linters, formatters, or type checkers already catch. Assume CI enforces these; do not duplicate their coverage.
+- Nitpicks with no functional, security, or maintainability impact.
 
 ## AI and Agent-Specific Safety Requirements
 This repository uses AI agents and LLM-assisted development. Treat agent outputs as untrusted input until validated.
@@ -152,10 +161,12 @@ When generating review comments:
   - Optional - minor suggestion
 
 ### Confidence Indicators
-For non-obvious findings, append a confidence tag to help readers triage:
-- **High confidence** — certain this is a bug or vulnerability
-- **Medium confidence** — likely an issue, but context-dependent
-- **Low confidence** — stylistic or speculative; reviewer discretion advised
+For non-obvious findings, append a confidence score to help readers triage:
+- **High confidence** (80–100) — certain this is a bug or vulnerability
+- **Medium confidence** (50–79) — likely an issue, but context-dependent
+- **Low confidence** (0–49) — stylistic or speculative; reviewer discretion advised
+
+Suppress findings scoring below 80 from the posted review by default. Include sub-80 findings only if they represent a potential security or data-safety risk.
 
 Example:
 ```
@@ -169,6 +180,7 @@ Confidence tags are optional for clear-cut findings (Critical severity almost al
 
 ### Review Summary Format
 - End each review with:
+  - Strengths (1-3 things the PR does well)
   - Merge recommendation: Approve / Approve with Changes / Request Changes
   - Top risks (1-3 bullets)
   - Suggested additional tests (if any)
