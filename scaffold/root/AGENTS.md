@@ -176,7 +176,7 @@ Example:
 The catch block on line 42 discards the exception without logging.
 ```
 
-Confidence tags are optional for clear-cut findings (Critical severity almost always implies high confidence). Use them when the finding involves judgment or ambiguity.
+Confidence scores are optional for clear-cut findings (Critical severity almost always implies high confidence). Use them when the finding involves judgment or ambiguity.
 
 ### Review Summary Format
 - End each review with:
