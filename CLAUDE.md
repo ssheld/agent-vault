@@ -7,6 +7,8 @@ This repository holds reusable scaffold files for `agent-vault/`.
 - Edit `scaffold/agent-vault/` for defaults used in future project initialization.
 - Do not store project-specific context in this repository.
 
+@scaffold/agent-vault/review-policy.md
+
 ## Target Project Usage
 In generated project vaults:
 - `agent-vault/Templates/` is template source only. Instantiated notes belong in canonical runtime files under `agent-vault/`.
