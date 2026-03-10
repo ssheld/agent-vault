@@ -41,6 +41,8 @@ Deliver project milestones with clear scope, verifiable outcomes, and reliable h
 - Design doc: `docs/design.md`
 - Plan: `agent-vault/plan.md`
 - Coding standards: `agent-vault/coding-standards.md`
+- Project context: `agent-vault/project-context.md`
+- Project commands: `agent-vault/project-commands.md`
 - Context log: `agent-vault/context-log.md`
 - Open questions: `agent-vault/open-questions.md`
 - Decision log: `agent-vault/decision-log.md`

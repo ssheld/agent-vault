@@ -92,6 +92,8 @@ CI also enforces this via `.github/workflows/policy-mirror-check.yml` on pull re
 - Seeded if missing:
   - `<repo>/.github/pull_request_template.md`
   - `<repo>/docs/design.md`
+  - `<repo>/agent-vault/project-context.md`
+  - `<repo>/agent-vault/project-commands.md`
   - `<repo>/agent-vault/lessons.md`
 
 If an existing root policy file does not have the managed marker, `update-project.sh` leaves it unchanged and reports a skip notice suggesting `--migrate-root`.
@@ -139,12 +141,14 @@ Generated projects get a starter `docs/design.md` that uses Mermaid fenced code 
 `new-project.sh` creates `<repo-path>/agent-vault/` with:
 - `shared-rules.md` (single source of truth for implementation rules)
 - `review-policy.md` (single source of truth for PR review guidelines, including required format for responding to review feedback)
-- `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` (policy files; `agent-vault/CLAUDE.md` and `agent-vault/GEMINI.md` import `shared-rules.md`, root wrappers import `review-policy.md`, and `AGENTS.md` inlines review guidance)
+- `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` (policy files; `agent-vault/CLAUDE.md` and `agent-vault/GEMINI.md` import `shared-rules.md`, `project-context.md`, and `project-commands.md`; root wrappers import `review-policy.md`; and `AGENTS.md` inlines review guidance)
 - Compatibility note: `AGENTS.md` files intentionally inline mirrored policy content for Codex review-path compatibility; this duplication is expected, but mirrored files should stay synchronized.
 - `README.md`
 - `context-log.md`
 - `plan.md`
 - `coding-standards.md`
+- `project-context.md`
+- `project-commands.md`
 - `decision-log.md`
 - `open-questions.md`
 - `lessons.md`
@@ -158,6 +162,6 @@ It also creates project-root files when missing:
 - `<repo-path>/GEMINI.md` -> imports `agent-vault/GEMINI.md` and `agent-vault/review-policy.md`
 - `<repo-path>/docs/design.md` -> starter architecture/design document with embedded Mermaid diagrams
 - `<repo-path>/.github/pull_request_template.md` -> standardized agent PR body template
-- Bootstrap behavior: `new-project.sh` hydrates project metadata placeholders (`repo_reference`, active branch, dates) in the baseline `agent-vault/` docs, seeds non-empty baseline content in required core docs (`agent-vault/README.md`, `plan.md`, `coding-standards.md`, and `context-log.md`), and copies scaffold helper docs such as `agent-vault/design-log/README.md` plus `docs/design.md`.
+- Bootstrap behavior: `new-project.sh` hydrates project metadata placeholders (`repo_reference`, active branch, dates) in the baseline `agent-vault/` docs, seeds non-empty baseline content in required core docs (`agent-vault/README.md`, `plan.md`, `coding-standards.md`, `context-log.md`, `project-context.md`, and `project-commands.md`), and copies scaffold helper docs such as `agent-vault/design-log/README.md` plus `docs/design.md`.
 
 If root files already exist, the script leaves them unchanged unless `--migrate-existing-root-md` is provided.

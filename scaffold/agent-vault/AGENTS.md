@@ -23,7 +23,8 @@
 - For non-trivial tasks (3+ steps or architectural decisions), outline a plan before implementing. Use `agent-vault/plan.md` for milestone-level planning. If implementation diverges significantly from the plan, stop and re-plan.
 
 ## Code Style
-- Prefer TypeScript over JavaScript.
+- Follow the primary language, framework, and toolchain guidance recorded in `agent-vault/coding-standards.md`.
+- If the repo has one dominant implementation language, prefer that language and its native tooling unless the task clearly requires otherwise.
 - Use meaningful variable names and avoid abbreviations.
 - Add comments only when the "why" is not obvious from the code.
 
@@ -104,6 +105,8 @@ When performing research or writing research-oriented documentation (design-log 
   - `agent-vault/context-log.md`
   - `agent-vault/plan.md`
   - `agent-vault/coding-standards.md`
+  - `agent-vault/project-context.md`
+  - `agent-vault/project-commands.md`
 - Skim `agent-vault/open-questions.md` for active blockers relevant to the task.
 - Skim `agent-vault/decision-log.md` for active decisions relevant to the task.
 - Read `agent-vault/lessons.md` (if it exists).
@@ -138,6 +141,7 @@ Before considering any change complete and before running git commit:
 - Read `docs/design.md` (or the project's main architecture/design document if named differently).
 - Determine whether the proposed changes modify, add to, or invalidate any component, layer, data flow, boundary, interface, or architectural invariant described there.
 - If yes: automatically propose and apply the corresponding updates to `docs/design.md` so it accurately reflects the new reality.
+- If `agent-vault/project-context.md` contains substantive architecture or runtime guidance, automatically propose and apply the corresponding updates there too so agents do not load stale context on the next session.
 - When diagrams are needed or updated, prefer Mermaid blocks in the Markdown document rather than screenshots or external image assets unless the project already uses another documented approach.
 - If no: explicitly state in your reasoning: "No impact on docs/design.md detected."
 
@@ -148,6 +152,7 @@ Before considering any change complete and before running git commit:
   - Required environment variables
   - API endpoints, request/response shapes, authentication flows
   - Project folder structure or important file locations
+- If setup, test, CLI, or operational commands are affected and `agent-vault/project-commands.md` contains substantive command guidance, propose and apply the corresponding updates there too.
 - If any of the above are affected: propose and apply corresponding updates to `README.md` (or `CONTRIBUTING.md` / `docs/usage.md` if more appropriate).
 - Keep changes concise, clear, and professionally formatted.
 
