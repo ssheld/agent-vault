@@ -116,6 +116,8 @@ for required in \
   "$vault_scaffold_dir/shared-rules.md" \
   "$vault_scaffold_dir/review-policy.md" \
   "$vault_scaffold_dir/handoff.md" \
+  "$vault_scaffold_dir/project-context.md" \
+  "$vault_scaffold_dir/project-commands.md" \
   "$vault_scaffold_dir/lessons.md" \
   "$vault_scaffold_dir/design-log/README.md" \
   "$vault_scaffold_dir/context/handoffs/README.md" \
@@ -480,6 +482,8 @@ sync_root_wrapper_if_managed "$root_scaffold_dir/CLAUDE.md" "$canonical_repo_pat
 sync_root_wrapper_if_managed "$root_scaffold_dir/GEMINI.md" "$canonical_repo_path/GEMINI.md" "$ROOT_GEMINI_MARKER"
 seed_if_missing "$root_scaffold_dir/.github/pull_request_template.md" "$canonical_repo_path/.github/pull_request_template.md"
 seed_if_missing "$root_scaffold_dir/docs/design.md" "$canonical_repo_path/docs/design.md"
+seed_if_missing "$vault_scaffold_dir/project-context.md" "$project_dir/project-context.md"
+seed_if_missing "$vault_scaffold_dir/project-commands.md" "$project_dir/project-commands.md"
 
 sync_managed_file "$vault_scaffold_dir/shared-rules.md" "$project_dir/shared-rules.md"
 sync_managed_file "$vault_scaffold_dir/review-policy.md" "$project_dir/review-policy.md"

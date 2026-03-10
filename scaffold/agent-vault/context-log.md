@@ -30,6 +30,7 @@ Create a standardized project note set for multi-agent development.
 #### State
 - Created project workspace in `agent-vault/`.
 - Added project home, context log, plan, coding standards, and open questions.
+- Added baseline project context and command reference files for agent session start.
 - Added session tracking via `agent-vault/daily/`, `agent-vault/design-log/`, `agent-vault/context/handoffs/`, and `agent-vault/context/scratchpad.md`.
 
 #### Decisions
@@ -47,4 +48,6 @@ Create a standardized project note set for multi-agent development.
 - `agent-vault/context-log.md`
 - `agent-vault/plan.md`
 - `agent-vault/coding-standards.md`
+- `agent-vault/project-context.md`
+- `agent-vault/project-commands.md`
 - `agent-vault/decision-log.md`

@@ -10,6 +10,8 @@
 ## Local Agent Workflow
 Project agent rules are defined in `agent-vault/AGENTS.md`.
 Read that file before making changes.
+Read `agent-vault/project-context.md` for repository architecture and runtime behavior.
+Read `agent-vault/project-commands.md` for setup, test, and operational commands.
 
 ## PR Authoring
 - For agent-authored pull requests, follow `agent-vault/AGENTS.md` section `PR Authoring Standards`.

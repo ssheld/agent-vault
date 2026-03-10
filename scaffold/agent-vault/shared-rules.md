@@ -18,7 +18,8 @@
 - For non-trivial tasks (3+ steps or architectural decisions), outline a plan before implementing. Use `agent-vault/plan.md` for milestone-level planning. If implementation diverges significantly from the plan, stop and re-plan.
 
 ## Code Style
-- Prefer TypeScript over JavaScript.
+- Follow the primary language, framework, and toolchain guidance recorded in `agent-vault/coding-standards.md`.
+- If the repo has one dominant implementation language, prefer that language and its native tooling unless the task clearly requires otherwise.
 - Use meaningful variable names and avoid abbreviations.
 - Add comments only when the "why" is not obvious from the code.
 
@@ -99,6 +100,8 @@ When performing research or writing research-oriented documentation (design-log 
   - `agent-vault/context-log.md`
   - `agent-vault/plan.md`
   - `agent-vault/coding-standards.md`
+  - `agent-vault/project-context.md`
+  - `agent-vault/project-commands.md`
 - Skim `agent-vault/open-questions.md` for active blockers relevant to the task.
 - Skim `agent-vault/decision-log.md` for active decisions relevant to the task.
 - Read `agent-vault/lessons.md` (if it exists).

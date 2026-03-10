@@ -36,6 +36,8 @@ last_updated:
 - Design doc: `docs/design.md`
 - Plan: `plan.md`
 - Coding standards: `coding-standards.md`
+- Project context: `project-context.md`
+- Project commands: `project-commands.md`
 - Context log: `context-log.md`
 - Open questions: `open-questions.md`
 - Decision log: `decision-log.md`

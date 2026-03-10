@@ -326,6 +326,8 @@ done
 
 for required in \
   "$scaffold_dir/handoff.md" \
+  "$scaffold_dir/project-context.md" \
+  "$scaffold_dir/project-commands.md" \
   "$scaffold_dir/design-log/README.md" \
   "$scaffold_dir/context/handoffs/README.md" \
   "$scaffold_dir/decisions/README.md" \

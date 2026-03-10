@@ -11,6 +11,9 @@
 - Preserve backward compatibility unless explicitly planned.
 
 ## Language and Framework Conventions
+- Primary language/runtime:
+  - Record the repo's default implementation language(s) and major runtime/toolchain here.
+  - Agents should treat this as the source of truth when choosing languages, frameworks, and tooling for new code.
 - Naming:
   - Use explicit, domain-oriented names over abbreviations.
   - Match terms used in `plan.md`, `README.md`, and user-facing docs.
