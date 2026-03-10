@@ -141,6 +141,7 @@ Before considering any change complete and before running git commit:
 - Read `docs/design.md` (or the project's main architecture/design document if named differently).
 - Determine whether the proposed changes modify, add to, or invalidate any component, layer, data flow, boundary, interface, or architectural invariant described there.
 - If yes: automatically propose and apply the corresponding updates to `docs/design.md` so it accurately reflects the new reality.
+- If `agent-vault/project-context.md` contains substantive architecture or runtime guidance, automatically propose and apply the corresponding updates there too so agents do not load stale context on the next session.
 - When diagrams are needed or updated, prefer Mermaid blocks in the Markdown document rather than screenshots or external image assets unless the project already uses another documented approach.
 - If no: explicitly state in your reasoning: "No impact on docs/design.md detected."
 
@@ -151,6 +152,7 @@ Before considering any change complete and before running git commit:
   - Required environment variables
   - API endpoints, request/response shapes, authentication flows
   - Project folder structure or important file locations
+- If setup, test, CLI, or operational commands are affected and `agent-vault/project-commands.md` contains substantive command guidance, propose and apply the corresponding updates there too.
 - If any of the above are affected: propose and apply corresponding updates to `README.md` (or `CONTRIBUTING.md` / `docs/usage.md` if more appropriate).
 - Keep changes concise, clear, and professionally formatted.
 
