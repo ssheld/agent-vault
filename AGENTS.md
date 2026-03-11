@@ -164,7 +164,7 @@ Rules:
 - Never present review feedback as if it is the human account owner's personal opinion.
 
 ### Canonical Templates
-Use these templates verbatim as the structural baseline.
+Use these templates as the structural baseline. Replace placeholders with the actual review values before posting.
 
 **Formal PR review body**
 ```md
@@ -179,7 +179,7 @@ Use these templates verbatim as the structural baseline.
 - ...
 
 ## Merge Recommendation
-Request Changes
+{Approve | Approve with Changes | Request Changes}
 
 ## Top Risks
 - ...
@@ -202,7 +202,7 @@ Formal review state unavailable: <reason>
 - ...
 
 ## Merge Recommendation
-Approve with Changes
+{Approve | Approve with Changes | Request Changes}
 
 ## Top Risks
 - ...
@@ -259,6 +259,7 @@ Confidence scores are optional for clear-cut findings (Critical severity almost 
 ### Review Summary Format
 - Begin with the attribution header.
 - Present findings first, ordered by severity.
+- When there are no findings above the confidence threshold, omit the numbered findings section and add `No findings above the confidence threshold.` immediately under the attribution header.
 - End each review with:
   - Strengths (1-3 things the PR does well)
   - Merge recommendation: Approve / Approve with Changes / Request Changes
