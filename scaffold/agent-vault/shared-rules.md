@@ -10,6 +10,12 @@
 - Map every finding to a status (`Resolved`, `Partially Resolved`, or `Not Changed`) with concrete evidence.
 - If pushing back, explain technical rationale and risk/tradeoff explicitly.
 
+## PR Review Posting
+- When asked to review a pull request, follow the project-root `AGENTS.md` review policy exactly.
+- Prefer a formal GitHub PR review whenever the platform/API allows it.
+- Use a standalone PR conversation comment only as fallback, and include `Formal review state unavailable: <reason>`.
+- Do not mix top-level review summaries with inline-comment markers, and do not use local filesystem paths in GitHub review comments.
+
 ## Core Principles
 - Treat documentation as source code: code and docs must always stay in sync.
 - Never propose or commit changes that break documentation consistency.

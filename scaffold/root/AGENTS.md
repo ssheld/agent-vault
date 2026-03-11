@@ -119,6 +119,11 @@ This repository uses AI agents and LLM-assisted development. Treat agent outputs
 
 ## Comment Style
 
+### Review Transport
+- Prefer a formal GitHub PR review whenever the platform/API allows it.
+- Use a standalone PR conversation comment only as fallback when a formal review cannot be submitted.
+- Use inline review comments only for actual file/line-specific findings. Do not imitate inline comments inside a top-level review body.
+
 ### Attribution (REQUIRED)
 All PR review comments are posted under the repository owner's GitHub account.
 To avoid confusion, every agent MUST clearly identify itself.
@@ -150,10 +155,79 @@ Example:
 
 Rules:
 - Use your actual model name and version (e.g., Claude Opus 4.6, Codex 5.3, Gemini 2.5 Pro).
+- If the exact model/version is unavailable, use the best identifier you have (e.g., "Claude" or "Codex").
 - Include the client tool when known (e.g., Claude Code, Codex CLI, Gemini CLI).
 - If you are leaving review feedback in a standalone PR conversation comment instead of a formal review, use the same `Review by ...` attribution header at the top of that comment.
+- If you are using a standalone PR conversation comment because formal review submission was unavailable, add `Formal review state unavailable: <reason>` immediately under the attribution header.
 - Never present review feedback as if it is the human account owner's personal opinion.
-- If you are uncertain of your exact model version, use the best identifier you have (e.g., "Claude" or "Codex").
+
+### Canonical Templates
+Use these templates verbatim as the structural baseline.
+
+**Formal PR review body**
+```md
+> 🤖 **Review by {Model Name}** · via {Client Tool}
+
+1. `path/to/file.py:123`
+
+   **Recommended** · High confidence — Brief finding title.
+   Short explanation.
+
+## Strengths
+- ...
+
+## Merge Recommendation
+Request Changes
+
+## Top Risks
+- ...
+
+## Suggested Additional Tests
+- ...
+```
+
+**Standalone PR conversation comment used as review fallback**
+```md
+> 🤖 **Review by {Model Name}** · via {Client Tool}
+Formal review state unavailable: <reason>
+
+1. `path/to/file.py:123`
+
+   **Recommended** · High confidence — Brief finding title.
+   Short explanation.
+
+## Strengths
+- ...
+
+## Merge Recommendation
+Approve with Changes
+
+## Top Risks
+- ...
+
+## Suggested Additional Tests
+- ...
+```
+
+**Inline review comment**
+```md
+🤖 `{Model Name}`
+
+**Recommended** · High confidence — Brief finding title.
+Short explanation.
+```
+
+### GitHub Reference Rules
+- Never use local filesystem paths such as `/Users/...` in GitHub review comments.
+- Use GitHub-usable references instead:
+  - repo-relative `path:line`
+  - GitHub links
+  - true inline review comments on the affected lines
+- For top-level review bodies and standalone review comments, prefer repo-relative `path:line` references unless a GitHub link adds real value.
+
+### Mixed-Mode Formatting Prohibition
+- Do not include inline-comment markers like `🤖 \`{Model Name}\`` inside a top-level review body or standalone PR review comment.
+- Do not emulate file-by-file inline comments inside a review summary when the content is not actually being posted inline.
 
 ### Severity Labels
 When generating review comments:
@@ -181,15 +255,35 @@ The catch block on line 42 discards the exception without logging.
 Confidence scores are optional for clear-cut findings (Critical severity almost always implies high confidence). Use them when the finding involves judgment or ambiguity.
 
 ### Review Summary Format
+- Begin with the attribution header.
+- Present findings first, ordered by severity.
 - End each review with:
   - Strengths (1-3 things the PR does well)
   - Merge recommendation: Approve / Approve with Changes / Request Changes
   - Top risks (1-3 bullets)
   - Suggested additional tests (if any)
 
+### Review Posting Checklist
+Before posting any review or review-like comment, verify:
+- the correct transport was used:
+  - formal PR review when available
+  - standalone PR comment only when fallback is required
+- the attribution header is present
+- the actual model/version is used when known
+- findings appear first and are ordered by severity
+- the required footer sections are present:
+  - Strengths
+  - Merge recommendation
+  - Top risks
+  - Suggested additional tests
+- there are no local filesystem paths
+- there is no mixed top-level/inline formatting
+- sub-80 findings are suppressed unless they represent a security or data-safety risk
+
 ### Review State Fallback
 If the platform or API blocks the intended formal review state (e.g., permission restrictions, self-review limitations, role constraints):
-- Submit a `COMMENT` review instead.
+- Prefer a `COMMENT` review submission if the platform/API supports it.
+- Otherwise use a standalone PR conversation comment.
 - Keep the same textual merge recommendation in the review body (`Approve`, `Approve with Changes`, or `Request Changes`).
 - Add a one-line note: `Formal review state unavailable: <reason>`.
 
