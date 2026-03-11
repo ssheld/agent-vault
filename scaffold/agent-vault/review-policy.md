@@ -203,6 +203,8 @@ Short explanation.
   - GitHub links
   - true inline review comments on the affected lines
 - For top-level review bodies and standalone review comments, prefer repo-relative `path:line` references unless a GitHub link adds real value.
+- When a single finding spans multiple locations, list each affected location separately using `path:line` references.
+- Avoid dense range-heavy notation in top-level review bodies such as `path/to/file.py:18-35 and other/file.py:95-99, 282-298`; if precise ranges matter, use inline comments or explain the scope in prose after concise `path:line` anchors.
 
 ### Mixed-Mode Formatting Prohibition
 - Do not include inline-comment markers like `🤖 \`{Model Name}\`` inside a top-level review body or standalone PR review comment.
