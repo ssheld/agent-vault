@@ -125,6 +125,7 @@ This repository uses AI agents and LLM-assisted development. Treat agent outputs
 - Prefer a formal GitHub PR review whenever the platform/API allows it.
 - Use a standalone PR conversation comment only as fallback when a formal review cannot be submitted.
 - Use inline review comments only for actual file/line-specific findings. Do not imitate inline comments inside a top-level review body.
+- When the platform supports inline review comments, prefer them for concrete file/line-specific findings; use the top-level review body for cross-cutting observations and the required summary sections.
 
 ### Attribution (REQUIRED)
 All PR review comments are posted under the repository owner's GitHub account.
