@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=./lib/tracked-hooks.sh
+source "$script_dir/lib/tracked-hooks.sh"
+
 usage() {
   echo "Usage: $0 <project-name> <repo-path> [--migrate-existing-root-md]"
   echo "Example: $0 payments-api ~/workspaces/payments-api --migrate-existing-root-md"
@@ -296,7 +300,6 @@ if [[ -z "$slug" ]]; then
   exit 1
 fi
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 template_root="$(cd "$script_dir/.." && pwd -P)"
 scaffold_dir="$template_root/scaffold/agent-vault"
 root_scaffold_dir="$template_root/scaffold/root"
@@ -448,33 +451,5 @@ seed_root_file_if_missing "$root_scaffold_dir/.github/pull_request_template.md" 
 seed_root_file_if_missing "$root_scaffold_dir/docs/design.md" "$canonical_repo_path/docs/design.md"
 
 ensure_managed_gitignore_entries "$canonical_repo_path"
-
-configure_tracked_hooks_path() {
-  local repo_root="$1"
-  local desired_hooks_path="agent-vault/_assets/hooks"
-  local current_hooks_path=""
-
-  if ! git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    return
-  fi
-
-  current_hooks_path="$(git -C "$repo_root" config --local --get core.hooksPath 2>/dev/null || true)"
-
-  if [[ -z "$current_hooks_path" ]]; then
-    git -C "$repo_root" config --local core.hooksPath "$desired_hooks_path"
-    echo "Enabled tracked metadata hook via core.hooksPath=$desired_hooks_path"
-    return
-  fi
-
-  if [[ "$current_hooks_path" == "$desired_hooks_path" ]]; then
-    echo "Tracked metadata hook already enabled via core.hooksPath=$desired_hooks_path"
-    return
-  fi
-
-  echo "Notice: core.hooksPath already set to '$current_hooks_path'; left unchanged." >&2
-  echo "To use the tracked agent-vault hook in this clone, run:" >&2
-  echo "  git -C \"$repo_root\" config core.hooksPath $desired_hooks_path" >&2
-}
-
-echo "Created project notes at: $project_dir"
 configure_tracked_hooks_path "$canonical_repo_path"
+echo "Created project notes at: $project_dir"

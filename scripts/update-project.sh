@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=./lib/tracked-hooks.sh
+source "$script_dir/lib/tracked-hooks.sh"
+
 usage() {
   echo "Usage: $0 <repo-path> [--dry-run] [--migrate-root] [--sync-templates]"
   echo "Example: $0 ~/workspaces/harrier --dry-run --sync-templates"
@@ -99,7 +103,6 @@ if [[ ! -d "$project_dir" ]]; then
   exit 1
 fi
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 template_root="$(cd "$script_dir/.." && pwd -P)"
 vault_scaffold_dir="$template_root/scaffold/agent-vault"
 root_scaffold_dir="$template_root/scaffold/root"
@@ -479,38 +482,6 @@ ensure_managed_gitignore_entries() {
   fi
 }
 
-configure_tracked_hooks_path() {
-  local repo_root="$1"
-  local desired_hooks_path="agent-vault/_assets/hooks"
-  local current_hooks_path=""
-
-  if ! git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    return
-  fi
-
-  current_hooks_path="$(git -C "$repo_root" config --local --get core.hooksPath 2>/dev/null || true)"
-
-  if [[ -z "$current_hooks_path" ]]; then
-    if [[ "$dry_run" == "true" ]]; then
-      echo "Optional: enable the tracked metadata hook in this clone:"
-      echo "  git -C \"$repo_root\" config core.hooksPath $desired_hooks_path"
-    else
-      git -C "$repo_root" config --local core.hooksPath "$desired_hooks_path"
-      echo "Enabled tracked metadata hook via core.hooksPath=$desired_hooks_path"
-    fi
-    return
-  fi
-
-  if [[ "$current_hooks_path" == "$desired_hooks_path" ]]; then
-    echo "Tracked metadata hook already enabled via core.hooksPath=$desired_hooks_path"
-    return
-  fi
-
-  echo "Notice: core.hooksPath already set to '$current_hooks_path'; left unchanged." >&2
-  echo "To use the tracked agent-vault hook in this clone, run:" >&2
-  echo "  git -C \"$repo_root\" config core.hooksPath $desired_hooks_path" >&2
-}
-
 preflight_symlink_checks
 
 sync_root_wrapper_if_managed "$root_scaffold_dir/AGENTS.md" "$canonical_repo_path/AGENTS.md" "$ROOT_AGENTS_MARKER"
@@ -553,4 +524,4 @@ elif [[ "$backed_up" -gt 0 ]]; then
   echo "Backups saved under: $backup_dir"
 fi
 
-configure_tracked_hooks_path "$canonical_repo_path"
+configure_tracked_hooks_path "$canonical_repo_path" "$dry_run"

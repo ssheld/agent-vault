@@ -48,6 +48,8 @@ init_repo() {
 
   mkdir -p "$repo_path"
   git -C "$repo_path" init >/dev/null
+  git -C "$repo_path" config user.name "Agent Vault Test"
+  git -C "$repo_path" config user.email "agent-vault-tests@example.com"
 }
 
 run_hook_expect_failure() {
@@ -88,6 +90,7 @@ assert_output_contains "$failure_output" "agent-vault metadata gate failed."
 assert_output_contains "$failure_output" "stage agent-vault/context-log.md"
 assert_output_contains "$failure_output" "stage one note under agent-vault/daily/"
 assert_output_contains "$failure_output" "stage one note under agent-vault/design-log/"
+(cd "$hook_repo" && AGENT_VAULT_SKIP_METADATA_GATE=1 agent-vault/_assets/hooks/pre-commit)
 
 printf '\nHook coverage update.\n' >> "$hook_repo/agent-vault/context-log.md"
 cat <<EOF > "$hook_repo/agent-vault/daily/$today.md"
@@ -136,5 +139,54 @@ if [[ "$(git -C "$custom_hooks_repo" config --local --get core.hooksPath)" != ".
   echo "Expected custom core.hooksPath to remain unchanged." >&2
   exit 1
 fi
+
+global_hooks_repo="$tmp_root/global-hooks-path"
+global_hooks_config="$tmp_root/global-hooks.gitconfig"
+init_repo "$global_hooks_repo"
+git config --file "$global_hooks_config" core.hooksPath .global-hooks
+GIT_CONFIG_GLOBAL="$global_hooks_config" "$repo_root/scripts/new-project.sh" "hook-test" "$global_hooks_repo" >/dev/null
+if git -C "$global_hooks_repo" config --local --get core.hooksPath >/dev/null 2>&1; then
+  echo "Expected inherited global core.hooksPath to remain non-local." >&2
+  exit 1
+fi
+if [[ "$(GIT_CONFIG_GLOBAL="$global_hooks_config" git -C "$global_hooks_repo" config --get core.hooksPath)" != ".global-hooks" ]]; then
+  echo "Expected inherited global core.hooksPath to remain effective." >&2
+  exit 1
+fi
+
+deletion_repo="$tmp_root/deleted-metadata-does-not-count"
+init_repo "$deletion_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$deletion_repo" >/dev/null
+git -C "$deletion_repo" add .
+(cd "$deletion_repo" && AGENT_VAULT_SKIP_METADATA_GATE=1 git commit -m "Bootstrap hook test fixture" >/dev/null)
+mkdir -p "$deletion_repo/src"
+printf 'print("old")\n' > "$deletion_repo/src/app.py"
+printf '\nDeletion fixture context.\n' >> "$deletion_repo/agent-vault/context-log.md"
+cat <<EOF > "$deletion_repo/agent-vault/daily/$today.md"
+# Daily Note
+
+- Seed metadata for deletion coverage.
+EOF
+cat <<EOF > "$deletion_repo/agent-vault/design-log/$today-0200-delete-coverage.md"
+# Design Log
+
+- Seed metadata for deletion coverage.
+EOF
+git -C "$deletion_repo" add \
+  src/app.py \
+  agent-vault/context-log.md \
+  "agent-vault/daily/$today.md" \
+  "agent-vault/design-log/$today-0200-delete-coverage.md"
+(cd "$deletion_repo" && AGENT_VAULT_SKIP_METADATA_GATE=1 git commit -m "Seed deletion coverage metadata" >/dev/null)
+printf 'print("new")\n' > "$deletion_repo/src/app.py"
+git -C "$deletion_repo" add src/app.py
+git -C "$deletion_repo" rm -f \
+  agent-vault/context-log.md \
+  "agent-vault/daily/$today.md" \
+  "agent-vault/design-log/$today-0200-delete-coverage.md" >/dev/null
+deletion_failure_output="$(run_hook_expect_failure "$deletion_repo")"
+assert_output_contains "$deletion_failure_output" "stage agent-vault/context-log.md"
+assert_output_contains "$deletion_failure_output" "stage one note under agent-vault/daily/"
+assert_output_contains "$deletion_failure_output" "stage one note under agent-vault/design-log/"
 
 echo "session metadata hook regression checks passed."

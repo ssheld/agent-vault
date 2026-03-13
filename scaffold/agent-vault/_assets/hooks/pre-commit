@@ -46,18 +46,18 @@ is_runtime_note_file() {
   esac
 }
 
-staged_files=()
+all_staged_files=()
 while IFS= read -r file_path; do
   [[ -n "$file_path" ]] || continue
-  staged_files+=("$file_path")
+  all_staged_files+=("$file_path")
 done < <(git diff --cached --name-only --diff-filter=ACDMRTUXB)
 
-if [[ "${#staged_files[@]}" -eq 0 ]]; then
+if [[ "${#all_staged_files[@]}" -eq 0 ]]; then
   exit 0
 fi
 
 requires_metadata_gate="false"
-for file_path in "${staged_files[@]}"; do
+for file_path in "${all_staged_files[@]}"; do
   if ! is_runtime_note_file "$file_path"; then
     requires_metadata_gate="true"
     break
@@ -72,7 +72,13 @@ has_context_log="false"
 has_daily_note="false"
 has_design_log="false"
 
-for file_path in "${staged_files[@]}"; do
+non_deleted_staged_files=()
+while IFS= read -r file_path; do
+  [[ -n "$file_path" ]] || continue
+  non_deleted_staged_files+=("$file_path")
+done < <(git diff --cached --name-only --diff-filter=ACMRTUXB)
+
+for file_path in "${non_deleted_staged_files[@]}"; do
   case "$file_path" in
     agent-vault/context-log.md)
       has_context_log="true"
