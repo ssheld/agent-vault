@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ "${AGENT_VAULT_SKIP_METADATA_GATE:-}" == "1" ]]; then
+  exit 0
+fi
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -z "$repo_root" ]]; then
+  exit 0
+fi
+
+cd "$repo_root"
+
+if [[ ! -d "agent-vault" ]]; then
+  exit 0
+fi
+
+is_runtime_note_file() {
+  local file_path="$1"
+
+  case "$file_path" in
+    agent-vault/context-log.md|agent-vault/open-questions.md|agent-vault/decision-log.md|agent-vault/lessons.md)
+      return 0
+      ;;
+    agent-vault/daily/*.md)
+      [[ "$file_path" != "agent-vault/daily/README.md" ]]
+      return
+      ;;
+    agent-vault/design-log/*.md)
+      [[ "$file_path" != "agent-vault/design-log/README.md" && "$file_path" != "agent-vault/design-log/bootstrap.md" ]]
+      return
+      ;;
+    agent-vault/context/handoffs/*.md)
+      [[ "$file_path" != "agent-vault/context/handoffs/README.md" ]]
+      return
+      ;;
+    agent-vault/decisions/*.md)
+      [[ "$file_path" != "agent-vault/decisions/README.md" ]]
+      return
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+all_staged_files=()
+while IFS= read -r file_path; do
+  [[ -n "$file_path" ]] || continue
+  all_staged_files+=("$file_path")
+done < <(git diff --cached --name-only --diff-filter=ACDMRTUXB)
+
+if [[ "${#all_staged_files[@]}" -eq 0 ]]; then
+  exit 0
+fi
+
+requires_metadata_gate="false"
+for file_path in "${all_staged_files[@]}"; do
+  if ! is_runtime_note_file "$file_path"; then
+    requires_metadata_gate="true"
+    break
+  fi
+done
+
+if [[ "$requires_metadata_gate" != "true" ]]; then
+  exit 0
+fi
+
+has_context_log="false"
+has_daily_note="false"
+has_design_log="false"
+
+non_deleted_staged_files=()
+while IFS= read -r file_path; do
+  [[ -n "$file_path" ]] || continue
+  non_deleted_staged_files+=("$file_path")
+done < <(git diff --cached --name-only --diff-filter=ACMRTUXB)
+
+for file_path in "${non_deleted_staged_files[@]}"; do
+  case "$file_path" in
+    agent-vault/context-log.md)
+      has_context_log="true"
+      ;;
+    agent-vault/daily/*.md)
+      if [[ "$file_path" != "agent-vault/daily/README.md" ]]; then
+        has_daily_note="true"
+      fi
+      ;;
+    agent-vault/design-log/*.md)
+      if [[ "$file_path" != "agent-vault/design-log/README.md" && "$file_path" != "agent-vault/design-log/bootstrap.md" ]]; then
+        has_design_log="true"
+      fi
+      ;;
+  esac
+done
+
+missing_items=()
+if [[ "$has_context_log" != "true" ]]; then
+  missing_items+=("stage agent-vault/context-log.md")
+fi
+if [[ "$has_daily_note" != "true" ]]; then
+  missing_items+=("stage one note under agent-vault/daily/")
+fi
+if [[ "$has_design_log" != "true" ]]; then
+  missing_items+=("stage one note under agent-vault/design-log/")
+fi
+
+if [[ "${#missing_items[@]}" -eq 0 ]]; then
+  exit 0
+fi
+
+echo "agent-vault metadata gate failed." >&2
+echo "Substantive staged changes require baseline session artifacts before commit:" >&2
+for item in "${missing_items[@]}"; do
+  echo "- $item" >&2
+done
+echo >&2
+echo "Also stage any conditionally required artifacts for this session:" >&2
+echo "- agent-vault/open-questions.md" >&2
+echo "- agent-vault/decision-log.md plus a decision record" >&2
+echo "- agent-vault/context/handoffs/" >&2
+echo "- agent-vault/lessons.md" >&2
+echo >&2
+echo "If this commit is intentionally trivial, bypass explicitly:" >&2
+echo "AGENT_VAULT_SKIP_METADATA_GATE=1 git commit ..." >&2
+
+exit 1

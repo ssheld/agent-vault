@@ -1,0 +1,35 @@
+name: Scaffold Regression Checks
+
+on:
+  pull_request:
+    paths:
+      - "README.md"
+      - "scaffold/agent-vault/**"
+      - "scripts/new-project.sh"
+      - "scripts/update-project.sh"
+      - "scripts/test-gitignore-management.sh"
+      - "scripts/test-session-metadata-hook.sh"
+      - ".github/workflows/scaffold-regression-checks.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "README.md"
+      - "scaffold/agent-vault/**"
+      - "scripts/new-project.sh"
+      - "scripts/update-project.sh"
+      - "scripts/test-gitignore-management.sh"
+      - "scripts/test-session-metadata-hook.sh"
+      - ".github/workflows/scaffold-regression-checks.yml"
+  workflow_dispatch:
+
+jobs:
+  scaffold-regression-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Verify managed .gitignore handling
+        run: bash scripts/test-gitignore-management.sh
+      - name: Verify session metadata hook behavior
+        run: bash scripts/test-session-metadata-hook.sh

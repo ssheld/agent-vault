@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=./lib/tracked-hooks.sh
+source "$script_dir/lib/tracked-hooks.sh"
+
 usage() {
   echo "Usage: $0 <project-name> <repo-path> [--migrate-existing-root-md]"
   echo "Example: $0 payments-api ~/workspaces/payments-api --migrate-existing-root-md"
@@ -296,7 +300,6 @@ if [[ -z "$slug" ]]; then
   exit 1
 fi
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 template_root="$(cd "$script_dir/.." && pwd -P)"
 scaffold_dir="$template_root/scaffold/agent-vault"
 root_scaffold_dir="$template_root/scaffold/root"
@@ -328,6 +331,8 @@ for required in \
   "$scaffold_dir/handoff.md" \
   "$scaffold_dir/project-context.md" \
   "$scaffold_dir/project-commands.md" \
+  "$scaffold_dir/_assets/hooks/README.md" \
+  "$scaffold_dir/_assets/hooks/pre-commit" \
   "$scaffold_dir/design-log/README.md" \
   "$scaffold_dir/context/handoffs/README.md" \
   "$scaffold_dir/decisions/README.md" \
@@ -446,5 +451,5 @@ seed_root_file_if_missing "$root_scaffold_dir/.github/pull_request_template.md" 
 seed_root_file_if_missing "$root_scaffold_dir/docs/design.md" "$canonical_repo_path/docs/design.md"
 
 ensure_managed_gitignore_entries "$canonical_repo_path"
-
+configure_tracked_hooks_path "$canonical_repo_path"
 echo "Created project notes at: $project_dir"
