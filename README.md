@@ -46,7 +46,10 @@ The generated vault is plain Markdown and works directly in Obsidian.
    - Example: `./scripts/update-project.sh ~/workspaces/harrier`
    - To migrate unmanaged root wrappers to managed versions:
      - `./scripts/update-project.sh <repo-path> --migrate-root`
-4. Commit generated or updated files in the target project repo.
+4. `new-project.sh` and `update-project.sh` automatically enable the tracked metadata hook in the current clone when `core.hooksPath` is not already customized.
+5. For additional clones, or when you want to opt into the tracked hook manually:
+   - `git -C <repo-path> config core.hooksPath agent-vault/_assets/hooks`
+6. Commit generated or updated files in the target project repo.
 
 This repo should stay template-only. Do not store project-specific session logs here.
 
@@ -72,6 +75,13 @@ To prevent accidental drift, run:
 
 CI also enforces this via `.github/workflows/policy-mirror-check.yml` on pull requests and pushes to `main`.
 
+## Scaffold Regression Checks
+Run the scaffold regression scripts locally when changing bootstrap, sync, or tracked hook behavior:
+- `bash scripts/test-gitignore-management.sh`
+- `bash scripts/test-session-metadata-hook.sh`
+
+CI also runs these checks via `.github/workflows/scaffold-regression-checks.yml`.
+
 ## Updating Existing Repos
 `update-project.sh` updates these managed scaffold files:
 - Always managed:
@@ -81,6 +91,8 @@ CI also enforces this via `.github/workflows/policy-mirror-check.yml` on pull re
   - `<repo>/agent-vault/CLAUDE.md`
   - `<repo>/agent-vault/GEMINI.md`
   - `<repo>/agent-vault/handoff.md`
+  - `<repo>/agent-vault/_assets/hooks/README.md`
+  - `<repo>/agent-vault/_assets/hooks/pre-commit`
   - `<repo>/agent-vault/design-log/README.md`
   - `<repo>/agent-vault/context/handoffs/README.md`
   - `<repo>/agent-vault/decisions/README.md`
@@ -107,6 +119,9 @@ When running `update-project.sh` with `--migrate-root`, unmanaged root wrappers 
 
 When a managed file changes, the script backs up the previous version under:
 - `<repo>/agent-vault/context/updates/<timestamp>/...`
+
+Generated projects auto-enable the tracked metadata gate in the clone where `new-project.sh` or `update-project.sh` runs, unless `core.hooksPath` is already set to something else. Additional clones can enable it with:
+- `git -C <repo-path> config core.hooksPath agent-vault/_assets/hooks`
 
 Both scripts also ensure root `.gitignore` includes managed local-only ignore entries (added only when missing):
 - `.obsidian/workspace.json`
@@ -153,7 +168,7 @@ Generated projects get a starter `docs/design.md` that uses Mermaid fenced code 
 - `open-questions.md`
 - `lessons.md`
 - `handoff.md`
-- `daily/`, `context/`, `design-log/`, `decisions/`, `_assets/`
+- `daily/`, `context/`, `design-log/`, `decisions/`, `_assets/` (including the optional tracked `pre-commit` hook under `agent-vault/_assets/hooks/`)
 - `Templates/` (copied from template source; instantiated notes belong outside this folder)
 
 It also creates project-root files when missing:

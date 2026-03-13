@@ -127,13 +127,15 @@ When performing research or writing research-oriented documentation (design-log 
 - If a durable decision was made, create or update the corresponding decision record and `agent-vault/decision-log.md`.
 - If handing off, add a note in `agent-vault/context/handoffs/`.
 - If the user corrected a mistake during this session, add an entry to `agent-vault/lessons.md` describing the mistake pattern and a preventive rule.
+- Treat these updates as a commit gate for substantive work, not as optional cleanup after the code is already done.
 
 ## Completion Verification - MUST follow before marking any task done
 Before reporting a task as finished:
 1. Prove it works: run relevant tests, check logs, or demonstrate the changed behavior.
 2. Diff against the base branch to confirm only intended changes are included.
-3. Ask yourself: "Would a senior engineer approve this?" If not, fix it first.
-4. If verification is not possible (no test suite, no runnable environment), explicitly state what was checked and what remains unverified.
+3. List the `agent-vault` artifacts created or updated this session, or explicitly state why no metadata update was required (for example, a trivial one-off request).
+4. Ask yourself: "Would a senior engineer approve this?" If not, fix it first.
+5. If verification is not possible (no test suite, no runnable environment), explicitly state what was checked and what remains unverified.
 
 ## Pre-Commit Checklist - MUST follow before every commit or patch application
 Before considering any change complete and before running git commit:
@@ -164,6 +166,19 @@ Before considering any change complete and before running git commit:
   - "Documentation is consistent - design.md and README.md were checked and need no changes."
   - "Updated docs/design.md to reflect new [component/flow]."
   - "Updated README.md: added/edited [specific section]."
+
+4. Agent-Vault Metadata Gate
+- For substantive work, do not run `git commit` until the staged diff includes:
+  - `agent-vault/context-log.md`
+  - one daily note in `agent-vault/daily/`
+  - one session note in `agent-vault/design-log/`
+- Also stage any conditionally required artifacts from this session:
+  - `agent-vault/open-questions.md` when unresolved items remain
+  - `agent-vault/decision-log.md` plus the decision record when a durable decision was made
+  - `agent-vault/context/handoffs/` when handing off unfinished work
+  - `agent-vault/lessons.md` when a corrected mistake should become a durable prevention rule
+- If the repo enables the tracked hook at `agent-vault/_assets/hooks/pre-commit`, keep it enabled via `git config core.hooksPath agent-vault/_assets/hooks`.
+- If a change is truly trivial and should not update project memory, make that an explicit decision and say so in your final summary instead of silently skipping the metadata step.
 
 ## Additional Guardrails
 - Prefer explicit diffs over whole-file rewrites when updating docs.

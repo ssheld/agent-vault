@@ -119,6 +119,8 @@ for required in \
   "$vault_scaffold_dir/project-context.md" \
   "$vault_scaffold_dir/project-commands.md" \
   "$vault_scaffold_dir/lessons.md" \
+  "$vault_scaffold_dir/_assets/hooks/README.md" \
+  "$vault_scaffold_dir/_assets/hooks/pre-commit" \
   "$vault_scaffold_dir/design-log/README.md" \
   "$vault_scaffold_dir/context/handoffs/README.md" \
   "$vault_scaffold_dir/decisions/README.md" \
@@ -189,6 +191,8 @@ preflight_symlink_checks() {
   assert_not_symlink "$project_dir/shared-rules.md" "agent-vault/shared-rules.md"
   assert_not_symlink "$project_dir/review-policy.md" "agent-vault/review-policy.md"
   assert_not_symlink "$project_dir/handoff.md" "agent-vault/handoff.md"
+  assert_not_symlink "$project_dir/_assets/hooks/README.md" "agent-vault/_assets/hooks/README.md"
+  assert_not_symlink "$project_dir/_assets/hooks/pre-commit" "agent-vault/_assets/hooks/pre-commit"
   assert_not_symlink "$project_dir/design-log/README.md" "agent-vault/design-log/README.md"
   assert_not_symlink "$project_dir/context/handoffs/README.md" "agent-vault/context/handoffs/README.md"
   assert_not_symlink "$project_dir/decisions/README.md" "agent-vault/decisions/README.md"
@@ -475,6 +479,38 @@ ensure_managed_gitignore_entries() {
   fi
 }
 
+configure_tracked_hooks_path() {
+  local repo_root="$1"
+  local desired_hooks_path="agent-vault/_assets/hooks"
+  local current_hooks_path=""
+
+  if ! git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    return
+  fi
+
+  current_hooks_path="$(git -C "$repo_root" config --local --get core.hooksPath 2>/dev/null || true)"
+
+  if [[ -z "$current_hooks_path" ]]; then
+    if [[ "$dry_run" == "true" ]]; then
+      echo "Optional: enable the tracked metadata hook in this clone:"
+      echo "  git -C \"$repo_root\" config core.hooksPath $desired_hooks_path"
+    else
+      git -C "$repo_root" config --local core.hooksPath "$desired_hooks_path"
+      echo "Enabled tracked metadata hook via core.hooksPath=$desired_hooks_path"
+    fi
+    return
+  fi
+
+  if [[ "$current_hooks_path" == "$desired_hooks_path" ]]; then
+    echo "Tracked metadata hook already enabled via core.hooksPath=$desired_hooks_path"
+    return
+  fi
+
+  echo "Notice: core.hooksPath already set to '$current_hooks_path'; left unchanged." >&2
+  echo "To use the tracked agent-vault hook in this clone, run:" >&2
+  echo "  git -C \"$repo_root\" config core.hooksPath $desired_hooks_path" >&2
+}
+
 preflight_symlink_checks
 
 sync_root_wrapper_if_managed "$root_scaffold_dir/AGENTS.md" "$canonical_repo_path/AGENTS.md" "$ROOT_AGENTS_MARKER"
@@ -491,6 +527,8 @@ sync_managed_file "$vault_scaffold_dir/AGENTS.md" "$project_dir/AGENTS.md"
 sync_managed_file "$vault_scaffold_dir/CLAUDE.md" "$project_dir/CLAUDE.md"
 sync_managed_file "$vault_scaffold_dir/GEMINI.md" "$project_dir/GEMINI.md"
 sync_managed_file "$vault_scaffold_dir/handoff.md" "$project_dir/handoff.md"
+sync_managed_file "$vault_scaffold_dir/_assets/hooks/README.md" "$project_dir/_assets/hooks/README.md"
+sync_managed_file "$vault_scaffold_dir/_assets/hooks/pre-commit" "$project_dir/_assets/hooks/pre-commit"
 sync_managed_file "$vault_scaffold_dir/design-log/README.md" "$project_dir/design-log/README.md"
 sync_managed_file "$vault_scaffold_dir/context/handoffs/README.md" "$project_dir/context/handoffs/README.md"
 sync_managed_file "$vault_scaffold_dir/decisions/README.md" "$project_dir/decisions/README.md"
@@ -514,3 +552,5 @@ if [[ "$dry_run" == "true" ]]; then
 elif [[ "$backed_up" -gt 0 ]]; then
   echo "Backups saved under: $backup_dir"
 fi
+
+configure_tracked_hooks_path "$canonical_repo_path"

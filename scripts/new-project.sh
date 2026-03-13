@@ -328,6 +328,8 @@ for required in \
   "$scaffold_dir/handoff.md" \
   "$scaffold_dir/project-context.md" \
   "$scaffold_dir/project-commands.md" \
+  "$scaffold_dir/_assets/hooks/README.md" \
+  "$scaffold_dir/_assets/hooks/pre-commit" \
   "$scaffold_dir/design-log/README.md" \
   "$scaffold_dir/context/handoffs/README.md" \
   "$scaffold_dir/decisions/README.md" \
@@ -447,4 +449,32 @@ seed_root_file_if_missing "$root_scaffold_dir/docs/design.md" "$canonical_repo_p
 
 ensure_managed_gitignore_entries "$canonical_repo_path"
 
+configure_tracked_hooks_path() {
+  local repo_root="$1"
+  local desired_hooks_path="agent-vault/_assets/hooks"
+  local current_hooks_path=""
+
+  if ! git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    return
+  fi
+
+  current_hooks_path="$(git -C "$repo_root" config --local --get core.hooksPath 2>/dev/null || true)"
+
+  if [[ -z "$current_hooks_path" ]]; then
+    git -C "$repo_root" config --local core.hooksPath "$desired_hooks_path"
+    echo "Enabled tracked metadata hook via core.hooksPath=$desired_hooks_path"
+    return
+  fi
+
+  if [[ "$current_hooks_path" == "$desired_hooks_path" ]]; then
+    echo "Tracked metadata hook already enabled via core.hooksPath=$desired_hooks_path"
+    return
+  fi
+
+  echo "Notice: core.hooksPath already set to '$current_hooks_path'; left unchanged." >&2
+  echo "To use the tracked agent-vault hook in this clone, run:" >&2
+  echo "  git -C \"$repo_root\" config core.hooksPath $desired_hooks_path" >&2
+}
+
 echo "Created project notes at: $project_dir"
+configure_tracked_hooks_path "$canonical_repo_path"
