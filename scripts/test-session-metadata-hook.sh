@@ -189,4 +189,30 @@ assert_output_contains "$deletion_failure_output" "stage agent-vault/context-log
 assert_output_contains "$deletion_failure_output" "stage one note under agent-vault/daily/"
 assert_output_contains "$deletion_failure_output" "stage one note under agent-vault/design-log/"
 
+# shellcheck source=./lib/tracked-hooks.sh
+source "$script_dir/lib/tracked-hooks.sh"
+
+custom_rc_repo="$tmp_root/custom-hooks-returns-nonzero"
+init_repo "$custom_rc_repo"
+git -C "$custom_rc_repo" config --local core.hooksPath .githooks
+custom_rc=0
+configure_tracked_hooks_path "$custom_rc_repo" || custom_rc=$?
+if [[ "$custom_rc" -eq 0 ]]; then
+  echo "Expected configure_tracked_hooks_path to return non-zero when custom core.hooksPath is set." >&2
+  exit 1
+fi
+
+success_rc_repo="$tmp_root/activation-returns-zero"
+init_repo "$success_rc_repo"
+success_rc=0
+configure_tracked_hooks_path "$success_rc_repo" || success_rc=$?
+if [[ "$success_rc" -ne 0 ]]; then
+  echo "Expected configure_tracked_hooks_path to return zero on successful activation." >&2
+  exit 1
+fi
+if [[ "$(git -C "$success_rc_repo" config --local --get core.hooksPath)" != "agent-vault/_assets/hooks" ]]; then
+  echo "Expected core.hooksPath to be set after successful activation." >&2
+  exit 1
+fi
+
 echo "session metadata hook regression checks passed."

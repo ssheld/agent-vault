@@ -7,7 +7,7 @@ configure_tracked_hooks_path() {
   local current_hooks_path=""
 
   if ! git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    return
+    return 1
   fi
 
   current_hooks_path="$(git -C "$repo_root" config --get core.hooksPath 2>/dev/null || true)"
@@ -17,17 +17,22 @@ configure_tracked_hooks_path() {
       echo "Dry run: would enable tracked metadata hook via core.hooksPath=$desired_hooks_path"
     else
       git -C "$repo_root" config --local core.hooksPath "$desired_hooks_path"
+      if [[ "$(git -C "$repo_root" config --get core.hooksPath 2>/dev/null)" != "$desired_hooks_path" ]]; then
+        echo "Warning: core.hooksPath was set but read-back does not match expected value '$desired_hooks_path'." >&2
+        return 1
+      fi
       echo "Enabled tracked metadata hook via core.hooksPath=$desired_hooks_path"
     fi
-    return
+    return 0
   fi
 
   if [[ "$current_hooks_path" == "$desired_hooks_path" ]]; then
     echo "Tracked metadata hook already enabled via core.hooksPath=$desired_hooks_path"
-    return
+    return 0
   fi
 
   echo "Notice: effective core.hooksPath already set to '$current_hooks_path'; left unchanged." >&2
   echo "To use the tracked agent-vault hook in this clone, run:" >&2
   echo "  git -C \"$repo_root\" config core.hooksPath $desired_hooks_path" >&2
+  return 1
 }

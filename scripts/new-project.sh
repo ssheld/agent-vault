@@ -451,5 +451,11 @@ seed_root_file_if_missing "$root_scaffold_dir/.github/pull_request_template.md" 
 seed_root_file_if_missing "$root_scaffold_dir/docs/design.md" "$canonical_repo_path/docs/design.md"
 
 ensure_managed_gitignore_entries "$canonical_repo_path"
-configure_tracked_hooks_path "$canonical_repo_path"
+hook_rc=0
+configure_tracked_hooks_path "$canonical_repo_path" || hook_rc=$?
+if [[ "$hook_rc" -ne 0 ]]; then
+  echo "Warning: tracked metadata hook could not be activated automatically." >&2
+  echo "To enable it manually, run:" >&2
+  echo "  git -C \"$canonical_repo_path\" config core.hooksPath agent-vault/_assets/hooks" >&2
+fi
 echo "Created project notes at: $project_dir"

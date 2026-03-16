@@ -510,6 +510,9 @@ sync_template_files "$vault_scaffold_dir/Templates" "$project_dir/Templates"
 
 ensure_managed_gitignore_entries "$canonical_repo_path"
 
+hook_rc=0
+configure_tracked_hooks_path "$canonical_repo_path" "$dry_run" || hook_rc=$?
+
 echo
 echo "Summary:"
 echo "- created: $created"
@@ -517,6 +520,11 @@ echo "- updated: $updated"
 echo "- unchanged: $unchanged"
 echo "- skipped: $skipped"
 echo "- backups: $backed_up"
+if [[ "$hook_rc" -eq 0 ]]; then
+  echo "- hook: enabled"
+else
+  echo "- hook: NOT active (see warning below)"
+fi
 
 if [[ "$dry_run" == "true" ]]; then
   echo "Dry run complete. No files were written."
@@ -524,4 +532,9 @@ elif [[ "$backed_up" -gt 0 ]]; then
   echo "Backups saved under: $backup_dir"
 fi
 
-configure_tracked_hooks_path "$canonical_repo_path" "$dry_run"
+if [[ "$hook_rc" -ne 0 ]]; then
+  echo
+  echo "Warning: tracked metadata hook could not be activated automatically." >&2
+  echo "To enable it manually, run:" >&2
+  echo "  git -C \"$canonical_repo_path\" config core.hooksPath agent-vault/_assets/hooks" >&2
+fi
