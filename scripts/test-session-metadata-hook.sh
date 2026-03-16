@@ -215,4 +215,17 @@ if [[ "$(git -C "$success_rc_repo" config --local --get core.hooksPath)" != "age
   exit 1
 fi
 
+dryrun_rc_repo="$tmp_root/dryrun-returns-zero"
+init_repo "$dryrun_rc_repo"
+dryrun_rc=0
+dryrun_output="$(configure_tracked_hooks_path "$dryrun_rc_repo" "true")" || dryrun_rc=$?
+if [[ "$dryrun_rc" -ne 0 ]]; then
+  echo "Expected configure_tracked_hooks_path to return zero on dry-run activation." >&2
+  exit 1
+fi
+if git -C "$dryrun_rc_repo" config --local --get core.hooksPath >/dev/null 2>&1; then
+  echo "Expected core.hooksPath to remain unset after dry-run activation." >&2
+  exit 1
+fi
+
 echo "session metadata hook regression checks passed."

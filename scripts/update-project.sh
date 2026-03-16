@@ -520,7 +520,9 @@ echo "- updated: $updated"
 echo "- unchanged: $unchanged"
 echo "- skipped: $skipped"
 echo "- backups: $backed_up"
-if [[ "$hook_rc" -eq 0 ]]; then
+if [[ "$hook_rc" -eq 0 && "$dry_run" == "true" ]]; then
+  echo "- hook: would enable"
+elif [[ "$hook_rc" -eq 0 ]]; then
   echo "- hook: enabled"
 else
   echo "- hook: NOT active (see warning below)"
