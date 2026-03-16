@@ -520,10 +520,11 @@ echo "- updated: $updated"
 echo "- unchanged: $unchanged"
 echo "- skipped: $skipped"
 echo "- backups: $backed_up"
-if [[ "$hook_rc" -eq 0 && "$dry_run" == "true" ]]; then
-  echo "- hook: would enable"
-elif [[ "$hook_rc" -eq 0 ]]; then
+actual_hooks_path="$(git -C "$canonical_repo_path" config --get core.hooksPath 2>/dev/null || true)"
+if [[ "$actual_hooks_path" == "agent-vault/_assets/hooks" ]]; then
   echo "- hook: enabled"
+elif [[ "$hook_rc" -eq 0 && "$dry_run" == "true" ]]; then
+  echo "- hook: would enable"
 else
   echo "- hook: NOT active (see warning below)"
 fi
