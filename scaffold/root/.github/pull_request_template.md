@@ -10,9 +10,13 @@
 ## Changes
 - `path/to/file`: what changed and why
 
-## Validation
-- `command`: result
-- `command`: result
+## Verification Loop
+- Build / package: `command` - result / Not applicable
+- Typecheck / static analysis: `command` - result / Not applicable
+- Lint / format validation: `command` - result / Not applicable
+- Tests / coverage: `command` - result / Not applicable
+- Security / secrets / workflow checks: `command` - result / Not applicable
+- Diff review: `command` or short note - result
 - Not run (if any): reason and residual risk
 
 ## Risks and Rollback

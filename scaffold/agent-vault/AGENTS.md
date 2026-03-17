@@ -61,6 +61,19 @@
 - TDD is a strong default, not an absolute mandate. For docs-only work, config-only changes, exploratory spikes, one-off operational fixes, or tasks with no practical test seam yet, state why test-first was not realistic.
 - When behavior changed but test-first was not realistic, add the best available automated coverage before merge unless the limitation is explicit and accepted.
 
+## Verification Loop
+- Run the Verification Loop before opening a PR, asking for review, or reporting substantive work as done. During longer sessions, also run the relevant parts of the loop after significant refactors or major behavior changes.
+- Use the project's documented commands from `agent-vault/project-commands.md` when available.
+- Apply the loop in order, skipping only steps that do not exist or do not matter for the repo or change:
+  - Build / package: confirm the changed artifact can be produced when the repo has a build, bundle, or packaging step.
+  - Typecheck / static analysis: run compiler, type-system, or equivalent static checks when the repo uses them.
+  - Lint / format validation: run lint or formatting validation when the repo uses them.
+  - Tests / coverage: run the most relevant automated tests for the changed behavior, and include coverage checks when the repo tracks them.
+  - Security / secrets review: run applicable dependency, secret, or security-sensitive checks when the change touches auth, permissions, external inputs, shell execution, CI/workflows, infrastructure, or secret handling.
+  - Diff review: inspect the final diff against the base branch for unintended edits, leftover debug code, documentation drift, and missing `agent-vault` metadata updates.
+- If a step fails, fix the issue and rerun the relevant parts of the loop before proceeding.
+- If a step is unavailable or not meaningful for the repo, explicitly say so in the final summary or PR body instead of implying it ran.
+
 ## Code Style
 - Follow the primary language, framework, and toolchain guidance recorded in `agent-vault/coding-standards.md`.
 - If the repo has one dominant implementation language, prefer that language and its native tooling unless the task clearly requires otherwise.
@@ -79,10 +92,10 @@
 - PR body must include:
   - Summary of problem and approach.
   - Files/areas changed with concise rationale.
-  - Validation evidence (commands run and outcomes).
+  - Verification Loop evidence (commands run, outcomes, and any skipped or not-applicable steps).
   - Risks, rollback considerations, and any residual gaps.
   - Explicit docs consistency note (`design.md`/`README.md` updated or no impact).
-- If tests/checks were not run, explicitly state why and what remains unverified.
+- If any Verification Loop step was not run, explicitly state why and what remains unverified.
 - If the PR addresses review feedback, include itemized mapping per `review-policy.md` (`Responding to Review Feedback`).
 
 ## Artifact Locations and Naming
@@ -170,11 +183,10 @@ When performing research or writing research-oriented documentation (design-log 
 
 ## Completion Verification - MUST follow before marking any task done
 Before reporting a task as finished:
-1. Prove it works: run relevant tests, check logs, or demonstrate the changed behavior.
-2. Diff against the base branch to confirm only intended changes are included.
-3. List the `agent-vault` artifacts created or updated this session, or explicitly state why no metadata update was required (for example, a trivial one-off request).
-4. Ask yourself: "Would a senior engineer approve this?" If not, fix it first.
-5. If verification is not possible (no test suite, no runnable environment), explicitly state what was checked and what remains unverified.
+1. Run the Verification Loop appropriate to the repo and change scope.
+2. List the `agent-vault` artifacts created or updated this session, or explicitly state why no metadata update was required (for example, a trivial one-off request).
+3. Ask yourself: "Would a senior engineer approve this?" If not, fix it first.
+4. If any Verification Loop step was unavailable or could not run, explicitly state what was checked and what remains unverified.
 
 ## Pre-Commit Checklist - MUST follow before every commit or patch application
 Before considering any change complete and before running git commit:
