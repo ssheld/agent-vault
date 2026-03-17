@@ -15,6 +15,18 @@
 - Map every finding to a status (`Resolved`, `Partially Resolved`, or `Not Changed`) with concrete evidence.
 - If pushing back, explain technical rationale and risk/tradeoff explicitly.
 
+## GitHub Post Attribution
+- When creating a GitHub issue, posting an issue comment, or posting a non-review PR conversation comment, begin the body with:
+
+```md
+> 🤖 **Post by {Model Name}** · via {Client Tool}
+```
+
+- Use your actual model name/version when known. If the exact version is unavailable, use the best identifier you have.
+- If the post is specifically PR review feedback or a PR review-feedback response, use the specialized format in `agent-vault/review-policy.md` instead of this generic header.
+- Never present GitHub posts as if they are the human account owner's personal opinion.
+- Prefer repo-relative paths or GitHub links over local filesystem paths in GitHub posts.
+
 ## PR Review Posting
 - When asked to review a pull request, follow the project-root `AGENTS.md` review policy exactly.
 - Prefer a formal GitHub PR review whenever the platform/API allows it.
