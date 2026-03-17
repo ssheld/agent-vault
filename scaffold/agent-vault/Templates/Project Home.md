@@ -21,7 +21,7 @@ last_updated:
 
 ## Scope
 - In scope:
-- Surfacing material trade-offs to a human owner before they become durable project policy.
+  - Surfacing material trade-offs to a human owner before they become durable project policy.
 - Out of scope:
 
 ## Decision Gate
