@@ -14,12 +14,15 @@ It gives each code repository a standard `agent-vault/` directory with Markdown 
 - open questions and decisions
 - project plan and coding standards
 
+Generated vaults are intended to preserve human control over material trade-offs, not just record decisions after an agent already chose a path.
+
 ## Problem It Solves
 When multiple agents (or humans + agents) collaborate, context often gets lost between sessions. Typical failures are:
 - repeated rediscovery of decisions
 - unclear handoffs
 - stale docs compared to implementation
 - no consistent place for unresolved questions
+- agents silently making architecture or workflow trade-offs that should stay owner-controlled
 
 This template standardizes where that context lives and how it is updated.
 

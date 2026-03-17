@@ -23,6 +23,28 @@
 - Find root causes. No temporary fixes or workarounds unless explicitly agreed with the user and tracked in `agent-vault/open-questions.md`.
 - For non-trivial tasks (3+ steps or architectural decisions), outline a plan before implementing. Use `agent-vault/plan.md` for milestone-level planning. If implementation diverges significantly from the plan, stop and re-plan.
 
+## Human Decision Gate
+- Humans are the default decision-makers for material trade-offs. When multiple technically valid options exist and the choice materially affects architecture, UX, maintainability, workflow, security posture, performance, cost, or future flexibility, do not choose silently.
+- Material trade-offs include choices such as introducing or replacing core libraries, changing API or data-model shape, relaxing validation or security controls, changing deployment or review workflow, or accepting meaningful maintainability/performance/cost trade-offs to gain speed elsewhere.
+- Surface the options, trade-offs, and your recommendation to the human owner instead of silently selecting a path.
+- You may proceed without pausing only when at least one of the following is true:
+  - the user explicitly delegated that class of decision,
+  - an `accepted` decision record already exists,
+  - the decision falls within a user-approved plan,
+  - the choice is clearly reversible and already within explicitly approved scope.
+- `proposed` decision records provide context only. Do not treat a `proposed` decision record as settled policy or as a bypass for this gate.
+
+### Interactive Sessions
+- In interactive sessions, present the trade-off directly to the user in the conversation with the options, trade-offs, and your recommendation.
+- Do not proceed until the user chooses or explicitly delegates that class of decision.
+
+### Full-Auto Mode
+- In full-auto mode, the gate still applies. Do not hard-block, but record the chosen path, rationale, and pending owner decision in `agent-vault/open-questions.md`.
+
+### Do Not Escalate
+- Routine local implementation details that stay within approved scope and do not materially change behavior or future flexibility should not trigger the gate.
+- Examples include local variable naming, formatting, choosing between equivalent helper APIs already established in the project, or reordering independent implementation steps.
+
 ## Code Style
 - Follow the primary language, framework, and toolchain guidance recorded in `agent-vault/coding-standards.md`.
 - If the repo has one dominant implementation language, prefer that language and its native tooling unless the task clearly requires otherwise.
@@ -124,6 +146,7 @@ When performing research or writing research-oriented documentation (design-log 
 - Create or update today's note in `agent-vault/daily/` when the session was substantive.
 - Add a session note in `agent-vault/design-log/`.
 - Update `agent-vault/open-questions.md` when unresolved items exist.
+- If a material trade-off remains unresolved, keep the options, recommendation, and default path visible in `agent-vault/open-questions.md` until the owner accepts a final path.
 - If a durable decision was made, create or update the corresponding decision record and `agent-vault/decision-log.md`.
 - If handing off, add a note in `agent-vault/context/handoffs/`.
 - If the user corrected a mistake during this session, add an entry to `agent-vault/lessons.md` describing the mistake pattern and a preventive rule.
