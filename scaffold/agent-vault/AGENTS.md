@@ -23,6 +23,7 @@
 
 ## Core Principles
 - Treat documentation as source code: code and docs must always stay in sync.
+- When repo-local `agent-vault` instructions conflict with global plugin or user-level conventions, follow the repo-local instructions for this repository.
 - Never propose or commit changes that break documentation consistency.
 - When asked to implement, refactor, or add a feature, always follow the Pre-Commit Checklist below before finalizing edits or commits.
 - Find root causes. No temporary fixes or workarounds unless explicitly agreed with the user and tracked in `agent-vault/open-questions.md`.
