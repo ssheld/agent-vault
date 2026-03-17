@@ -51,6 +51,16 @@
 - Routine local implementation details that stay within approved scope and do not materially change behavior or future flexibility should not trigger the gate.
 - Examples include local variable naming, formatting, choosing between equivalent helper APIs already established in the project, or reordering independent implementation steps.
 
+## Test-Driven Development
+- Treat test-driven development as the default workflow for behavior-changing code when practical.
+- Use a RED / GREEN / REFACTOR loop by default:
+  - RED: add or update a test that captures the intended behavior or reproduces the bug, and confirm it fails for the expected reason.
+  - GREEN: implement the smallest change needed to make the test pass.
+  - REFACTOR: improve clarity or structure while keeping the tests green.
+- For bug fixes, start with a reproducing test when practical.
+- TDD is a strong default, not an absolute mandate. For docs-only work, config-only changes, exploratory spikes, one-off operational fixes, or tasks with no practical test seam yet, state why test-first was not realistic.
+- When behavior changed but test-first was not realistic, add the best available automated coverage before merge unless the limitation is explicit and accepted.
+
 ## Code Style
 - Follow the primary language, framework, and toolchain guidance recorded in `agent-vault/coding-standards.md`.
 - If the repo has one dominant implementation language, prefer that language and its native tooling unless the task clearly requires otherwise.
