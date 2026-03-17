@@ -24,6 +24,17 @@
 - Find root causes. No temporary fixes or workarounds unless explicitly agreed with the user and tracked in `agent-vault/open-questions.md`.
 - For non-trivial tasks (3+ steps or architectural decisions), outline a plan before implementing. Use `agent-vault/plan.md` for milestone-level planning. If implementation diverges significantly from the plan, stop and re-plan.
 
+## Feature Implementation Workflow
+- Use this default sequence for non-trivial feature work, multi-step refactors, or changes with meaningful behavior or design impact.
+- For trivial one-file edits, docs-only changes, or other low-risk work, a lighter path is acceptable as long as the relevant rules below are still followed.
+
+1. Clarify the request, scope, and any material trade-offs before coding. If the choice affects architecture, workflow, security, performance, cost, or future flexibility, apply the Human Decision Gate.
+2. Check for existing solutions before building something new. Follow Research First so local repo patterns, framework capabilities, and proven libraries are considered before net-new abstractions.
+3. Plan the implementation and validation approach before coding. For non-trivial work, update or create the relevant plan in `agent-vault/plan.md`.
+4. Implement in small coherent steps. Use TDD when practical, and keep the change aligned with the approved scope and plan.
+5. Self-review the result before asking for outside review. Run the Verification Loop, inspect the diff, and fix issues before moving on.
+6. Prepare the change for commit, PR, or handoff. Complete the Pre-Commit Checklist, update required `agent-vault` artifacts, and follow PR Authoring Standards when opening a PR.
+
 ## Human Decision Gate
 - Humans are the default decision-makers for material trade-offs. When multiple technically valid options exist and the choice materially affects architecture, UX, maintainability, workflow, security posture, performance, cost, or future flexibility, do not choose silently.
 - Material trade-offs include choices such as introducing or replacing core libraries, changing API or data-model shape, relaxing validation or security controls, changing deployment or review workflow, or accepting meaningful maintainability/performance/cost trade-offs to gain speed elsewhere.
