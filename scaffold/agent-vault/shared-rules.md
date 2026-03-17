@@ -35,6 +35,7 @@
 - When asked to implement, refactor, or add a feature, always follow the Pre-Commit Checklist below before finalizing edits or commits.
 - Find root causes. No temporary fixes or workarounds unless explicitly agreed with the user and tracked in `agent-vault/open-questions.md`.
 - For non-trivial tasks (3+ steps or architectural decisions), outline a plan before implementing. Use `agent-vault/plan.md` for milestone-level planning. If implementation diverges significantly from the plan, stop and re-plan.
+- Focus simplification, cleanup, and refactoring on code already touched by the current task. Do not widen scope into unrelated cleanup unless it was explicitly requested or is necessary for correctness or maintainability of the current change.
 
 ## Feature Implementation Workflow
 - Use this default sequence for non-trivial feature work, multi-step refactors, or changes with meaningful behavior or design impact.
