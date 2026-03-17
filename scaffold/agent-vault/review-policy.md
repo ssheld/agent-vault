@@ -24,6 +24,11 @@ When performing a code review on this repository, behave like a senior backend e
 - No dynamic SQL without parameterization.
 - Sensitive data (secrets, PII) must not be logged or leaked.
 - Distinguish critical vulnerabilities from hardening suggestions.
+- Treat code-execution, shell-execution, raw-HTML injection, unsafe-deserialization, and workflow-command interpolation patterns as security review triggers that require explicit justification, trusted inputs, or documented sanitization. They are not blanket bans, but they do require evidence that the usage is safe.
+- For CI/CD and workflow YAML, flag untrusted GitHub event fields flowing into `run:` or shell commands. Review issue titles/bodies, PR titles/bodies, comment bodies, commit messages, branch names, refs, and similar event payload fields for workflow injection risk.
+- For dynamic execution and shelling out, scrutinize patterns such as `eval`, `new Function`, `child_process.exec`, and `os.system`, especially when inputs are interpolated or not clearly trusted.
+- For unsafe HTML rendering, scrutinize patterns such as `dangerouslySetInnerHTML`, `.innerHTML =`, and `document.write`; require clear sanitization or proof that the content is trusted.
+- For unsafe deserialization, scrutinize patterns such as `pickle` on untrusted data or equivalent deserialization paths that can execute attacker-controlled content.
 
 ### 3) Reliability and Observability
 - External dependencies should use timeouts and retries with backoff where appropriate.
