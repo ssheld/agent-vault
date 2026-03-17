@@ -51,6 +51,14 @@
 - Routine local implementation details that stay within approved scope and do not materially change behavior or future flexibility should not trigger the gate.
 - Examples include local variable naming, formatting, choosing between equivalent helper APIs already established in the project, or reordering independent implementation steps.
 
+## Research First
+- Before building a new abstraction, workflow, or helper, search the existing repo for code, docs, templates, and prior patterns that may already solve most of the task.
+- If the repo does not already contain a suitable solution, check the relevant framework, standard library, or established libraries before writing net-new utilities or infrastructure.
+- Prefer reusing, adapting, or extending an existing local implementation or proven library capability when it materially fits the requirement.
+- Research-first does not mean "add a dependency by default." If reuse would require a material tool, library, workflow, or architecture choice, still apply the Human Decision Gate.
+- Do not force internet research for every task. Start with local repo sources and widen the search only when the task depends on behavior or tooling that is not already clear from local context.
+- If you still choose a net-new implementation after researching, be prepared to explain briefly why the existing repo code or available libraries were not a good fit.
+
 ## Test-Driven Development
 - Treat test-driven development as the default workflow for behavior-changing code when practical.
 - Use a RED / GREEN / REFACTOR loop by default:
