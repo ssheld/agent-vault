@@ -46,6 +46,9 @@ The generated vault is plain Markdown and works directly in Obsidian.
    - Optional template refresh:
      - `./scripts/update-project.sh <repo-path> --dry-run --sync-templates`
      - `./scripts/update-project.sh <repo-path> --sync-templates`
+   - Optional coding-standards refresh:
+     - `./scripts/update-project.sh <repo-path> --dry-run --sync-coding-standards`
+     - `./scripts/update-project.sh <repo-path> --sync-coding-standards`
    - Example: `./scripts/update-project.sh ~/workspaces/harrier`
    - To migrate unmanaged root wrappers to managed versions:
      - `./scripts/update-project.sh <repo-path> --migrate-root`
@@ -81,6 +84,7 @@ CI also enforces this via `.github/workflows/policy-mirror-check.yml` on pull re
 ## Scaffold Regression Checks
 Run the scaffold regression scripts locally when changing bootstrap, sync, or tracked hook behavior:
 - `bash scripts/test-gitignore-management.sh`
+- `bash scripts/test-coding-standards-sync.sh`
 - `bash scripts/test-session-metadata-hook.sh`
 
 CI also runs these checks via `.github/workflows/scaffold-regression-checks.yml`.
@@ -111,11 +115,17 @@ CI also runs these checks via `.github/workflows/scaffold-regression-checks.yml`
   - `<repo>/agent-vault/project-commands.md`
   - `<repo>/agent-vault/lessons.md`
 
+`<repo>/agent-vault/coding-standards.md` remains project-owned by default. `update-project.sh` does not replace it unless you explicitly pass `--sync-coding-standards`.
+
 If an existing root policy file does not have the managed marker, `update-project.sh` leaves it unchanged and reports a skip notice suggesting `--migrate-root`.
 
 Template refresh is opt-in:
 - `./scripts/update-project.sh <repo-path> --sync-templates` updates `agent-vault/Templates/` from the scaffold and backs up replaced files under `agent-vault/context/updates/<timestamp>/`.
 - Without `--sync-templates`, project-local template customizations are left alone.
+
+Coding standards refresh is also opt-in:
+- `./scripts/update-project.sh <repo-path> --sync-coding-standards` replaces `agent-vault/coding-standards.md` with the scaffold version and backs up the previous file under `agent-vault/context/updates/<timestamp>/`.
+- Without `--sync-coding-standards`, the script leaves project-owned coding standards untouched and reports when they differ from the scaffold.
 
 ### Migrating Root Wrappers (`--migrate-root`)
 When running `update-project.sh` with `--migrate-root`, unmanaged root wrappers (those missing the `agent-vault-managed` marker) are backed up and replaced with the current scaffold versions. This is useful for workspaces created before root wrapper management was introduced.
