@@ -16,6 +16,7 @@ Deliver project milestones with clear scope, verifiable outcomes, and reliable h
 - Milestone 1 scope and exit criteria are documented in `agent-vault/plan.md`.
 - Current priorities and session state are current in `agent-vault/context-log.md`.
 - Active decisions and open questions are current in `agent-vault/decision-log.md` and `agent-vault/open-questions.md`.
+- Material trade-offs are either owner-approved or explicitly tracked as pending decisions.
 - Architecture and key flows are current in `docs/design.md`.
 - Completion checks are defined before implementation starts.
 
@@ -23,9 +24,15 @@ Deliver project milestones with clear scope, verifiable outcomes, and reliable h
 - In scope:
   - Planning and implementation work tracked in this repository.
   - Documentation updates needed to keep behavior and design artifacts aligned.
+  - Surfacing material trade-offs to a human owner before they become durable project policy.
 - Out of scope:
   - Project memory stored outside `agent-vault/`.
   - Untracked process changes without decision/open-question updates.
+
+## Decision Gate
+- Humans are the default decision-makers for material trade-offs involving architecture, UX, workflow, security, performance, cost, maintainability, or future flexibility.
+- Pending owner decisions belong in `agent-vault/open-questions.md`.
+- `proposed` decision records remain non-binding until the owner explicitly accepts them.
 
 ## Links
 - Repo: __REPO_REFERENCE__

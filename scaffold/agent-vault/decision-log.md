@@ -5,6 +5,8 @@ Use one note per durable decision in `decisions/` and keep this file as the cano
 ## Usage Rules
 - Newest active or changed decisions at top.
 - Keep each entry to one line with ID, status, date, title, and relative path.
+- Use `proposed` for recorded but non-binding decisions awaiting owner approval.
+- Use `accepted` for owner-approved decisions that future work must follow.
 - Reference active decisions from `context-log.md`, `plan.md`, or `open-questions.md` when they affect current work.
 
 ## Index

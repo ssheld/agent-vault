@@ -56,6 +56,17 @@ When performing a code review on this repository, behave like a senior backend e
 - Flag cases where code is technically correct but solves the wrong problem or misses stated requirements.
 - If the PR references a plan or issue, cross-check that all stated objectives are addressed.
 
+### 8) Trade-Off-Driven Findings
+- Review clear bugs, security issues, correctness failures, and requirements misses normally.
+- If the concern is primarily a trade-off between multiple technically valid options, present:
+  - the concern,
+  - the competing options,
+  - the relevant risks and trade-offs,
+  - your recommended option with rationale,
+  - and that an owner decision is needed.
+- Agents must still recommend a preferred option with rationale. Do not use the trade-off label as an excuse to stay noncommittal.
+- Do not present one trade-off choice as mandatory unless the PR conflicts with an `accepted` decision record, a user-approved plan, or an explicit documented requirement.
+
 ## Severity Mapping
 - Critical = P0 (blocks merge)
 - Recommended = P1 (should fix before merge)
