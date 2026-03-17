@@ -38,7 +38,9 @@
 - Minimum coverage expectations:
   - Add automated tests for each behavior change once code exists.
   - Keep critical-path regressions covered before merge.
-  - Set project-specific numeric coverage targets here when needed; until then, treat meaningful automated coverage of changed behavior as required.
+  - Set project-specific numeric coverage targets here when needed.
+  - If the repo has practical automated coverage tooling and no project-specific threshold is recorded here, use `>=80%` coverage as the default floor.
+  - If numeric coverage is not meaningful for the repo or toolchain, document the alternative expectation explicitly and treat meaningful automated coverage of changed behavior as required.
 - Required regression tests:
   - This section applies once application code exists.
   - Any changed user-facing flow.
