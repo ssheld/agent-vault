@@ -10,6 +10,13 @@
 - Keep changes minimal and coherent.
 - Preserve backward compatibility unless explicitly planned.
 
+## Readability Defaults
+- Until the project records stricter or different preferences here, treat the following as the default readability baseline.
+- Prefer explicit, readable structure over compact or clever code when the compact version is harder to follow.
+- Avoid high-density control flow such as nested ternaries when a clearer alternative exists.
+- Remove comments that only restate what the code already makes obvious.
+- Keep useful abstractions, but remove accidental or redundant ones when doing so clarifies the code without widening scope.
+
 ## Language and Framework Conventions
 - Primary language/runtime:
   - Record the repo's default implementation language(s) and major runtime/toolchain here.
@@ -49,6 +56,7 @@
 
 ## Review Checklist
 - [ ] Matches project architecture and naming conventions.
+- [ ] Keeps code readable without relying on dense or clever control flow.
 - [ ] Includes tests for changed behavior (or explicitly documents why test-first or automated coverage was not yet practical).
 - [ ] Updates docs/context when behavior changes.
 - [ ] No unrelated changes.
