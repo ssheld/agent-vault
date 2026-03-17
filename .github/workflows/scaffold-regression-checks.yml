@@ -8,6 +8,7 @@ on:
       - "scripts/new-project.sh"
       - "scripts/update-project.sh"
       - "scripts/test-gitignore-management.sh"
+      - "scripts/test-coding-standards-sync.sh"
       - "scripts/test-session-metadata-hook.sh"
       - ".github/workflows/scaffold-regression-checks.yml"
   push:
@@ -19,6 +20,7 @@ on:
       - "scripts/new-project.sh"
       - "scripts/update-project.sh"
       - "scripts/test-gitignore-management.sh"
+      - "scripts/test-coding-standards-sync.sh"
       - "scripts/test-session-metadata-hook.sh"
       - ".github/workflows/scaffold-regression-checks.yml"
   workflow_dispatch:
@@ -31,5 +33,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Verify managed .gitignore handling
         run: bash scripts/test-gitignore-management.sh
+      - name: Verify coding standards sync behavior
+        run: bash scripts/test-coding-standards-sync.sh
       - name: Verify session metadata hook behavior
         run: bash scripts/test-session-metadata-hook.sh

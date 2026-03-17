@@ -7,13 +7,14 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$script_dir/lib/tracked-hooks.sh"
 
 usage() {
-  echo "Usage: $0 <repo-path> [--dry-run] [--migrate-root] [--sync-templates]"
-  echo "Example: $0 ~/workspaces/harrier --dry-run --sync-templates"
+  echo "Usage: $0 <repo-path> [--dry-run] [--migrate-root] [--sync-templates] [--sync-coding-standards]"
+  echo "Example: $0 ~/workspaces/harrier --dry-run --sync-templates --sync-coding-standards"
   echo ""
   echo "Options:"
   echo "  --dry-run       Show what would change without writing files"
   echo "  --migrate-root  Replace unmanaged root wrappers with managed versions (backs up originals)"
   echo "  --sync-templates  Refresh agent-vault/Templates/ from scaffold (backs up existing files)"
+  echo "  --sync-coding-standards  Replace agent-vault/coding-standards.md from scaffold (backs up existing file)"
 }
 
 expand_path() {
@@ -52,6 +53,7 @@ repo_path_input=""
 dry_run="false"
 migrate_root="false"
 sync_templates="false"
+sync_coding_standards="false"
 
 for arg in "$@"; do
   case "$arg" in
@@ -63,6 +65,9 @@ for arg in "$@"; do
       ;;
     --sync-templates)
       sync_templates="true"
+      ;;
+    --sync-coding-standards)
+      sync_coding_standards="true"
       ;;
     -h|--help)
       usage
@@ -119,6 +124,7 @@ for required in \
   "$vault_scaffold_dir/shared-rules.md" \
   "$vault_scaffold_dir/review-policy.md" \
   "$vault_scaffold_dir/handoff.md" \
+  "$vault_scaffold_dir/coding-standards.md" \
   "$vault_scaffold_dir/project-context.md" \
   "$vault_scaffold_dir/project-commands.md" \
   "$vault_scaffold_dir/lessons.md" \
@@ -143,6 +149,7 @@ updated=0
 unchanged=0
 backed_up=0
 skipped=0
+coding_standards_manual_merge_warning="false"
 
 repo_relative_path() {
   local path="$1"
@@ -390,6 +397,37 @@ sync_template_files() {
   done < <(find "$src_root" -type f -print0)
 }
 
+sync_project_owned_file_if_requested() {
+  local src="$1"
+  local dest="$2"
+  local option_name="$3"
+  local sync_enabled="$4"
+  local rel
+
+  rel="$(repo_relative_path "$dest")"
+
+  if [[ "$sync_enabled" == "true" ]]; then
+    sync_managed_file "$src" "$dest"
+    return
+  fi
+
+  if [[ ! -e "$dest" ]]; then
+    echo "Skip: $rel (project-owned file missing; use $option_name to seed from scaffold)"
+    skipped=$((skipped + 1))
+    return
+  fi
+
+  if cmp -s "$src" "$dest"; then
+    echo "Unchanged: $rel (project-owned file matches scaffold)"
+    unchanged=$((unchanged + 1))
+    return
+  fi
+
+  echo "Skip: $rel (project-owned file differs from scaffold; review manually or use $option_name to replace with backup)"
+  coding_standards_manual_merge_warning="true"
+  skipped=$((skipped + 1))
+}
+
 sync_root_wrapper_if_managed() {
   local src="$1"
   local dest="$2"
@@ -489,6 +527,7 @@ sync_root_wrapper_if_managed "$root_scaffold_dir/CLAUDE.md" "$canonical_repo_pat
 sync_root_wrapper_if_managed "$root_scaffold_dir/GEMINI.md" "$canonical_repo_path/GEMINI.md" "$ROOT_GEMINI_MARKER"
 seed_if_missing "$root_scaffold_dir/.github/pull_request_template.md" "$canonical_repo_path/.github/pull_request_template.md"
 seed_if_missing "$root_scaffold_dir/docs/design.md" "$canonical_repo_path/docs/design.md"
+sync_project_owned_file_if_requested "$vault_scaffold_dir/coding-standards.md" "$project_dir/coding-standards.md" "--sync-coding-standards" "$sync_coding_standards"
 seed_if_missing "$vault_scaffold_dir/project-context.md" "$project_dir/project-context.md"
 seed_if_missing "$vault_scaffold_dir/project-commands.md" "$project_dir/project-commands.md"
 
@@ -533,6 +572,12 @@ if [[ "$dry_run" == "true" ]]; then
   echo "Dry run complete. No files were written."
 elif [[ "$backed_up" -gt 0 ]]; then
   echo "Backups saved under: $backup_dir"
+fi
+
+if [[ "$coding_standards_manual_merge_warning" == "true" ]]; then
+  echo
+  echo "Warning: agent-vault/coding-standards.md differs from the scaffold and was left unchanged." >&2
+  echo "If you want the newer scaffold standards, merge them manually or rerun update-project.sh with --sync-coding-standards to replace the file with a backup." >&2
 fi
 
 if [[ "$hook_rc" -ne 0 ]]; then
