@@ -70,6 +70,34 @@ run_hook_expect_success() {
   (cd "$repo_path" && agent-vault/_assets/hooks/pre-commit)
 }
 
+replace_first_match() {
+  local file_path="$1"
+  local search_text="$2"
+  local replacement_text="$3"
+
+  perl -0pi -e 's/\Q'"$search_text"'\E/'"$replacement_text"'/' "$file_path"
+}
+
+replace_first_context_log_timestamp() {
+  local file_path="$1"
+  local replacement_timestamp="$2"
+
+  perl -0pi -e 's/^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} local - /### '"$replacement_timestamp"' local - /m' "$file_path"
+}
+
+replace_first_context_log_heading() {
+  local file_path="$1"
+  local replacement_heading="$2"
+
+  perl -0pi -e 's/^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} local - .*$/### '"$replacement_heading"'/m' "$file_path"
+}
+
+clear_context_log_entries() {
+  local file_path="$1"
+
+  perl -0pi -e 's/^## Entries\s*\n.*\z/## Entries\n/mgs' "$file_path"
+}
+
 hook_repo="$tmp_root/hook-enforcement"
 init_repo "$hook_repo"
 "$repo_root/scripts/new-project.sh" "hook-test" "$hook_repo" >/dev/null
@@ -116,6 +144,17 @@ init_repo "$metadata_only_repo"
 printf '\nMetadata-only change.\n' >> "$metadata_only_repo/agent-vault/context-log.md"
 git -C "$metadata_only_repo" add agent-vault/context-log.md
 run_hook_expect_success "$metadata_only_repo"
+
+metadata_only_invalid_repo="$tmp_root/metadata-only-invalid"
+init_repo "$metadata_only_invalid_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$metadata_only_invalid_repo" >/dev/null
+replace_first_match "$metadata_only_invalid_repo/agent-vault/context-log.md" "last_updated: $today" "last_updated: 2000-01-01"
+replace_first_match "$metadata_only_invalid_repo/agent-vault/context-log.md" "- Last updated: $today" "- Last updated: 2000-01-01"
+git -C "$metadata_only_invalid_repo" add agent-vault/context-log.md
+metadata_only_invalid_output="$(run_hook_expect_failure "$metadata_only_invalid_repo")"
+assert_output_contains "$metadata_only_invalid_output" "Context log validation failed:"
+assert_output_contains "$metadata_only_invalid_output" 'frontmatter `last_updated` must match the top entry date'
+assert_output_contains "$metadata_only_invalid_output" 'Current Snapshot `Last updated` must match the top entry date'
 
 update_repo="$tmp_root/update-project-hook-seed"
 init_repo "$update_repo"
@@ -188,6 +227,94 @@ deletion_failure_output="$(run_hook_expect_failure "$deletion_repo")"
 assert_output_contains "$deletion_failure_output" "stage agent-vault/context-log.md"
 assert_output_contains "$deletion_failure_output" "stage one note under agent-vault/daily/"
 assert_output_contains "$deletion_failure_output" "stage one note under agent-vault/design-log/"
+
+ordering_repo="$tmp_root/context-log-ordering"
+init_repo "$ordering_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$ordering_repo" >/dev/null
+replace_first_context_log_timestamp "$ordering_repo/agent-vault/context-log.md" "$today 09:00"
+cat <<EOF >> "$ordering_repo/agent-vault/context-log.md"
+
+### $today 10:00 local - test-agent - appended newer entry below older one
+#### Goal
+Exercise ordering validation.
+
+#### State
+- Added a newer entry in the wrong position.
+
+#### Decisions
+- None.
+
+#### Open Questions
+- None.
+
+#### Next Prompt
+"Fix context log ordering."
+
+#### References
+- agent-vault/context-log.md
+EOF
+cat <<EOF > "$ordering_repo/agent-vault/daily/$today.md"
+# Daily Note
+
+- Seed ordering validation fixture.
+EOF
+cat <<EOF > "$ordering_repo/agent-vault/design-log/$today-0300-context-log-ordering.md"
+# Design Log
+
+- Seed ordering validation fixture.
+EOF
+mkdir -p "$ordering_repo/src"
+printf 'print("ordering")\n' > "$ordering_repo/src/app.py"
+git -C "$ordering_repo" add \
+  src/app.py \
+  agent-vault/context-log.md \
+  "agent-vault/daily/$today.md" \
+  "agent-vault/design-log/$today-0300-context-log-ordering.md"
+ordering_failure_output="$(run_hook_expect_failure "$ordering_repo")"
+assert_output_contains "$ordering_failure_output" "Context log validation failed:"
+assert_output_contains "$ordering_failure_output" 'must keep entries newest-first'
+
+freshness_repo="$tmp_root/context-log-freshness"
+init_repo "$freshness_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$freshness_repo" >/dev/null
+replace_first_match "$freshness_repo/agent-vault/context-log.md" "last_updated: $today" "last_updated: 2000-01-01"
+replace_first_match "$freshness_repo/agent-vault/context-log.md" "- Last updated: $today" "- Last updated: 2000-01-01"
+cat <<EOF > "$freshness_repo/agent-vault/daily/$today.md"
+# Daily Note
+
+- Seed freshness validation fixture.
+EOF
+cat <<EOF > "$freshness_repo/agent-vault/design-log/$today-0400-context-log-freshness.md"
+# Design Log
+
+- Seed freshness validation fixture.
+EOF
+mkdir -p "$freshness_repo/src"
+printf 'print("freshness")\n' > "$freshness_repo/src/app.py"
+git -C "$freshness_repo" add \
+  src/app.py \
+  agent-vault/context-log.md \
+  "agent-vault/daily/$today.md" \
+  "agent-vault/design-log/$today-0400-context-log-freshness.md"
+freshness_failure_output="$(run_hook_expect_failure "$freshness_repo")"
+assert_output_contains "$freshness_failure_output" 'frontmatter `last_updated` must match the top entry date'
+assert_output_contains "$freshness_failure_output" 'Current Snapshot `Last updated` must match the top entry date'
+
+invalid_heading_repo="$tmp_root/context-log-invalid-heading"
+init_repo "$invalid_heading_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$invalid_heading_repo" >/dev/null
+replace_first_context_log_heading "$invalid_heading_repo/agent-vault/context-log.md" "bad heading format"
+git -C "$invalid_heading_repo" add agent-vault/context-log.md
+invalid_heading_output="$(run_hook_expect_failure "$invalid_heading_repo")"
+assert_output_contains "$invalid_heading_output" 'entry headings must start with `YYYY-MM-DD HH:MM local - <agent> - <topic>`'
+
+empty_entries_repo="$tmp_root/context-log-empty-entries"
+init_repo "$empty_entries_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$empty_entries_repo" >/dev/null
+clear_context_log_entries "$empty_entries_repo/agent-vault/context-log.md"
+git -C "$empty_entries_repo" add agent-vault/context-log.md
+empty_entries_output="$(run_hook_expect_failure "$empty_entries_repo")"
+assert_output_contains "$empty_entries_output" 'must include at least one entry under `## Entries`'
 
 # shellcheck source=./lib/tracked-hooks.sh
 source "$script_dir/lib/tracked-hooks.sh"

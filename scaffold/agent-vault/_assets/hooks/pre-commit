@@ -46,6 +46,144 @@ is_runtime_note_file() {
   esac
 }
 
+extract_context_log_frontmatter_value() {
+  local file_path="$1"
+  local field_name="$2"
+
+  awk -v field_name="$field_name" '
+    BEGIN {
+      frontmatter_markers = 0
+    }
+    /^---$/ {
+      frontmatter_markers += 1
+      next
+    }
+    frontmatter_markers == 1 && index($0, field_name ":") == 1 {
+      value = substr($0, length(field_name) + 2)
+      sub(/^[[:space:]]+/, "", value)
+      sub(/[[:space:]]+$/, "", value)
+      print value
+      exit
+    }
+    frontmatter_markers >= 2 {
+      exit
+    }
+  ' "$file_path"
+}
+
+extract_context_log_snapshot_last_updated() {
+  local file_path="$1"
+
+  awk '
+    /^## Current Snapshot$/ {
+      in_snapshot = 1
+      next
+    }
+    in_snapshot && /^## / {
+      exit
+    }
+    in_snapshot && /^- Last updated:/ {
+      value = $0
+      sub(/^- Last updated:[[:space:]]*/, "", value)
+      sub(/[[:space:]]+$/, "", value)
+      print value
+      exit
+    }
+  ' "$file_path"
+}
+
+collect_context_log_entry_timestamps() {
+  local file_path="$1"
+
+  awk '
+    /^## Entries$/ {
+      in_entries = 1
+      next
+    }
+    in_entries && /^## / {
+      exit
+    }
+    in_entries && /^### / {
+      if (match($0, /^### ([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]) local - /)) {
+        timestamp = $0
+        sub(/^### /, "", timestamp)
+        sub(/ local - .*$/, "", timestamp)
+        print timestamp
+        next
+      }
+
+      printf "__INVALID__\t%s\n", $0
+    }
+  ' "$file_path"
+}
+
+validate_staged_context_log() {
+  local file_path="$1"
+  local tmp_file=""
+  local first_timestamp=""
+  local first_date=""
+  local last_updated=""
+  local snapshot_last_updated=""
+  local previous_timestamp=""
+  local current_timestamp=""
+  local current_entry_line=""
+  local has_entries="false"
+  local -a errors=()
+
+  tmp_file="$(mktemp "${TMPDIR:-/tmp}/agent-vault-context-log.XXXXXX")"
+  trap 'rm -f "$tmp_file"; trap - RETURN' RETURN
+  git show ":$file_path" >"$tmp_file" 2>/dev/null || {
+    echo "Unable to read staged $file_path for validation."
+    return 1
+  }
+
+  while IFS= read -r current_entry_line; do
+    [[ -n "$current_entry_line" ]] || continue
+    has_entries="true"
+
+    if [[ "$current_entry_line" == __INVALID__* ]]; then
+      errors+=("$file_path entry headings must start with \`YYYY-MM-DD HH:MM local - <agent> - <topic>\`; found: ${current_entry_line#*$'\t'}")
+      continue
+    fi
+
+    current_timestamp="$current_entry_line"
+
+    if [[ -z "$first_timestamp" ]]; then
+      first_timestamp="$current_timestamp"
+      first_date="${current_timestamp%% *}"
+    elif [[ "$current_timestamp" > "$previous_timestamp" ]]; then
+      errors+=("$file_path must keep entries newest-first; found newer entry \`$current_timestamp\` below older entry \`$previous_timestamp\`.")
+    fi
+
+    previous_timestamp="$current_timestamp"
+  done < <(collect_context_log_entry_timestamps "$tmp_file")
+
+  if [[ "$has_entries" != "true" ]]; then
+    errors+=("$file_path must include at least one entry under \`## Entries\`.")
+  fi
+
+  last_updated="$(extract_context_log_frontmatter_value "$tmp_file" "last_updated")"
+  snapshot_last_updated="$(extract_context_log_snapshot_last_updated "$tmp_file")"
+
+  if [[ -n "$first_date" && "$last_updated" != "$first_date" ]]; then
+    errors+=("$file_path frontmatter \`last_updated\` must match the top entry date \`$first_date\`; found \`${last_updated:-<empty>}\`.")
+  fi
+
+  if [[ -n "$first_date" && "$snapshot_last_updated" != "$first_date" ]]; then
+    errors+=("$file_path Current Snapshot \`Last updated\` must match the top entry date \`$first_date\`; found \`${snapshot_last_updated:-<empty>}\`.")
+  fi
+
+  trap - RETURN
+  rm -f "$tmp_file"
+
+  if [[ "${#errors[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  printf '%s\n' "${errors[@]}"
+  return 1
+}
+
 all_staged_files=()
 while IFS= read -r file_path; do
   [[ -n "$file_path" ]] || continue
@@ -54,6 +192,37 @@ done < <(git diff --cached --name-only --diff-filter=ACDMRTUXB)
 
 if [[ "${#all_staged_files[@]}" -eq 0 ]]; then
   exit 0
+fi
+
+non_deleted_staged_files=()
+while IFS= read -r file_path; do
+  [[ -n "$file_path" ]] || continue
+  non_deleted_staged_files+=("$file_path")
+done < <(git diff --cached --name-only --diff-filter=ACMRTUXB)
+
+has_context_log="false"
+for file_path in "${non_deleted_staged_files[@]}"; do
+  if [[ "$file_path" == "agent-vault/context-log.md" ]]; then
+    has_context_log="true"
+    break
+  fi
+done
+
+context_log_validation_failed="false"
+context_log_validation_output=""
+
+if [[ "$has_context_log" == "true" ]]; then
+  context_log_validation_output="$(validate_staged_context_log "agent-vault/context-log.md" 2>&1)" || context_log_validation_failed="true"
+fi
+
+if [[ "$context_log_validation_failed" == "true" ]]; then
+  echo "agent-vault metadata gate failed." >&2
+  echo "Context log validation failed:" >&2
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    echo "- $line" >&2
+  done <<<"$context_log_validation_output"
+  exit 1
 fi
 
 requires_metadata_gate="false"
@@ -68,20 +237,12 @@ if [[ "$requires_metadata_gate" != "true" ]]; then
   exit 0
 fi
 
-has_context_log="false"
 has_daily_note="false"
 has_design_log="false"
-
-non_deleted_staged_files=()
-while IFS= read -r file_path; do
-  [[ -n "$file_path" ]] || continue
-  non_deleted_staged_files+=("$file_path")
-done < <(git diff --cached --name-only --diff-filter=ACMRTUXB)
 
 for file_path in "${non_deleted_staged_files[@]}"; do
   case "$file_path" in
     agent-vault/context-log.md)
-      has_context_log="true"
       ;;
     agent-vault/daily/*.md)
       if [[ "$file_path" != "agent-vault/daily/README.md" ]]; then

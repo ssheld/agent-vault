@@ -17,6 +17,10 @@ git config core.hooksPath agent-vault/_assets/hooks
     - `agent-vault/context-log.md`
     - one note under `agent-vault/daily/`
     - one note under `agent-vault/design-log/`
+  - Validates staged `agent-vault/context-log.md` content:
+    - entry headings must use `YYYY-MM-DD HH:MM local - <agent> - <topic>`
+    - entries must remain newest-first
+    - frontmatter and Current Snapshot `Last updated` must match the top entry date
   - This is a baseline gate only. Conditional artifacts such as `open-questions.md`, decision records, handoff notes, and `lessons.md` still depend on the actual session outcome.
 
 ## Intentional Bypass
