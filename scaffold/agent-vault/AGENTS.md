@@ -63,7 +63,7 @@
   - the decision falls within a user-approved plan,
   - the choice is clearly reversible and already within explicitly approved scope.
 - `proposed` decision records provide context only. Do not treat a `proposed` decision record as settled policy or as a bypass for this gate.
-- Do not assume older `accepted` records bypass the gate unless the record itself preserves the owner approval provenance (for example, `owners`, `accepted_by`, and approval context/source).
+- Do not assume older `accepted` records bypass the gate unless the record itself preserves the owner approval provenance (for example, `owners`, `accepted_by`, and `approval_source`).
 
 ### Interactive Sessions
 - In interactive sessions, present the trade-off directly to the user in the conversation with the options, trade-offs, and your recommendation.
@@ -212,7 +212,7 @@ When performing research or writing research-oriented documentation (design-log 
 - If a durable decision was made, create or update the corresponding decision record and `agent-vault/decision-log.md`.
 - If handing off, add a note in `agent-vault/context/handoffs/`.
 - If the user corrected a mistake during this session, add an entry to `agent-vault/lessons.md` describing the mistake pattern and a preventive rule.
-- If you create a commit, push, or PR in the same session, reconcile today's daily note, context log, and any new design-log entry so they reflect the post-commit/post-PR state instead of leaving those actions in future-tense carry-forward text.
+- Before creating a commit for substantive work, make sure today's daily note, context log, and any new design-log entry do not leave same-session publication mechanics (`git commit`, `git push`, PR creation) in `Carry Forward`, `Next`, or equivalent future-tense text unless those actions will truly remain unfinished after the session.
 - Treat these updates as a commit gate for substantive work, not as optional cleanup after the code is already done.
 
 ## Completion Verification - MUST follow before marking any task done

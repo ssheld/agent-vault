@@ -9,6 +9,7 @@ on:
       - "scripts/update-project.sh"
       - "scripts/test-gitignore-management.sh"
       - "scripts/test-coding-standards-sync.sh"
+      - "scripts/test-decision-template-sync.sh"
       - "scripts/test-session-metadata-hook.sh"
       - ".github/workflows/scaffold-regression-checks.yml"
   push:
@@ -21,6 +22,7 @@ on:
       - "scripts/update-project.sh"
       - "scripts/test-gitignore-management.sh"
       - "scripts/test-coding-standards-sync.sh"
+      - "scripts/test-decision-template-sync.sh"
       - "scripts/test-session-metadata-hook.sh"
       - ".github/workflows/scaffold-regression-checks.yml"
   workflow_dispatch:
@@ -35,5 +37,7 @@ jobs:
         run: bash scripts/test-gitignore-management.sh
       - name: Verify coding standards sync behavior
         run: bash scripts/test-coding-standards-sync.sh
+      - name: Verify policy template sync behavior
+        run: bash scripts/test-decision-template-sync.sh
       - name: Verify session metadata hook behavior
         run: bash scripts/test-session-metadata-hook.sh

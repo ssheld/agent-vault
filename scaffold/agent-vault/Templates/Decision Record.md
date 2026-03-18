@@ -15,7 +15,7 @@ approval_source:
 
 # Decision: <title>
 
-> `proposed` = recorded but not owner-approved; not binding. `accepted` = owner-approved; binding for future work and a valid human decision gate bypass only when the record preserves approval provenance. Only explicit owner approval should change a record to `accepted`.
+> `proposed` = recorded but not owner-approved; not binding. `accepted` = owner-approved; binding for future work and a valid human decision gate bypass only when the record preserves approval provenance (`owners`, `accepted_by`, and `approval_source`). Only explicit owner approval should change a record to `accepted`.
 
 ## Decision Needed
 - Decision needed from:

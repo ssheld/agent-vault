@@ -28,7 +28,7 @@ last_updated:
 - Humans are the default decision-makers for material trade-offs involving architecture, UX, workflow, security, performance, cost, maintainability, or future flexibility.
 - Pending owner decisions belong in `open-questions.md`.
 - `proposed` decision records remain non-binding until the owner explicitly accepts them.
-- `accepted` decision records should preserve approval provenance in the file before future sessions treat them as a gate bypass.
+- `accepted` decision records should preserve approval provenance in the file (`owners`, `accepted_by`, and `approval_source`) before future sessions treat them as a gate bypass.
 
 ## Links
 - Repo:
