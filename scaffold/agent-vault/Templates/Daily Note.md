@@ -23,5 +23,6 @@ last_updated:
 - 
 
 ## Carry Forward
+<!-- Only list genuinely unfinished work. If a commit, push, or PR already happened in this session, record it in Work Log / Decisions above and do not repeat it here as pending. -->
 - Next step:
 - Suggested next prompt:

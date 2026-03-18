@@ -57,6 +57,10 @@ The generated vault is plain Markdown and works directly in Obsidian.
    - `git -C <repo-path> config core.hooksPath agent-vault/_assets/hooks`
 6. Commit generated or updated files in the target project repo.
 
+Generated workflows also expect:
+- accepted decision records to preserve owner approval provenance in the file before they are used as an automatic Human Decision Gate bypass
+- same-session daily/context/design-log notes to avoid leaving immediate publication mechanics (`git commit`, `git push`, PR creation) in future-tense carry-forward text unless those actions will truly remain unfinished
+
 This repo should stay template-only. Do not store project-specific session logs here.
 
 ## Template Source
@@ -85,6 +89,7 @@ CI also enforces this via `.github/workflows/policy-mirror-check.yml` on pull re
 Run the scaffold regression scripts locally when changing bootstrap, sync, or tracked hook behavior:
 - `bash scripts/test-gitignore-management.sh`
 - `bash scripts/test-coding-standards-sync.sh`
+- `bash scripts/test-decision-template-sync.sh`
 - `bash scripts/test-session-metadata-hook.sh`
 
 CI also runs these checks via `.github/workflows/scaffold-regression-checks.yml`.
@@ -104,6 +109,7 @@ CI also runs these checks via `.github/workflows/scaffold-regression-checks.yml`
   - `<repo>/agent-vault/context/handoffs/README.md`
   - `<repo>/agent-vault/decisions/README.md`
   - `<repo>/agent-vault/daily/README.md`
+  - `<repo>/agent-vault/Templates/Decision Record.md`
 - Root wrappers (managed only when the root file has the `agent-vault-managed` marker):
   - `<repo>/AGENTS.md`
   - `<repo>/CLAUDE.md`
@@ -121,7 +127,7 @@ If an existing root policy file does not have the managed marker, `update-projec
 
 Template refresh is opt-in:
 - `./scripts/update-project.sh <repo-path> --sync-templates` updates `agent-vault/Templates/` from the scaffold and backs up replaced files under `agent-vault/context/updates/<timestamp>/`.
-- Without `--sync-templates`, project-local template customizations are left alone.
+- Without `--sync-templates`, project-local template customizations are left alone except for policy-critical templates that are always managed (`agent-vault/Templates/Decision Record.md`).
 
 Coding standards refresh is also opt-in:
 - `./scripts/update-project.sh <repo-path> --sync-coding-standards` replaces `agent-vault/coding-standards.md` with the scaffold version and backs up the previous file under `agent-vault/context/updates/<timestamp>/`.

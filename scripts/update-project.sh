@@ -13,7 +13,7 @@ usage() {
   echo "Options:"
   echo "  --dry-run       Show what would change without writing files"
   echo "  --migrate-root  Replace unmanaged root wrappers with managed versions (backs up originals)"
-  echo "  --sync-templates  Refresh agent-vault/Templates/ from scaffold (backs up existing files)"
+  echo "  --sync-templates  Refresh project-local agent-vault/Templates/ from scaffold (backs up existing files); policy-critical templates may sync on normal updates"
   echo "  --sync-coding-standards  Replace agent-vault/coding-standards.md from scaffold (backs up existing file)"
 }
 
@@ -48,6 +48,9 @@ MANAGED_GITIGNORE_BLOCKS=(
 ROOT_AGENTS_MARKER="<!-- agent-vault-managed: root-wrapper; file=AGENTS.md -->"
 ROOT_CLAUDE_MARKER="<!-- agent-vault-managed: root-wrapper; file=CLAUDE.md -->"
 ROOT_GEMINI_MARKER="<!-- agent-vault-managed: root-wrapper; file=GEMINI.md -->"
+POLICY_TEMPLATE_REL_PATHS=(
+  "Decision Record.md"
+)
 
 repo_path_input=""
 dry_run="false"
@@ -133,7 +136,8 @@ for required in \
   "$vault_scaffold_dir/design-log/README.md" \
   "$vault_scaffold_dir/context/handoffs/README.md" \
   "$vault_scaffold_dir/decisions/README.md" \
-  "$vault_scaffold_dir/daily/README.md"
+  "$vault_scaffold_dir/daily/README.md" \
+  "$vault_scaffold_dir/Templates/Decision Record.md"
 do
   if [[ ! -f "$required" ]]; then
     echo "Error: missing scaffold file: $required"
@@ -207,6 +211,7 @@ preflight_symlink_checks() {
   assert_not_symlink "$project_dir/context/handoffs/README.md" "agent-vault/context/handoffs/README.md"
   assert_not_symlink "$project_dir/decisions/README.md" "agent-vault/decisions/README.md"
   assert_not_symlink "$project_dir/daily/README.md" "agent-vault/daily/README.md"
+  assert_not_symlink "$project_dir/Templates/Decision Record.md" "agent-vault/Templates/Decision Record.md"
   assert_not_symlink "$canonical_repo_path/.gitignore" ".gitignore"
 }
 
@@ -385,6 +390,8 @@ sync_template_files() {
   local src_file=""
   local rel=""
   local dest=""
+  local policy_rel=""
+  local skip="false"
 
   if [[ "$sync_templates" != "true" ]]; then
     return
@@ -392,6 +399,19 @@ sync_template_files() {
 
   while IFS= read -r -d '' src_file; do
     rel="${src_file#$src_root/}"
+    skip="false"
+
+    for policy_rel in "${POLICY_TEMPLATE_REL_PATHS[@]}"; do
+      if [[ "$rel" == "$policy_rel" ]]; then
+        skip="true"
+        break
+      fi
+    done
+
+    if [[ "$skip" == "true" ]]; then
+      continue
+    fi
+
     dest="$dest_root/$rel"
     sync_managed_file "$src_file" "$dest"
   done < <(find "$src_root" -type f -print0)
@@ -543,6 +563,7 @@ sync_managed_file "$vault_scaffold_dir/design-log/README.md" "$project_dir/desig
 sync_managed_file "$vault_scaffold_dir/context/handoffs/README.md" "$project_dir/context/handoffs/README.md"
 sync_managed_file "$vault_scaffold_dir/decisions/README.md" "$project_dir/decisions/README.md"
 sync_managed_file "$vault_scaffold_dir/daily/README.md" "$project_dir/daily/README.md"
+sync_managed_file "$vault_scaffold_dir/Templates/Decision Record.md" "$project_dir/Templates/Decision Record.md"
 
 seed_if_missing "$vault_scaffold_dir/lessons.md" "$project_dir/lessons.md"
 sync_template_files "$vault_scaffold_dir/Templates" "$project_dir/Templates"
