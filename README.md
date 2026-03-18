@@ -57,6 +57,10 @@ The generated vault is plain Markdown and works directly in Obsidian.
    - `git -C <repo-path> config core.hooksPath agent-vault/_assets/hooks`
 6. Commit generated or updated files in the target project repo.
 
+Generated workflows also expect:
+- accepted decision records to preserve owner approval provenance in the file before they are used as an automatic Human Decision Gate bypass
+- same-session daily/context/design-log notes to be reconciled after creating a commit, push, or PR so they reflect the committed state rather than a pre-commit checklist
+
 This repo should stay template-only. Do not store project-specific session logs here.
 
 ## Template Source

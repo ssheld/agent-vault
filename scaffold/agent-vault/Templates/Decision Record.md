@@ -10,11 +10,12 @@ decision_needed_from:
 scope:
 accepted_by:
 accepted_date:
+approval_source:
 ---
 
 # Decision: <title>
 
-> `proposed` = recorded but not owner-approved; not binding. `accepted` = owner-approved; binding for future work and a valid human decision gate bypass. Only explicit owner approval should change a record to `accepted`.
+> `proposed` = recorded but not owner-approved; not binding. `accepted` = owner-approved; binding for future work and a valid human decision gate bypass only when the record preserves approval provenance. Only explicit owner approval should change a record to `accepted`.
 
 ## Decision Needed
 - Decision needed from:
@@ -37,6 +38,7 @@ accepted_date:
 - Outcome:
 - Accepted by:
 - Accepted on:
+- Approval source:
 
 ## Consequences
 - Positive:
