@@ -131,8 +131,8 @@ validate_staged_context_log() {
   local -a errors=()
 
   tmp_file="$(mktemp "${TMPDIR:-/tmp}/agent-vault-context-log.XXXXXX")"
+  trap 'rm -f "$tmp_file"; trap - RETURN' RETURN
   git show ":$file_path" >"$tmp_file" 2>/dev/null || {
-    rm -f "$tmp_file"
     echo "Unable to read staged $file_path for validation."
     return 1
   }
@@ -173,6 +173,7 @@ validate_staged_context_log() {
     errors+=("$file_path Current Snapshot \`Last updated\` must match the top entry date \`$first_date\`; found \`${snapshot_last_updated:-<empty>}\`.")
   fi
 
+  trap - RETURN
   rm -f "$tmp_file"
 
   if [[ "${#errors[@]}" -eq 0 ]]; then
@@ -193,6 +194,37 @@ if [[ "${#all_staged_files[@]}" -eq 0 ]]; then
   exit 0
 fi
 
+non_deleted_staged_files=()
+while IFS= read -r file_path; do
+  [[ -n "$file_path" ]] || continue
+  non_deleted_staged_files+=("$file_path")
+done < <(git diff --cached --name-only --diff-filter=ACMRTUXB)
+
+has_context_log="false"
+for file_path in "${non_deleted_staged_files[@]}"; do
+  if [[ "$file_path" == "agent-vault/context-log.md" ]]; then
+    has_context_log="true"
+    break
+  fi
+done
+
+context_log_validation_failed="false"
+context_log_validation_output=""
+
+if [[ "$has_context_log" == "true" ]]; then
+  context_log_validation_output="$(validate_staged_context_log "agent-vault/context-log.md" 2>&1)" || context_log_validation_failed="true"
+fi
+
+if [[ "$context_log_validation_failed" == "true" ]]; then
+  echo "agent-vault metadata gate failed." >&2
+  echo "Context log validation failed:" >&2
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    echo "- $line" >&2
+  done <<<"$context_log_validation_output"
+  exit 1
+fi
+
 requires_metadata_gate="false"
 for file_path in "${all_staged_files[@]}"; do
   if ! is_runtime_note_file "$file_path"; then
@@ -205,20 +237,12 @@ if [[ "$requires_metadata_gate" != "true" ]]; then
   exit 0
 fi
 
-has_context_log="false"
 has_daily_note="false"
 has_design_log="false"
-
-non_deleted_staged_files=()
-while IFS= read -r file_path; do
-  [[ -n "$file_path" ]] || continue
-  non_deleted_staged_files+=("$file_path")
-done < <(git diff --cached --name-only --diff-filter=ACMRTUXB)
 
 for file_path in "${non_deleted_staged_files[@]}"; do
   case "$file_path" in
     agent-vault/context-log.md)
-      has_context_log="true"
       ;;
     agent-vault/daily/*.md)
       if [[ "$file_path" != "agent-vault/daily/README.md" ]]; then
@@ -245,24 +269,7 @@ if [[ "$has_design_log" != "true" ]]; then
 fi
 
 if [[ "${#missing_items[@]}" -eq 0 ]]; then
-  context_log_validation_failed="false"
-  context_log_validation_output=""
-
-  if [[ "$has_context_log" == "true" ]]; then
-    context_log_validation_output="$(validate_staged_context_log "agent-vault/context-log.md" 2>&1)" || context_log_validation_failed="true"
-  fi
-
-  if [[ "$context_log_validation_failed" != "true" ]]; then
-    exit 0
-  fi
-
-  echo "agent-vault metadata gate failed." >&2
-  echo "Context log validation failed:" >&2
-  while IFS= read -r line; do
-    [[ -n "$line" ]] || continue
-    echo "- $line" >&2
-  done <<<"$context_log_validation_output"
-  exit 1
+  exit 0
 fi
 
 echo "agent-vault metadata gate failed." >&2
