@@ -142,6 +142,8 @@ When a managed file changes, the script backs up the previous version under:
 Generated projects auto-enable the tracked metadata gate in the clone where `new-project.sh` or `update-project.sh` runs, unless `core.hooksPath` is already set to something else. Additional clones can enable it with:
 - `git -C <repo-path> config core.hooksPath agent-vault/_assets/hooks`
 
+That tracked hook enforces the baseline session artifacts and validates staged `agent-vault/context-log.md` ordering/freshness so newer entries do not get appended below stale headers.
+
 Both scripts also ensure root `.gitignore` includes managed local-only ignore entries (added only when missing):
 - `.obsidian/workspace.json`
 - `.obsidian/app.json`
