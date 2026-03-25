@@ -148,6 +148,17 @@
   - `agent-vault/decisions/DEC-###-<slug>.md` - decision record
 - `agent-vault/context/scratchpad.md` is temporary working memory only. Move lasting information into canonical files before finishing.
 
+## Artifact Ordering Rules
+Use the canonical ordering for each artifact type below instead of guessing based on recency alone.
+
+| Artifact | Ordering rule |
+| --- | --- |
+| `agent-vault/context-log.md`, `agent-vault/lessons.md` | Newest entry at top. |
+| `agent-vault/decision-log.md` | Newest active or changed decisions at top. |
+| `agent-vault/daily/YYYY-MM-DD.md` | Chronological within the day. Append new same-day work at the bottom. |
+| `agent-vault/design-log/` notes | One file per substantive session. Read the newest 3 notes first during session start. |
+| `agent-vault/context/handoffs/` notes | Read the note referenced by the latest `context-log.md` entry first; otherwise read the most recent handoff note. |
+
 ## Template Usage Rules
 - Use the bootstrap files in place. Do not create duplicate `README.md`, `plan.md`, `coding-standards.md`, `context-log.md`, `open-questions.md`, or `decision-log.md` notes elsewhere.
 - Create or update `agent-vault/daily/YYYY-MM-DD.md` on the first substantive work session of each local day. Reuse the same file for later sessions that day. Skip daily notes for trivial one-off requests.

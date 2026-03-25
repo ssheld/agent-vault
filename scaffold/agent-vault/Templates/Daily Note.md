@@ -14,6 +14,7 @@ last_updated:
 - [ ]
 
 ## Work Log
+<!-- Keep same-day work chronological. Append new entries or added session sections at the bottom. -->
 - HH:MM - 
 
 ## Decisions / Key Updates
