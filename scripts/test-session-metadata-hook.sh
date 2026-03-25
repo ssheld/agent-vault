@@ -34,6 +34,18 @@ assert_file_exists() {
   fi
 }
 
+assert_files_equal() {
+  local left="$1"
+  local right="$2"
+
+  if ! cmp -s "$left" "$right"; then
+    echo "Expected files to match:" >&2
+    echo "  $left" >&2
+    echo "  $right" >&2
+    exit 1
+  fi
+}
+
 assert_executable() {
   local file_path="$1"
 
@@ -97,6 +109,8 @@ clear_context_log_entries() {
 
   perl -0pi -e 's/^## Entries\s*\n.*\z/## Entries\n/mgs' "$file_path"
 }
+
+legacy_context_log_fixture="$repo_root/scripts/test-fixtures/context-log/legacy-known.md"
 
 hook_repo="$tmp_root/hook-enforcement"
 init_repo "$hook_repo"
@@ -169,6 +183,83 @@ if [[ "$(git -C "$update_repo" config --local --get core.hooksPath)" != "agent-v
   echo "Expected update-project.sh to enable the tracked hooks path." >&2
   exit 1
 fi
+
+missing_context_log_repo="$tmp_root/missing-context-log"
+init_repo "$missing_context_log_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$missing_context_log_repo" >/dev/null
+rm "$missing_context_log_repo/agent-vault/context-log.md"
+missing_output="$("$repo_root/scripts/update-project.sh" "$missing_context_log_repo" --sync-templates 2>&1)"
+assert_output_contains "$missing_output" "Unchanged: agent-vault/_assets/hooks/pre-commit"
+if [[ "$missing_output" == *"agent-vault/context-log.md"* ]]; then
+  echo "Missing context-log should not emit migration warnings or updates." >&2
+  printf '%s\n' "$missing_output" >&2
+  exit 1
+fi
+
+legacy_known_dry_run_repo="$tmp_root/legacy-context-log-dry-run"
+init_repo "$legacy_known_dry_run_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$legacy_known_dry_run_repo" >/dev/null
+cp "$legacy_context_log_fixture" "$legacy_known_dry_run_repo/agent-vault/context-log.md"
+legacy_known_before="$tmp_root/legacy-context-log-before.md"
+cp "$legacy_known_dry_run_repo/agent-vault/context-log.md" "$legacy_known_before"
+legacy_known_dry_run_output="$("$repo_root/scripts/update-project.sh" "$legacy_known_dry_run_repo" --dry-run --sync-templates 2>&1)"
+assert_output_contains "$legacy_known_dry_run_output" "Update: agent-vault/context-log.md (backup -> agent-vault/context/updates/"
+assert_files_equal "$legacy_known_before" "$legacy_known_dry_run_repo/agent-vault/context-log.md"
+
+legacy_known_repo="$tmp_root/legacy-context-log-migration"
+init_repo "$legacy_known_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$legacy_known_repo" >/dev/null
+cp "$legacy_context_log_fixture" "$legacy_known_repo/agent-vault/context-log.md"
+"$repo_root/scripts/update-project.sh" "$legacy_known_repo" --sync-templates >/dev/null
+assert_output_contains "$(sed -n '1,80p' "$legacy_known_repo/agent-vault/context-log.md")" "## Current Snapshot"
+assert_output_contains "$(sed -n '1,80p' "$legacy_known_repo/agent-vault/context-log.md")" "### $today"
+assert_output_contains "$(cat "$legacy_known_repo/agent-vault/context-log.md")" "## Legacy Unindexed Entries"
+assert_output_contains "$(cat "$legacy_known_repo/agent-vault/context-log.md")" "## Historical Snapshot"
+assert_output_contains "$(cat "$legacy_known_repo/agent-vault/context-log.md")" "## Historical Indexed Entries"
+mkdir -p "$legacy_known_repo/src"
+printf 'print(\"legacy migration\")\n' > "$legacy_known_repo/src/app.py"
+cat <<EOF > "$legacy_known_repo/agent-vault/daily/$today.md"
+# Daily Note
+
+- Validate migrated context-log compatibility.
+EOF
+cat <<EOF > "$legacy_known_repo/agent-vault/design-log/$today-0450-context-log-migration.md"
+# Design Log
+
+- Validate migrated context-log compatibility.
+EOF
+git -C "$legacy_known_repo" add \
+  src/app.py \
+  agent-vault/context-log.md \
+  "agent-vault/daily/$today.md" \
+  "agent-vault/design-log/$today-0450-context-log-migration.md"
+run_hook_expect_success "$legacy_known_repo"
+
+unknown_layout_repo="$tmp_root/unknown-context-log-layout"
+init_repo "$unknown_layout_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$unknown_layout_repo" >/dev/null
+cat <<EOF > "$unknown_layout_repo/agent-vault/context-log.md"
+---
+type: context-log
+project: hook-test
+last_updated: $today
+---
+
+# Context Log
+
+## Random Notes
+- This intentionally does not match a recognized generated layout.
+
+### $today 08:00 local - test-agent - ad hoc note
+#### Goal
+Exercise the unknown-layout warning path.
+EOF
+unknown_before="$tmp_root/unknown-context-log-before.md"
+cp "$unknown_layout_repo/agent-vault/context-log.md" "$unknown_before"
+unknown_output="$("$repo_root/scripts/update-project.sh" "$unknown_layout_repo" --sync-templates 2>&1)"
+assert_output_contains "$unknown_output" "Skip: agent-vault/context-log.md (legacy or unrecognized layout; manual migration required)"
+assert_output_contains "$unknown_output" "Warning: agent-vault/context-log.md uses a legacy or unrecognized layout and was left unchanged."
+assert_files_equal "$unknown_before" "$unknown_layout_repo/agent-vault/context-log.md"
 
 custom_hooks_repo="$tmp_root/custom-hooks-path"
 init_repo "$custom_hooks_repo"

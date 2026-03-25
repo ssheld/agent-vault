@@ -143,6 +143,7 @@ Generated projects auto-enable the tracked metadata gate in the clone where `new
 - `git -C <repo-path> config core.hooksPath agent-vault/_assets/hooks`
 
 That tracked hook enforces the baseline session artifacts and validates staged `agent-vault/context-log.md` ordering/freshness so newer entries do not get appended below stale headers.
+When syncing older generated repos, `update-project.sh` now auto-migrates recognized legacy `agent-vault/context-log.md` layouts into the validator-compatible top-level `## Current Snapshot` / `## Entries` shape before syncing the stricter hook. If the layout is not recognized, the script leaves the file unchanged and prints a manual-remediation warning instead of guessing.
 
 Both scripts also ensure root `.gitignore` includes managed local-only ignore entries (added only when missing):
 - `.obsidian/workspace.json`

@@ -146,6 +146,8 @@ do
 done
 
 timestamp="$(date '+%Y%m%d-%H%M%S')"
+today="$(date '+%Y-%m-%d')"
+now_local="$(date '+%Y-%m-%d %H:%M')"
 backup_dir="$project_dir/context/updates/$timestamp"
 
 created=0
@@ -154,6 +156,7 @@ unchanged=0
 backed_up=0
 skipped=0
 coding_standards_manual_merge_warning="false"
+context_log_manual_migration_warning="false"
 
 repo_relative_path() {
   local path="$1"
@@ -231,6 +234,294 @@ has_exact_line() {
       exit found ? 0 : 1
     }
   ' "$file_path"
+}
+
+extract_frontmatter_value() {
+  local file_path="$1"
+  local field_name="$2"
+
+  awk -v field_name="$field_name" '
+    BEGIN {
+      frontmatter_markers = 0
+    }
+    /^---$/ {
+      frontmatter_markers += 1
+      next
+    }
+    frontmatter_markers == 1 && index($0, field_name ":") == 1 {
+      value = substr($0, length(field_name) + 2)
+      sub(/^[[:space:]]+/, "", value)
+      sub(/[[:space:]]+$/, "", value)
+      print value
+      exit
+    }
+    frontmatter_markers >= 2 {
+      exit
+    }
+  ' "$file_path"
+}
+
+first_matching_line_number() {
+  local file_path="$1"
+  local pattern="$2"
+
+  awk -v pattern="$pattern" '
+    $0 ~ pattern {
+      print NR
+      exit
+    }
+  ' "$file_path"
+}
+
+extract_section_body() {
+  local file_path="$1"
+  local heading="$2"
+
+  awk -v heading="$heading" '
+    !capture && $0 == heading {
+      capture = 1
+      next
+    }
+    capture {
+      if ($0 ~ /^## /) {
+        exit
+      }
+      print
+    }
+  ' "$file_path"
+}
+
+infer_active_branch() {
+  local repo_root="$1"
+  local branch=""
+
+  if git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    branch="$(git -C "$repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$branch" || "$branch" == "HEAD" ]]; then
+    printf 'main\n'
+    return
+  fi
+
+  printf '%s\n' "$branch"
+}
+
+replace_file_from_tmp() {
+  local tmp_file="$1"
+  local dest="$2"
+  local rel
+  local path_status=0
+
+  rel="$(repo_relative_path "$dest")"
+
+  validate_write_path "$dest" || path_status=$?
+  if [[ "$path_status" -eq 1 ]]; then
+    echo "Error: refusing to update $rel because a path component is a symlink." >&2
+    echo "Replace symlinked path components with regular directories/files and rerun update-project.sh." >&2
+    exit 1
+  fi
+  if [[ "$path_status" -eq 2 ]]; then
+    echo "Error: refusing to update path outside repository root: $rel" >&2
+    exit 1
+  fi
+
+  assert_not_symlink "$dest" "$rel"
+
+  if cmp -s "$tmp_file" "$dest"; then
+    echo "Unchanged: $rel"
+    unchanged=$((unchanged + 1))
+    return
+  fi
+
+  if [[ "$dry_run" == "true" ]]; then
+    echo "Update: $rel (backup -> agent-vault/context/updates/$timestamp/$rel)"
+    backed_up=$((backed_up + 1))
+  else
+    local backup_path="$backup_dir/$rel"
+    mkdir -p "$(dirname "$backup_path")"
+    cp -p "$dest" "$backup_path"
+    cp "$tmp_file" "$dest"
+    echo "Updated: $rel"
+    backed_up=$((backed_up + 1))
+  fi
+
+  updated=$((updated + 1))
+}
+
+classify_context_log_layout() {
+  local file_path="$1"
+  local snapshot_line=""
+  local entries_line=""
+  local entry_heading_line=""
+  local legacy_entry_heading_line=""
+  local has_historical_wrappers="false"
+
+  if [[ ! -f "$file_path" ]]; then
+    printf 'missing\n'
+    return
+  fi
+
+  snapshot_line="$(first_matching_line_number "$file_path" '^## Current Snapshot$')"
+  entries_line="$(first_matching_line_number "$file_path" '^## Entries$')"
+  entry_heading_line="$(first_matching_line_number "$file_path" '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} local')"
+  legacy_entry_heading_line="$(first_matching_line_number "$file_path" '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} local — ')"
+
+  if grep -Eq '^## (Legacy Unindexed Entries|Historical Snapshot|Historical Indexed Entries)$' "$file_path"; then
+    has_historical_wrappers="true"
+  fi
+
+  if [[ -n "$snapshot_line" && -n "$entries_line" && "$snapshot_line" -lt "$entries_line" ]]; then
+    if [[ -z "$entry_heading_line" || "$entries_line" -lt "$entry_heading_line" || "$has_historical_wrappers" == "true" ]]; then
+      printf 'current\n'
+      return
+    fi
+  fi
+
+  if [[ "$has_historical_wrappers" != "true" && -n "$snapshot_line" && -n "$entries_line" && -n "$entry_heading_line" && -n "$legacy_entry_heading_line" ]]; then
+    if [[ "$entry_heading_line" -lt "$snapshot_line" && "$legacy_entry_heading_line" -lt "$snapshot_line" && "$snapshot_line" -lt "$entries_line" ]]; then
+      printf 'legacy-known\n'
+      return
+    fi
+  fi
+
+  printf 'unknown\n'
+}
+
+migrate_legacy_context_log_if_needed() {
+  local file_path="$project_dir/context-log.md"
+  local rel="agent-vault/context-log.md"
+  local layout=""
+  local project_slug=""
+  local display_project=""
+  local active_branch=""
+  local title_line=""
+  local snapshot_line=""
+  local entries_line=""
+  local prefix_start_line=""
+  local prefix_end_line=""
+  local legacy_unindexed_body=""
+  local historical_snapshot_body=""
+  local historical_entries_body=""
+  local tmp_file=""
+
+  layout="$(classify_context_log_layout "$file_path")"
+
+  case "$layout" in
+    missing|current)
+      return
+      ;;
+    unknown)
+      echo "Skip: $rel (legacy or unrecognized layout; manual migration required)"
+      skipped=$((skipped + 1))
+      context_log_manual_migration_warning="true"
+      return
+      ;;
+    legacy-known)
+      ;;
+    *)
+      echo "Error: unknown context-log layout classification: $layout" >&2
+      exit 1
+      ;;
+  esac
+
+  project_slug="$(extract_frontmatter_value "$file_path" "project")"
+  if [[ -z "$project_slug" ]]; then
+    project_slug="$(basename "$canonical_repo_path")"
+  fi
+
+  display_project="$(extract_section_body "$file_path" "## Current Snapshot" | awk '
+    index($0, "- Project:") == 1 {
+      value = substr($0, length("- Project:") + 1)
+      sub(/^[[:space:]]+/, "", value)
+      sub(/[[:space:]]+$/, "", value)
+      print value
+      exit
+    }
+  ')"
+  if [[ -z "$display_project" ]]; then
+    display_project="$project_slug"
+  fi
+
+  active_branch="$(infer_active_branch "$canonical_repo_path")"
+  title_line="$(first_matching_line_number "$file_path" '^# Context Log$')"
+  snapshot_line="$(first_matching_line_number "$file_path" '^## Current Snapshot$')"
+  entries_line="$(first_matching_line_number "$file_path" '^## Entries$')"
+
+  prefix_start_line=1
+  if [[ -n "$title_line" ]]; then
+    prefix_start_line=$((title_line + 1))
+  fi
+  prefix_end_line=$((snapshot_line - 1))
+
+  if [[ "$prefix_start_line" -le "$prefix_end_line" ]]; then
+    legacy_unindexed_body="$(sed -n "${prefix_start_line},${prefix_end_line}p" "$file_path")"
+  fi
+  historical_snapshot_body="$(extract_section_body "$file_path" "## Current Snapshot")"
+  historical_entries_body="$(sed -n "$((entries_line + 1)),\$p" "$file_path")"
+
+  tmp_file="$(mktemp "${TMPDIR:-/tmp}/agent-vault-context-log-migration.XXXXXX")"
+  trap 'rm -f "$tmp_file"; trap - RETURN' RETURN
+
+  {
+    printf -- '---\n'
+    printf 'type: context-log\n'
+    printf 'project: %s\n' "$project_slug"
+    printf 'last_updated: %s\n' "$today"
+    printf -- '---\n\n'
+    printf '# Context Log\n\n'
+    printf '## Current Snapshot\n'
+    printf -- '- Project: %s\n' "$display_project"
+    printf -- '- Primary goal: Preserve existing cross-session context while using this validator-compatible layout for future updates.\n'
+    printf -- '- Current status: This context log was auto-migrated during `update-project.sh`. Historical content is preserved below, and future updates should use the top-level `## Entries` section.\n'
+    printf -- '- Active branch: `%s`\n' "$active_branch"
+    printf -- '- Last updated: %s\n\n' "$today"
+    printf '## Entries\n\n'
+    printf '### %s local - update-project - context-log-layout-migration\n' "$now_local"
+    printf '#### Goal\n'
+    printf 'Migrate this context log into the validator-compatible layout while preserving existing historical content.\n\n'
+    printf '#### State\n'
+    printf -- '- Added a top-level `## Current Snapshot` and `## Entries` block for future updates.\n'
+    printf -- '- Preserved prior context-log content below under historical sections instead of rewriting old entries in place.\n'
+    printf -- '- Future substantive sessions should add new entries to the top-level `## Entries` section.\n\n'
+    printf '#### Decisions\n'
+    printf -- '- Auto-migrate the recognized legacy generated layout during scaffold sync.\n'
+    printf -- '- Preserve older sections below rather than normalizing all historical content in the same migration.\n\n'
+    printf '#### Open Questions\n'
+    printf -- '- None.\n\n'
+    printf '#### Next Prompt\n'
+    printf '"Continue working from the top-level `## Current Snapshot` and `## Entries` sections in `agent-vault/context-log.md`."\n\n'
+    printf '#### References\n'
+    printf -- '- `agent-vault/context-log.md`\n'
+    printf -- '- `agent-vault/shared-rules.md`\n'
+    printf -- '- `agent-vault/_assets/hooks/pre-commit`\n'
+  } >"$tmp_file"
+
+  if [[ -n "$legacy_unindexed_body" ]]; then
+    {
+      printf '\n## Legacy Unindexed Entries\n'
+      printf '%s\n' "$legacy_unindexed_body"
+    } >>"$tmp_file"
+  fi
+
+  if [[ -n "$historical_snapshot_body" ]]; then
+    {
+      printf '\n## Historical Snapshot\n'
+      printf '%s\n' "$historical_snapshot_body"
+    } >>"$tmp_file"
+  fi
+
+  if [[ -n "$historical_entries_body" ]]; then
+    {
+      printf '\n## Historical Indexed Entries\n'
+      printf '%s\n' "$historical_entries_body"
+    } >>"$tmp_file"
+  fi
+
+  replace_file_from_tmp "$tmp_file" "$file_path"
+
+  trap - RETURN
+  rm -f "$tmp_file"
 }
 
 gitignore_has_line() {
@@ -557,6 +848,7 @@ sync_managed_file "$vault_scaffold_dir/AGENTS.md" "$project_dir/AGENTS.md"
 sync_managed_file "$vault_scaffold_dir/CLAUDE.md" "$project_dir/CLAUDE.md"
 sync_managed_file "$vault_scaffold_dir/GEMINI.md" "$project_dir/GEMINI.md"
 sync_managed_file "$vault_scaffold_dir/handoff.md" "$project_dir/handoff.md"
+migrate_legacy_context_log_if_needed
 sync_managed_file "$vault_scaffold_dir/_assets/hooks/README.md" "$project_dir/_assets/hooks/README.md"
 sync_managed_file "$vault_scaffold_dir/_assets/hooks/pre-commit" "$project_dir/_assets/hooks/pre-commit"
 sync_managed_file "$vault_scaffold_dir/design-log/README.md" "$project_dir/design-log/README.md"
@@ -599,6 +891,13 @@ if [[ "$coding_standards_manual_merge_warning" == "true" ]]; then
   echo
   echo "Warning: agent-vault/coding-standards.md differs from the scaffold and was left unchanged." >&2
   echo "If you want the newer scaffold standards, merge them manually or rerun update-project.sh with --sync-coding-standards to replace the file with a backup." >&2
+fi
+
+if [[ "$context_log_manual_migration_warning" == "true" ]]; then
+  echo
+  echo "Warning: agent-vault/context-log.md uses a legacy or unrecognized layout and was left unchanged." >&2
+  echo "The stricter tracked hook expects a top-level \`## Current Snapshot\` section followed by \`## Entries\`." >&2
+  echo "Before the next substantive metadata-gated commit, add that top-level block and make sure frontmatter \`last_updated\` and snapshot \`Last updated\` match the top entry date." >&2
 fi
 
 if [[ "$hook_rc" -ne 0 ]]; then

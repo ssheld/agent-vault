@@ -242,8 +242,6 @@ has_design_log="false"
 
 for file_path in "${non_deleted_staged_files[@]}"; do
   case "$file_path" in
-    agent-vault/context-log.md)
-      ;;
     agent-vault/daily/*.md)
       if [[ "$file_path" != "agent-vault/daily/README.md" ]]; then
         has_daily_note="true"
