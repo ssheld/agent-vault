@@ -108,6 +108,18 @@ When performing a code review on this repository, behave like a senior backend e
 - Agents must still recommend a preferred option with rationale. Do not use the trade-off label as an excuse to stay noncommittal.
 - Do not present one trade-off choice as mandatory unless the PR conflicts with an `accepted` decision record, a user-approved plan, or an explicit documented requirement.
 
+### Emphasis Triggers
+Use these triggers to decide which existing priorities deserve extra scrutiny based on PR scope. They guide review attention only; do not list triggers, lenses, or focused passes in the posted review body unless they explain an actual finding.
+
+| Scope trigger | Emphasize priority |
+| --- | --- |
+| Auth, permissions, secrets, CI/workflows, shell or tool execution, unsafe HTML/deserialization, model/tool invocation changes, or untrusted input handling | Security and Data Safety; AI and Agent-Specific Safety Requirements |
+| External services, retries, timeouts, queues, background jobs, cleanup scripts, or partial-failure behavior | Reliability and Observability |
+| CLI flags, setup steps, generated templates, public APIs/contracts, `docs/design.md`, `README.md`, or documented architecture boundaries | Requirements Alignment |
+| Refactors, new helpers, new abstractions, duplicated logic, or broad policy/template changes | Maintainability and System Design |
+| Behavior changes, bug fixes, validation rules, state transitions, or edge-case handling | Correctness and Edge Cases; Testing Expectations |
+| Cost-sensitive loops, batching, caching, model calls, or concurrency limits | Performance and Cost |
+
 ## Severity Mapping
 - Critical = P0 (blocks merge)
 - Recommended = P1 (should fix before merge)
