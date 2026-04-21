@@ -7,12 +7,13 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$script_dir/lib/tracked-hooks.sh"
 
 usage() {
-  echo "Usage: $0 <repo-path> [--dry-run] [--migrate-root] [--sync-templates] [--sync-coding-standards]"
+  echo "Usage: $0 <repo-path> [--dry-run] [--migrate-root] [--migrate-root-scripts] [--sync-templates] [--sync-coding-standards]"
   echo "Example: $0 ~/workspaces/harrier --dry-run --sync-templates --sync-coding-standards"
   echo ""
   echo "Options:"
   echo "  --dry-run       Show what would change without writing files"
   echo "  --migrate-root  Replace unmanaged root wrappers with managed versions (backs up originals)"
+  echo "  --migrate-root-scripts  Replace unmanaged root helper scripts with managed versions (backs up originals)"
   echo "  --sync-templates  Refresh project-local agent-vault/Templates/ from scaffold (backs up existing files); policy-critical templates may sync on normal updates"
   echo "  --sync-coding-standards  Replace agent-vault/coding-standards.md from scaffold (backs up existing file)"
 }
@@ -48,6 +49,8 @@ MANAGED_GITIGNORE_BLOCKS=(
 ROOT_AGENTS_MARKER="<!-- agent-vault-managed: root-wrapper; file=AGENTS.md -->"
 ROOT_CLAUDE_MARKER="<!-- agent-vault-managed: root-wrapper; file=CLAUDE.md -->"
 ROOT_GEMINI_MARKER="<!-- agent-vault-managed: root-wrapper; file=GEMINI.md -->"
+NEW_WORKTREE_HELPER_MARKER="# agent-vault-managed: helper-script; file=new-worktree.sh"
+REMOVE_WORKTREE_HELPER_MARKER="# agent-vault-managed: helper-script; file=remove-worktree.sh"
 POLICY_TEMPLATE_REL_PATHS=(
   "Decision Record.md"
 )
@@ -55,6 +58,7 @@ POLICY_TEMPLATE_REL_PATHS=(
 repo_path_input=""
 dry_run="false"
 migrate_root="false"
+migrate_root_scripts="false"
 sync_templates="false"
 sync_coding_standards="false"
 
@@ -65,6 +69,9 @@ for arg in "$@"; do
       ;;
     --migrate-root)
       migrate_root="true"
+      ;;
+    --migrate-root-scripts)
+      migrate_root_scripts="true"
       ;;
     --sync-templates)
       sync_templates="true"
@@ -121,6 +128,9 @@ for required in \
   "$root_scaffold_dir/GEMINI.md" \
   "$root_scaffold_dir/.github/pull_request_template.md" \
   "$root_scaffold_dir/docs/design.md" \
+  "$root_scaffold_dir/docs/runbooks/parallel-agent-worktrees.md" \
+  "$root_scaffold_dir/scripts/new-worktree.sh" \
+  "$root_scaffold_dir/scripts/remove-worktree.sh" \
   "$vault_scaffold_dir/AGENTS.md" \
   "$vault_scaffold_dir/CLAUDE.md" \
   "$vault_scaffold_dir/GEMINI.md" \
@@ -588,6 +598,14 @@ is_managed_root_wrapper() {
   has_exact_line "$file_path" "$marker"
 }
 
+is_managed_helper_script() {
+  local file_path="$1"
+  local marker="$2"
+
+  [[ -f "$file_path" ]] || return 1
+  has_exact_line "$file_path" "$marker"
+}
+
 sync_managed_file() {
   local src="$1"
   local dest="$2"
@@ -640,6 +658,17 @@ sync_managed_file() {
   fi
 
   updated=$((updated + 1))
+}
+
+sync_managed_executable_file() {
+  local src="$1"
+  local dest="$2"
+
+  sync_managed_file "$src" "$dest"
+
+  if [[ "$dry_run" != "true" && -f "$dest" ]]; then
+    chmod +x "$dest"
+  fi
 }
 
 seed_if_missing() {
@@ -774,6 +803,40 @@ sync_root_wrapper_if_managed() {
   skipped=$((skipped + 1))
 }
 
+sync_root_helper_script_if_managed() {
+  local src="$1"
+  local dest="$2"
+  local marker="$3"
+  local rel
+
+  rel="$(repo_relative_path "$dest")"
+
+  if [[ -L "$dest" ]]; then
+    echo "Skip: $rel (symlink files are not auto-managed)"
+    skipped=$((skipped + 1))
+    return
+  fi
+
+  if [[ ! -e "$dest" ]]; then
+    sync_managed_executable_file "$src" "$dest"
+    return
+  fi
+
+  if is_managed_helper_script "$dest" "$marker"; then
+    sync_managed_executable_file "$src" "$dest"
+    return
+  fi
+
+  if [[ "$migrate_root_scripts" == "true" ]]; then
+    echo "Migrating: $rel (unmanaged -> managed helper script)"
+    sync_managed_executable_file "$src" "$dest"
+    return
+  fi
+
+  echo "Skip: $rel (unmanaged root helper script; use --migrate-root-scripts to replace)"
+  skipped=$((skipped + 1))
+}
+
 ensure_managed_gitignore_entries() {
   local repo_root="$1"
   local gitignore_path="$repo_root/.gitignore"
@@ -838,6 +901,9 @@ sync_root_wrapper_if_managed "$root_scaffold_dir/CLAUDE.md" "$canonical_repo_pat
 sync_root_wrapper_if_managed "$root_scaffold_dir/GEMINI.md" "$canonical_repo_path/GEMINI.md" "$ROOT_GEMINI_MARKER"
 seed_if_missing "$root_scaffold_dir/.github/pull_request_template.md" "$canonical_repo_path/.github/pull_request_template.md"
 seed_if_missing "$root_scaffold_dir/docs/design.md" "$canonical_repo_path/docs/design.md"
+seed_if_missing "$root_scaffold_dir/docs/runbooks/parallel-agent-worktrees.md" "$canonical_repo_path/docs/runbooks/parallel-agent-worktrees.md"
+sync_root_helper_script_if_managed "$root_scaffold_dir/scripts/new-worktree.sh" "$canonical_repo_path/scripts/new-worktree.sh" "$NEW_WORKTREE_HELPER_MARKER"
+sync_root_helper_script_if_managed "$root_scaffold_dir/scripts/remove-worktree.sh" "$canonical_repo_path/scripts/remove-worktree.sh" "$REMOVE_WORKTREE_HELPER_MARKER"
 sync_project_owned_file_if_requested "$vault_scaffold_dir/coding-standards.md" "$project_dir/coding-standards.md" "--sync-coding-standards" "$sync_coding_standards"
 seed_if_missing "$vault_scaffold_dir/project-context.md" "$project_dir/project-context.md"
 seed_if_missing "$vault_scaffold_dir/project-commands.md" "$project_dir/project-commands.md"
