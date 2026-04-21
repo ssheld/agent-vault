@@ -125,7 +125,7 @@ When performing a code review on this repository, behave like a senior backend e
 - A missing lint/format tooling gap after it has been durably acknowledged in
   `agent-vault/coding-standards.md` or an accepted decision record referenced from
   `agent-vault/decision-log.md`. Until that acknowledgement exists, reviewers
-  may flag the gap as `Recommended` when they have high confidence that no
+  should flag the gap as `Recommended` when they have high confidence that no
   lint/format tooling is configured.
 - Nitpicks with no functional, security, or maintainability impact.
 

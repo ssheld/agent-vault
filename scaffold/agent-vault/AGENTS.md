@@ -111,7 +111,6 @@
   - Diff review: inspect the final diff against the base branch for unintended edits, leftover debug code, documentation drift, and missing `agent-vault` metadata updates.
 - If a step fails, fix the issue and rerun the relevant parts of the loop before proceeding.
 - If a step is unavailable or not meaningful for the repo, explicitly say so in the final summary or PR body instead of implying it ran.
-- If lint/format tooling is unavailable or unconfigured, this disclosure is required unless the gap is already documented in `agent-vault/coding-standards.md` or in an accepted decision record referenced from `agent-vault/decision-log.md`.
 
 ## Code Style
 - Follow the primary language, framework, and toolchain guidance recorded in `agent-vault/coding-standards.md`.
