@@ -14,7 +14,7 @@ last_updated:
 - [ ]
 
 ## Work Log
-<!-- Keep same-day work chronological. Append new entries or added session sections at the bottom. -->
+<!-- Keep same-day work chronological. Append new entries or added session sections at the bottom. Prefer repo-relative paths where possible. -->
 - HH:MM - 
 
 ## Decisions / Key Updates

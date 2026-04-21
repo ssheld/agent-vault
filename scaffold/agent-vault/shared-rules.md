@@ -161,6 +161,7 @@ Use the canonical ordering for each artifact type below instead of guessing base
 
 ## Template Usage Rules
 - Use the bootstrap files in place. Do not create duplicate `README.md`, `plan.md`, `coding-standards.md`, `context-log.md`, `open-questions.md`, or `decision-log.md` notes elsewhere.
+- In committed memory artifacts, prefer repo-relative paths and portable command examples such as `agent-vault/...`, `docs/...`, `./scripts/...`, or `<repo-root>/...`. Machine-specific absolute paths such as `/Users/...`, `/home/...`, or `C:\...` are acceptable only when the local path itself is relevant debugging or environment context.
 - Create or update `agent-vault/daily/YYYY-MM-DD.md` on the first substantive work session of each local day. Reuse the same file for later sessions that day. Skip daily notes for trivial one-off requests.
 - Add a design-log note for every substantive work session.
 - When a durable decision is made about architecture, workflow, API shape, data model, deployment, or tool policy, create a decision record in `agent-vault/decisions/` and add it to `agent-vault/decision-log.md`.

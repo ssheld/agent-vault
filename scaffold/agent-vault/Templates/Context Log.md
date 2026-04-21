@@ -11,6 +11,7 @@ last_updated:
 - Entry headings must start with `YYYY-MM-DD HH:MM local - <agent> - <topic>`.
 - Keep entries short and concrete.
 - Reference files and PRs instead of pasting long diffs.
+- Prefer repo-relative paths where possible.
 - Pair each major update with a design-log entry.
 - Add a handoff note when transferring work between agents/sessions.
 - Reference the active handoff note or decision record when one changes current work.
