@@ -16,6 +16,7 @@ scope:
 ## Open Issues
 
 ## Related Artifacts
+<!-- Prefer repo-relative paths where possible. -->
 - `agent-vault/daily/...`
 - `agent-vault/decisions/...`
 - `agent-vault/context/handoffs/...`
