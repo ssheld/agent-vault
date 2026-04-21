@@ -125,6 +125,7 @@
 ## PR Authoring Standards
 - When creating a pull request, include a complete PR body; do not open with a one-line summary only.
 - Use an imperative, outcome-focused title that reflects the actual change scope.
+- Do not prefix PR titles with agent or client identifiers such as `[codex]`, `[claude]`, or `[agent]` unless the repository explicitly requires that format.
 - Keep PR scope coherent; split unrelated work into separate PRs.
 - Prefer opening as draft until validation is complete, unless the user asks otherwise.
 - PR body must include:
