@@ -5,12 +5,17 @@ on:
     paths:
       - "README.md"
       - "scaffold/agent-vault/**"
+      - "scaffold/root/scripts/**"
+      - "scaffold/root/docs/runbooks/**"
       - "scripts/new-project.sh"
       - "scripts/update-project.sh"
       - "scripts/test-gitignore-management.sh"
       - "scripts/test-coding-standards-sync.sh"
       - "scripts/test-decision-template-sync.sh"
       - "scripts/test-session-metadata-hook.sh"
+      - "scripts/test-new-worktree.sh"
+      - "scripts/test-remove-worktree.sh"
+      - "scripts/test-worktree-helper-sync.sh"
       - ".github/workflows/scaffold-regression-checks.yml"
   push:
     branches:
@@ -18,12 +23,17 @@ on:
     paths:
       - "README.md"
       - "scaffold/agent-vault/**"
+      - "scaffold/root/scripts/**"
+      - "scaffold/root/docs/runbooks/**"
       - "scripts/new-project.sh"
       - "scripts/update-project.sh"
       - "scripts/test-gitignore-management.sh"
       - "scripts/test-coding-standards-sync.sh"
       - "scripts/test-decision-template-sync.sh"
       - "scripts/test-session-metadata-hook.sh"
+      - "scripts/test-new-worktree.sh"
+      - "scripts/test-remove-worktree.sh"
+      - "scripts/test-worktree-helper-sync.sh"
       - ".github/workflows/scaffold-regression-checks.yml"
   workflow_dispatch:
 
@@ -41,3 +51,9 @@ jobs:
         run: bash scripts/test-decision-template-sync.sh
       - name: Verify session metadata hook behavior
         run: bash scripts/test-session-metadata-hook.sh
+      - name: Verify worktree creation helper
+        run: bash scripts/test-new-worktree.sh
+      - name: Verify worktree removal helper
+        run: bash scripts/test-remove-worktree.sh
+      - name: Verify worktree helper scaffold sync
+        run: bash scripts/test-worktree-helper-sync.sh

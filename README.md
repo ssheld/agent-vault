@@ -52,6 +52,8 @@ The generated vault is plain Markdown and works directly in Obsidian.
    - Example: `./scripts/update-project.sh ~/workspaces/harrier`
    - To migrate unmanaged root wrappers to managed versions:
      - `./scripts/update-project.sh <repo-path> --migrate-root`
+   - To migrate unmanaged root worktree helper scripts to managed versions:
+     - `./scripts/update-project.sh <repo-path> --migrate-root-scripts`
 4. `new-project.sh` and `update-project.sh` automatically enable the tracked metadata hook in the current clone when `core.hooksPath` is not already customized.
 5. For additional clones, or when you want to opt into the tracked hook manually:
    - `git -C <repo-path> config core.hooksPath agent-vault/_assets/hooks`
@@ -68,6 +70,8 @@ This repo should stay template-only. Do not store project-specific session logs 
   - `scaffold/agent-vault/`
 - Project-root scaffold copied into project repos lives at:
   - `scaffold/root/`
+  - including optional helper scripts under `scaffold/root/scripts/` and
+    runbooks under `scaffold/root/docs/runbooks/`
 
 If you want changes to propagate to future projects, edit files under `scaffold/agent-vault/` and `scaffold/root/`.
 
@@ -91,6 +95,9 @@ Run the scaffold regression scripts locally when changing bootstrap, sync, or tr
 - `bash scripts/test-coding-standards-sync.sh`
 - `bash scripts/test-decision-template-sync.sh`
 - `bash scripts/test-session-metadata-hook.sh`
+- `bash scripts/test-new-worktree.sh`
+- `bash scripts/test-remove-worktree.sh`
+- `bash scripts/test-worktree-helper-sync.sh`
 
 CI also runs these checks via `.github/workflows/scaffold-regression-checks.yml`.
 
@@ -114,9 +121,14 @@ CI also runs these checks via `.github/workflows/scaffold-regression-checks.yml`
   - `<repo>/AGENTS.md`
   - `<repo>/CLAUDE.md`
   - `<repo>/GEMINI.md`
+- Root helper scripts (managed only when the script has the `agent-vault-managed`
+  marker, or when created by `update-project.sh` because it was missing):
+  - `<repo>/scripts/new-worktree.sh`
+  - `<repo>/scripts/remove-worktree.sh`
 - Seeded if missing:
   - `<repo>/.github/pull_request_template.md`
   - `<repo>/docs/design.md`
+  - `<repo>/docs/runbooks/parallel-agent-worktrees.md`
   - `<repo>/agent-vault/project-context.md`
   - `<repo>/agent-vault/project-commands.md`
   - `<repo>/agent-vault/lessons.md`
@@ -124,6 +136,9 @@ CI also runs these checks via `.github/workflows/scaffold-regression-checks.yml`
 `<repo>/agent-vault/coding-standards.md` remains project-owned by default. `update-project.sh` does not replace it unless you explicitly pass `--sync-coding-standards`.
 
 If an existing root policy file does not have the managed marker, `update-project.sh` leaves it unchanged and reports a skip notice suggesting `--migrate-root`.
+If an existing root worktree helper script does not have the managed marker,
+`update-project.sh` leaves it unchanged and reports a skip notice suggesting
+`--migrate-root-scripts`.
 
 Template refresh is opt-in:
 - `./scripts/update-project.sh <repo-path> --sync-templates` updates `agent-vault/Templates/` from the scaffold and backs up replaced files under `agent-vault/context/updates/<timestamp>/`.
@@ -135,6 +150,26 @@ Coding standards refresh is also opt-in:
 
 ### Migrating Root Wrappers (`--migrate-root`)
 When running `update-project.sh` with `--migrate-root`, unmanaged root wrappers (those missing the `agent-vault-managed` marker) are backed up and replaced with the current scaffold versions. This is useful for workspaces created before root wrapper management was introduced.
+
+### Migrating Root Worktree Helpers (`--migrate-root-scripts`)
+Generated projects include optional helpers for creating and removing
+issue-scoped Git worktrees:
+
+- `<repo>/scripts/new-worktree.sh`
+- `<repo>/scripts/remove-worktree.sh`
+
+When running `update-project.sh` normally, missing helper scripts are created
+from the scaffold and executable permissions are enforced. Existing helper
+scripts with the managed marker are updated from the scaffold. Existing helper
+scripts without the marker are skipped unless you pass
+`--migrate-root-scripts`, which backs up and replaces them with the managed
+versions.
+
+The default worktree location is a sibling directory named
+`../<repo-name>-wt/`. A writing agent can run the setup helper from the original
+checkout, but the generated runbook recommends launching actual writing
+sessions from inside the generated worktree so agent sandbox permissions use
+that worktree as the active workspace.
 
 When a managed file changes, the script backs up the previous version under:
 - `<repo>/agent-vault/context/updates/<timestamp>/...`
@@ -198,7 +233,9 @@ It also creates project-root files when missing:
 - `<repo-path>/CLAUDE.md` -> imports `agent-vault/CLAUDE.md` and `agent-vault/review-policy.md`
 - `<repo-path>/GEMINI.md` -> imports `agent-vault/GEMINI.md` and `agent-vault/review-policy.md`
 - `<repo-path>/docs/design.md` -> starter architecture/design document with embedded Mermaid diagrams
+- `<repo-path>/docs/runbooks/parallel-agent-worktrees.md` -> optional workflow for one issue-scoped Git worktree per writing agent
 - `<repo-path>/.github/pull_request_template.md` -> standardized agent PR body template
+- `<repo-path>/scripts/new-worktree.sh` and `<repo-path>/scripts/remove-worktree.sh` -> managed helpers for parallel-agent Git worktree setup and cleanup
 - Bootstrap behavior: `new-project.sh` hydrates project metadata placeholders (`repo_reference`, active branch, dates) in the baseline `agent-vault/` docs, seeds non-empty baseline content in `agent-vault/README.md`, `plan.md`, `coding-standards.md`, and `context-log.md`, copies structured starter templates for `project-context.md` and `project-commands.md`, and copies scaffold helper docs such as `agent-vault/design-log/README.md` plus `docs/design.md`.
 
 If root files already exist, the script leaves them unchanged unless `--migrate-existing-root-md` is provided.
