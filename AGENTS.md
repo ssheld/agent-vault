@@ -121,7 +121,14 @@ When performing a code review on this repository, behave like a senior backend e
 - Changes in files outside the PR diff
 - Intentional policy duplication between root `AGENTS.md` and `scaffold/agent-vault/review-policy.md` (Codex compatibility); flag only if files drift.
 - Pre-existing issues not introduced by the PR. Use git blame or commit history to distinguish inherited code from new changes. Only flag pre-existing issues if they create an immediate risk in combination with PR changes.
-- Issues that linters, formatters, or type checkers already catch. Assume CI enforces these; do not duplicate their coverage.
+- Issues that configured linters, formatters, or type checkers already catch
+  when those tools are present and enforced. Do not assume lint/format tooling
+  exists when it is not configured.
+- A missing lint/format tooling gap after it has been durably acknowledged in
+  `agent-vault/coding-standards.md` or an accepted decision record referenced from
+  `agent-vault/decision-log.md`. Until that acknowledgement exists, reviewers
+  should flag the gap as `Recommended` when they have high confidence that no
+  lint/format tooling is configured.
 - Nitpicks with no functional, security, or maintainability impact.
 
 ## AI and Agent-Specific Safety Requirements
