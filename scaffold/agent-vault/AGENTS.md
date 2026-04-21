@@ -104,11 +104,14 @@
   - Build / package: confirm the changed artifact can be produced when the repo has a build, bundle, or packaging step.
   - Typecheck / static analysis: run compiler, type-system, or equivalent static checks when the repo uses them.
   - Lint / format validation: run lint or formatting validation when the repo uses them.
+    If no lint or format tooling is configured, check whether that gap is documented in `agent-vault/coding-standards.md` or in an accepted decision record referenced from `agent-vault/decision-log.md`.
+    If it is not documented, the final summary or PR body MUST state that lint/format validation was unavailable or unconfigured and recommend adding tooling or documenting the intentional gap.
   - Tests / coverage: run the most relevant automated tests for the changed behavior, and include coverage checks when the repo tracks them.
   - Security / secrets review: run applicable dependency, secret, or security-sensitive checks when the change touches auth, permissions, external inputs, shell execution, CI/workflows, infrastructure, or secret handling.
   - Diff review: inspect the final diff against the base branch for unintended edits, leftover debug code, documentation drift, and missing `agent-vault` metadata updates.
 - If a step fails, fix the issue and rerun the relevant parts of the loop before proceeding.
 - If a step is unavailable or not meaningful for the repo, explicitly say so in the final summary or PR body instead of implying it ran.
+- If lint/format tooling is unavailable or unconfigured, this disclosure is required unless the gap is already documented in `agent-vault/coding-standards.md` or in an accepted decision record referenced from `agent-vault/decision-log.md`.
 
 ## Code Style
 - Follow the primary language, framework, and toolchain guidance recorded in `agent-vault/coding-standards.md`.
