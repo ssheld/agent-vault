@@ -322,9 +322,44 @@ If the platform or API blocks the intended formal review state (e.g., permission
 ## Responding to Review Feedback
 When asked to address review feedback in a PR comment, use a complete, itemized response.
 
+### Feedback Retrieval Checklist
+Before claiming that all PR feedback was reviewed or addressed, inspect every
+available feedback surface:
+- Top-level PR review bodies.
+- PR conversation comments.
+- Inline PR review comments and review threads.
+
+For GitHub PRs, use retrieval that covers all pages of each surface. Equivalent
+tools are acceptable, but the retrieval must cover these REST API surfaces:
+- Top-level reviews: `GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews`
+  (for example, `gh api --paginate repos/OWNER/REPO/pulls/NUMBER/reviews`).
+- Inline review comments: `GET /repos/{owner}/{repo}/pulls/{pull_number}/comments`
+  (for example, `gh api --paginate repos/OWNER/REPO/pulls/NUMBER/comments`).
+- PR conversation comments: `GET /repos/{owner}/{repo}/issues/{issue_number}/comments`
+  (for example, `gh api --paginate repos/OWNER/REPO/issues/NUMBER/comments`).
+
+When using raw REST calls instead of `gh api --paginate`, follow pagination
+headers such as `Link: rel="next"` until no next page remains. Fetching only
+the first page is not sufficient on active PRs.
+
+### Response Coverage
+- In this section, an actionable finding is any finding that requests or
+  implies a code, documentation, test, or policy change, including `Optional`
+  findings. Pure praise, acknowledgement, or background context does not
+  require a status mapping.
+- Address every actionable finding from every retrieved feedback surface; do
+  not collapse multiple findings into one vague bullet.
+- If the same issue appears in multiple places, it may be fixed once, but the
+  response must explicitly acknowledge the duplicate surfaces or state that
+  duplicate findings are grouped.
+- Top-level feedback-response comments may reference inline findings by
+  `path:line`, GitHub links, or equivalent anchors. This is allowed for
+  feedback responses and does not override the prohibition on imitating inline
+  review comments inside top-level review bodies.
+
 ### Required Coverage
-- Address every finding from the review being responded to; do not collapse multiple findings into one vague bullet.
-- For each finding, mark one status: `Resolved`, `Partially Resolved`, or `Not Changed`.
+- For each actionable finding identified by the retrieval checklist, mark one
+  status: `Resolved`, `Partially Resolved`, or `Not Changed`.
 - If a finding is `Partially Resolved` or `Not Changed`, explain exactly what remains and why.
 
 ### Evidence Requirements

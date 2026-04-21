@@ -12,6 +12,9 @@
 
 ## PR Feedback Response
 - When posting a PR comment that addresses reviewer feedback, follow `agent-vault/review-policy.md` under `Responding to Review Feedback`.
+- When asked to review, summarize, respond to, or address all PR feedback, use
+  the feedback retrieval checklist in `agent-vault/review-policy.md` before
+  claiming all feedback was covered.
 - Map every finding to a status (`Resolved`, `Partially Resolved`, or `Not Changed`) with concrete evidence.
 - If pushing back, explain technical rationale and risk/tradeoff explicitly.
 
