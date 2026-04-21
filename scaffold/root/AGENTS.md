@@ -343,6 +343,10 @@ headers such as `Link: rel="next"` until no next page remains. Fetching only
 the first page is not sufficient on active PRs.
 
 ### Response Coverage
+- In this section, an actionable finding is any finding that requests or
+  implies a code, documentation, test, or policy change, including `Optional`
+  findings. Pure praise, acknowledgement, or background context does not
+  require a status mapping.
 - Address every actionable finding from every retrieved feedback surface; do
   not collapse multiple findings into one vague bullet.
 - If the same issue appears in multiple places, it may be fixed once, but the
