@@ -47,7 +47,7 @@ resolve_path() {
 canonical_dir() {
     local path="$1"
     (
-        cd "$path"
+        cd "$path" || return 1
         pwd -P
     )
 }
@@ -104,6 +104,7 @@ find_worktree_branch() {
     local target_path="$1"
     local current_worktree=""
     local current_branch=""
+    local current_worktree_real=""
     local line=""
 
     while IFS= read -r line; do
@@ -113,7 +114,8 @@ find_worktree_branch() {
                 ;;
             branch\ refs/heads/*)
                 current_branch="${line#branch refs/heads/}"
-                if [[ "$(canonical_dir "$current_worktree")" == "$target_path" ]]; then
+                current_worktree_real="$(canonical_dir "$current_worktree" 2>/dev/null || true)"
+                if [[ "$current_worktree_real" == "$target_path" ]]; then
                     printf '%s\n' "$current_branch"
                     return 0
                 fi
@@ -185,16 +187,27 @@ fi
 if [[ -n "$BRANCH_NAME" ]]; then
     resolved_path="$(find_branch_worktree "$BRANCH_NAME" || true)"
     [[ -n "$resolved_path" ]] || die "No worktree found for branch: $BRANCH_NAME"
-    resolved_path="$(canonical_dir "$resolved_path")"
+    if [[ ! -d "$resolved_path" ]]; then
+        git -C "$PROJECT_DIR" worktree prune >/dev/null 2>&1 || true
+        die "Worktree record for branch '$BRANCH_NAME' points to a missing directory. Stale metadata was pruned; rerun this command to remove the remaining branch."
+    fi
+    resolved_path="$(canonical_dir "$resolved_path")" \
+        || die "Worktree path does not exist: $resolved_path"
     if [[ -n "$TARGET_PATH" ]]; then
-        TARGET_PATH="$(canonical_dir "$(resolve_path "$TARGET_PATH")")"
+        raw_target_path="$(resolve_path "$TARGET_PATH")"
+        [[ -d "$raw_target_path" ]] || die "Worktree path does not exist: $raw_target_path"
+        TARGET_PATH="$(canonical_dir "$raw_target_path")" \
+            || die "Worktree path does not exist: $raw_target_path"
         [[ "$TARGET_PATH" == "$resolved_path" ]] \
             || die "--branch and --path refer to different worktrees"
     else
         TARGET_PATH="$resolved_path"
     fi
 else
-    TARGET_PATH="$(canonical_dir "$(resolve_path "$TARGET_PATH")")"
+    raw_target_path="$(resolve_path "$TARGET_PATH")"
+    [[ -d "$raw_target_path" ]] || die "Worktree path does not exist: $raw_target_path"
+    TARGET_PATH="$(canonical_dir "$raw_target_path")" \
+        || die "Worktree path does not exist: $raw_target_path"
 fi
 
 [[ -d "$TARGET_PATH" ]] || die "Worktree path does not exist: $TARGET_PATH"

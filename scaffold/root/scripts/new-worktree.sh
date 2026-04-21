@@ -190,18 +190,14 @@ if [[ -n "$SLUG" ]]; then
     [[ -n "$NORMALIZED_SLUG" ]] || die "--slug must contain letters or numbers"
 fi
 
-ROOT_DIR="$(resolve_root_dir "$ROOT_DIR")"
-mkdir -p "$ROOT_DIR"
-ROOT_DIR="$(cd "$ROOT_DIR" && pwd -P)"
-
 NAME_SUFFIX="$ISSUE"
 if [[ -n "$NORMALIZED_SLUG" ]]; then
     NAME_SUFFIX="${NAME_SUFFIX}-${NORMALIZED_SLUG}"
 fi
 
+ROOT_DIR="$(resolve_root_dir "$ROOT_DIR")"
 BRANCH_NAME="${NORMALIZED_AGENT}/${NAME_SUFFIX}"
 WORKTREE_NAME="${NORMALIZED_AGENT}-${NAME_SUFFIX}"
-WORKTREE_PATH="${ROOT_DIR}/${WORKTREE_NAME}"
 
 EXISTING_WORKTREE="$(find_branch_worktree "$BRANCH_NAME" || true)"
 if [[ -n "$EXISTING_WORKTREE" && ! -d "$EXISTING_WORKTREE" ]]; then
@@ -216,16 +212,20 @@ if [[ -n "$EXISTING_WORKTREE" ]]; then
     exit 0
 fi
 
-if [[ -e "$WORKTREE_PATH" ]]; then
-    die "Target path already exists: $WORKTREE_PATH"
-fi
-
 if [[ -z "$BASE_REF" ]]; then
     BASE_REF="$(default_base_ref)"
 fi
 [[ -n "$BASE_REF" ]] || die "Could not determine a base ref"
 git -C "$PROJECT_DIR" rev-parse --verify --quiet "${BASE_REF}^{commit}" >/dev/null \
     || die "Base ref not found: $BASE_REF"
+
+mkdir -p "$ROOT_DIR"
+ROOT_DIR="$(cd "$ROOT_DIR" && pwd -P)"
+WORKTREE_PATH="${ROOT_DIR}/${WORKTREE_NAME}"
+
+if [[ -e "$WORKTREE_PATH" ]]; then
+    die "Target path already exists: $WORKTREE_PATH"
+fi
 
 if git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
     git -C "$PROJECT_DIR" worktree add "$WORKTREE_PATH" "$BRANCH_NAME"

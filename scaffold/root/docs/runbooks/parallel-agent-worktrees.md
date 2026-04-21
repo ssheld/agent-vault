@@ -72,7 +72,8 @@ Use `--root` to place worktrees somewhere else:
   --root ../custom-worktrees
 ```
 
-Relative `--root` paths are resolved from the main checkout.
+Relative `--root` paths are resolved from the main checkout, not your current
+directory.
 
 ## Agent Sandbox Permissions
 It is fine for an agent launched from the original checkout to run the setup

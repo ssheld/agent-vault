@@ -59,6 +59,19 @@ assert_path_exists() {
   fi
 }
 
+assert_path_missing() {
+  local path="$1"
+  local label="$2"
+
+  if [[ ! -e "$path" ]]; then
+    echo "PASS: $label"
+    passed=$((passed + 1))
+  else
+    echo "FAIL: $label - unexpected path still exists: $path" >&2
+    failed=$((failed + 1))
+  fi
+}
+
 assert_path_under_tmp() {
   local path="$1"
   local label="$2"
@@ -179,6 +192,27 @@ rc=0
 output="$(run_new_worktree "$working" --agent codex 2>&1)" || rc=$?
 assert_exit_code 1 "$rc" "missing-issue exits 1"
 assert_output_contains "$output" "--issue is required" "missing-issue shows error"
+
+# --- Test 7: Invalid issue values fail clearly ---
+rc=0
+output="$(run_new_worktree "$working" --agent codex --issue abc 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "non-numeric-issue exits 1"
+assert_output_contains "$output" "--issue must be numeric" "non-numeric-issue shows error"
+
+# --- Test 8: Agent values that normalize to empty fail clearly ---
+rc=0
+output="$(run_new_worktree "$working" --agent "!!!" --issue 127 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "empty-normalized-agent exits 1"
+assert_output_contains "$output" "--agent must contain letters or numbers" "empty-normalized-agent shows error"
+
+# --- Test 9: Bad base refs fail before creating the worktree root ---
+working="$(setup_repo repo6)"
+bad_base_root="$tmp_root/bad-base-root"
+rc=0
+output="$(bash "$working/scripts/new-worktree.sh" --root "$bad_base_root" --agent codex --issue 128 --slug bad-base --base does-not-exist 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "bad-base exits 1"
+assert_output_contains "$output" "Base ref not found: does-not-exist" "bad-base shows error"
+assert_path_missing "$bad_base_root" "bad-base does not create root"
 
 echo ""
 echo "Results: $passed passed, $failed failed"

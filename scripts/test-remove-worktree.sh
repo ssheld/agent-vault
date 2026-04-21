@@ -172,6 +172,72 @@ assert_exit_code 1 "$rc" "remove-detached-delete-branch exits 1"
 assert_output_contains "$output" "--delete-branch requires a branch-backed worktree" "remove-detached-delete-branch shows precondition error"
 assert_path_exists "$worktree_path" "remove-detached-delete-branch preserves worktree"
 
+# --- Test 6: Remove a detached-HEAD worktree by path without deleting a branch ---
+working="$(setup_repo repo6)"
+worktree_path="$(create_detached_worktree "$working" "detached-cleanup-success")"
+rc=0
+output="$(cd "$working" && bash scripts/remove-worktree.sh --path "$worktree_path" 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "remove-detached-by-path exits 0"
+assert_output_contains "$output" "Removed worktree:" "remove-detached-by-path reports removal"
+assert_path_missing "$worktree_path" "remove-detached-by-path deleted target path"
+
+# --- Test 7: Ignore shared .venv .pth files that point outside the target worktree ---
+working="$(setup_repo repo7)"
+worktree_path="$(create_worktree "$working" "codex/126-unrelated-venv" "codex-126-unrelated-venv")"
+unrelated_path="$tmp_root/unrelated-editable/src"
+mkdir -p "$working/.venv/lib/python3.10/site-packages" "$unrelated_path"
+printf '%s\n' "$unrelated_path" > "$working/.venv/lib/python3.10/site-packages/editable_project.pth"
+rc=0
+output="$(cd "$working" && bash scripts/remove-worktree.sh --branch codex/126-unrelated-venv 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "remove-unrelated-venv exits 0"
+assert_path_missing "$worktree_path" "remove-unrelated-venv deleted target path"
+
+# --- Test 8: Force removal succeeds for a dirty disposable worktree ---
+working="$(setup_repo repo8)"
+worktree_path="$(create_worktree "$working" "codex/127-force-dirty" "codex-127-force-dirty")"
+echo "dirty" > "$worktree_path/untracked.txt"
+rc=0
+output="$(cd "$working" && bash scripts/remove-worktree.sh --branch codex/127-force-dirty --force 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "remove-force-dirty exits 0"
+assert_output_contains "$output" "Removed worktree:" "remove-force-dirty reports removal"
+assert_path_missing "$worktree_path" "remove-force-dirty deleted target path"
+
+# --- Test 9: Refuse when --branch and --path refer to different worktrees ---
+working="$(setup_repo repo9)"
+worktree_a="$(create_worktree "$working" "codex/128-mismatch-a" "codex-128-mismatch-a")"
+worktree_b="$(create_worktree "$working" "codex/128-mismatch-b" "codex-128-mismatch-b")"
+rc=0
+output="$(cd "$working" && bash scripts/remove-worktree.sh --branch codex/128-mismatch-a --path "$worktree_b" 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "remove-branch-path-mismatch exits 1"
+assert_output_contains "$output" "--branch and --path refer to different worktrees" "remove-branch-path-mismatch shows error"
+assert_path_exists "$worktree_a" "remove-branch-path-mismatch preserves branch worktree"
+assert_path_exists "$worktree_b" "remove-branch-path-mismatch preserves path worktree"
+
+# --- Test 10: Stale branch worktree records are pruned with a clear error ---
+working="$(setup_repo repo10)"
+worktree_path="$(create_worktree "$working" "codex/129-stale-record" "codex-129-stale-record")"
+rm -rf "$worktree_path"
+rc=0
+output="$(cd "$working" && bash scripts/remove-worktree.sh --branch codex/129-stale-record 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "remove-stale-record exits 1"
+assert_output_contains "$output" "Stale metadata was pruned" "remove-stale-record shows prune message"
+if git -C "$working" show-ref --verify --quiet refs/heads/codex/129-stale-record; then
+  echo "PASS: remove-stale-record preserves branch"
+  passed=$((passed + 1))
+else
+  echo "FAIL: remove-stale-record preserves branch" >&2
+  failed=$((failed + 1))
+fi
+
+# --- Test 11: Bad --path values fail before any safety checks use the cwd ---
+working="$(setup_repo repo11)"
+missing_path="$tmp_root/wt/missing-worktree"
+rc=0
+output="$(cd "$working" && bash scripts/remove-worktree.sh --path "$missing_path" 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "remove-missing-path exits 1"
+assert_output_contains "$output" "Worktree path does not exist: $missing_path" "remove-missing-path shows error"
+assert_path_exists "$working" "remove-missing-path preserves checkout"
+
 echo ""
 echo "Results: $passed passed, $failed failed"
 if [[ "$failed" -gt 0 ]]; then
