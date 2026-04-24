@@ -35,6 +35,14 @@ die() {
     exit 1
 }
 
+delete_local_branch() {
+    local branch_name="$1"
+
+    git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$branch_name" \
+        || die "No local branch found: $branch_name"
+    git -C "$PROJECT_DIR" branch -D "$branch_name"
+}
+
 resolve_path() {
     local raw="$1"
     if [[ "$raw" = /* ]]; then
@@ -186,10 +194,25 @@ fi
 
 if [[ -n "$BRANCH_NAME" ]]; then
     resolved_path="$(find_branch_worktree "$BRANCH_NAME" || true)"
-    [[ -n "$resolved_path" ]] || die "No worktree found for branch: $BRANCH_NAME"
+    if [[ -z "$resolved_path" ]]; then
+        if [[ "$DELETE_BRANCH" == true && -z "$TARGET_PATH" ]]; then
+            echo "No worktree found for branch; deleting local branch only:"
+            echo "  Branch: $BRANCH_NAME"
+            delete_local_branch "$BRANCH_NAME"
+            exit 0
+        fi
+        die "No worktree found for branch: $BRANCH_NAME"
+    fi
     if [[ ! -d "$resolved_path" ]]; then
         git -C "$PROJECT_DIR" worktree prune >/dev/null 2>&1 || true
-        die "Worktree record for branch '$BRANCH_NAME' points to a missing directory. Stale metadata was pruned; rerun this command to remove the remaining branch."
+        if [[ "$DELETE_BRANCH" == true && -z "$TARGET_PATH" ]]; then
+            echo "Pruned stale worktree record for missing directory: $resolved_path"
+            echo "Deleting remaining local branch:"
+            echo "  Branch: $BRANCH_NAME"
+            delete_local_branch "$BRANCH_NAME"
+            exit 0
+        fi
+        die "Worktree record for branch '$BRANCH_NAME' points to a missing directory. Stale metadata was pruned; pass --delete-branch without --path to delete the remaining local branch."
     fi
     resolved_path="$(canonical_dir "$resolved_path")" \
         || die "Worktree path does not exist: $resolved_path"
@@ -243,5 +266,5 @@ if [[ -n "$BRANCH_NAME" ]]; then
 fi
 
 if [[ "$DELETE_BRANCH" == true ]]; then
-    git -C "$PROJECT_DIR" branch -D "$BRANCH_NAME"
+    delete_local_branch "$BRANCH_NAME"
 fi

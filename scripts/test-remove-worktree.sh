@@ -229,6 +229,18 @@ else
   failed=$((failed + 1))
 fi
 
+rc=0
+output="$(cd "$working" && bash scripts/remove-worktree.sh --branch codex/129-stale-record --delete-branch 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "remove-stale-record-delete-branch exits 0"
+assert_output_contains "$output" "No worktree found for branch; deleting local branch only" "remove-stale-record-delete-branch reports branch-only cleanup"
+if git -C "$working" show-ref --verify --quiet refs/heads/codex/129-stale-record; then
+  echo "FAIL: remove-stale-record-delete-branch deleted branch" >&2
+  failed=$((failed + 1))
+else
+  echo "PASS: remove-stale-record-delete-branch deleted branch"
+  passed=$((passed + 1))
+fi
+
 # --- Test 11: Bad --path values fail before any safety checks use the cwd ---
 working="$(setup_repo repo11)"
 missing_path="$tmp_root/wt/missing-worktree"
