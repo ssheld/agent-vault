@@ -95,6 +95,7 @@ Run the scaffold regression scripts locally when changing bootstrap, sync, or tr
 - `bash scripts/test-coding-standards-sync.sh`
 - `bash scripts/test-decision-template-sync.sh`
 - `bash scripts/test-session-metadata-hook.sh`
+- `bash scripts/test-main-push-gate.sh`
 - `bash scripts/test-new-worktree.sh`
 - `bash scripts/test-remove-worktree.sh`
 - `bash scripts/test-worktree-helper-sync.sh`
@@ -111,7 +112,9 @@ CI also runs these checks via `.github/workflows/scaffold-regression-checks.yml`
   - `<repo>/agent-vault/GEMINI.md`
   - `<repo>/agent-vault/handoff.md`
   - `<repo>/agent-vault/_assets/hooks/README.md`
+  - `<repo>/agent-vault/_assets/hooks/lib/runtime-note.sh`
   - `<repo>/agent-vault/_assets/hooks/pre-commit`
+  - `<repo>/agent-vault/_assets/hooks/pre-push`
   - `<repo>/agent-vault/design-log/README.md`
   - `<repo>/agent-vault/context/handoffs/README.md`
   - `<repo>/agent-vault/decisions/README.md`
@@ -177,7 +180,10 @@ When a managed file changes, the script backs up the previous version under:
 Generated projects auto-enable the tracked metadata gate in the clone where `new-project.sh` or `update-project.sh` runs, unless `core.hooksPath` is already set to something else. Additional clones can enable it with:
 - `git -C <repo-path> config core.hooksPath agent-vault/_assets/hooks`
 
-That tracked hook enforces the baseline session artifacts and validates staged `agent-vault/context-log.md` ordering/freshness so newer entries do not get appended below stale headers.
+The tracked `pre-commit` hook enforces the baseline session artifacts and validates staged `agent-vault/context-log.md` ordering/freshness so newer entries do not get appended below stale headers. The tracked `pre-push` hook is inert by default; repos may opt into a narrow direct-push-to-`main` shortcut for runtime `agent-vault` metadata only:
+- `git -C <repo-path> config --local agent-vault.allowMetadataOnlyMainPush true`
+
+That shortcut allows recording history after PR merges while keeping source code, config, scripts, root docs, policy files, templates, hook assets, and durable project docs such as `agent-vault/README.md`, `plan.md`, `coding-standards.md`, `project-context.md`, `project-commands.md`, and `handoff.md` on the PR path.
 When syncing older generated repos, `update-project.sh` now auto-migrates recognized legacy `agent-vault/context-log.md` layouts into the validator-compatible top-level `## Current Snapshot` / `## Entries` shape before syncing the stricter hook. If the layout is not recognized, the script leaves the file unchanged and prints a manual-remediation warning instead of guessing.
 
 Both scripts also ensure root `.gitignore` includes managed local-only ignore entries (added only when missing):
@@ -225,7 +231,7 @@ Generated projects get a starter `docs/design.md` that uses Mermaid fenced code 
 - `open-questions.md`
 - `lessons.md`
 - `handoff.md`
-- `daily/`, `context/`, `design-log/`, `decisions/`, `_assets/` (including the optional tracked `pre-commit` hook under `agent-vault/_assets/hooks/`)
+- `daily/`, `context/`, `design-log/`, `decisions/`, `_assets/` (including the optional tracked hooks under `agent-vault/_assets/hooks/`)
 - `Templates/` (copied from template source; instantiated notes belong outside this folder)
 
 It also creates project-root files when missing:
