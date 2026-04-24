@@ -132,6 +132,20 @@ commit_source_change "$opt_out_repo"
 opt_out_local_sha="$(git -C "$opt_out_repo" rev-parse HEAD)"
 run_pre_push "$opt_out_repo" "refs/heads/main" "$opt_out_local_sha" "refs/heads/main" "$opt_out_remote_sha"
 
+no_vault_repo="$tmp_root/no-agent-vault-noop"
+init_repo "$no_vault_repo"
+printf 'plain repo\n' >"$no_vault_repo/README.md"
+git -C "$no_vault_repo" add README.md
+git -C "$no_vault_repo" commit -m "Bootstrap plain repo" >/dev/null
+git -C "$no_vault_repo" config --local agent-vault.allowMetadataOnlyMainPush true
+no_vault_remote_sha="$(git -C "$no_vault_repo" rev-parse HEAD)"
+printf 'plain repo update\n' >"$no_vault_repo/README.md"
+git -C "$no_vault_repo" commit -am "Change plain repo" >/dev/null
+no_vault_local_sha="$(git -C "$no_vault_repo" rev-parse HEAD)"
+(cd "$no_vault_repo" && printf '%s %s %s %s\n' \
+  "refs/heads/main" "$no_vault_local_sha" "refs/heads/main" "$no_vault_remote_sha" \
+  | "$repo_root/scaffold/agent-vault/_assets/hooks/pre-push")
+
 global_config_repo="$tmp_root/global-config-ignored"
 global_config_file="$tmp_root/global-config.gitconfig"
 seed_project "$global_config_repo"
@@ -151,6 +165,14 @@ commit_metadata_change "$metadata_repo"
 metadata_local_sha="$(git -C "$metadata_repo" rev-parse HEAD)"
 run_pre_push "$metadata_repo" "refs/heads/main" "$metadata_local_sha" "refs/heads/main" "$metadata_remote_sha"
 
+empty_commit_repo="$tmp_root/empty-commit-allowed"
+seed_project "$empty_commit_repo"
+enable_gate "$empty_commit_repo"
+empty_commit_remote_sha="$(git -C "$empty_commit_repo" rev-parse HEAD)"
+git -C "$empty_commit_repo" commit --allow-empty -m "Empty metadata checkpoint" >/dev/null
+empty_commit_local_sha="$(git -C "$empty_commit_repo" rev-parse HEAD)"
+run_pre_push "$empty_commit_repo" "refs/heads/main" "$empty_commit_local_sha" "refs/heads/main" "$empty_commit_remote_sha"
+
 source_repo="$tmp_root/source-blocked"
 seed_project "$source_repo"
 enable_gate "$source_repo"
@@ -169,6 +191,20 @@ commit_mixed_change "$mixed_repo"
 mixed_local_sha="$(git -C "$mixed_repo" rev-parse HEAD)"
 mixed_output="$(run_pre_push_expect_failure "$mixed_repo" "refs/heads/main" "$mixed_local_sha" "refs/heads/main" "$mixed_remote_sha")"
 assert_output_contains "$mixed_output" "- src/app.py"
+
+range_repo="$tmp_root/intermediate-blocked-file-blocked"
+seed_project "$range_repo"
+enable_gate "$range_repo"
+range_remote_sha="$(git -C "$range_repo" rev-parse HEAD)"
+printf '\nTemporary policy change.\n' >>"$range_repo/agent-vault/AGENTS.md"
+git -C "$range_repo" add agent-vault/AGENTS.md
+(cd "$range_repo" && AGENT_VAULT_SKIP_METADATA_GATE=1 git commit -m "Temporarily change policy" >/dev/null)
+git -C "$range_repo" checkout "$range_remote_sha" -- agent-vault/AGENTS.md
+git -C "$range_repo" add agent-vault/AGENTS.md
+(cd "$range_repo" && AGENT_VAULT_SKIP_METADATA_GATE=1 git commit -m "Revert temporary policy change" >/dev/null)
+range_local_sha="$(git -C "$range_repo" rev-parse HEAD)"
+range_output="$(run_pre_push_expect_failure "$range_repo" "refs/heads/main" "$range_local_sha" "refs/heads/main" "$range_remote_sha")"
+assert_output_contains "$range_output" "- agent-vault/AGENTS.md"
 
 feature_repo="$tmp_root/non-main-unaffected"
 seed_project "$feature_repo"
