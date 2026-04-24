@@ -116,8 +116,11 @@ hook_repo="$tmp_root/hook-enforcement"
 init_repo "$hook_repo"
 "$repo_root/scripts/new-project.sh" "hook-test" "$hook_repo" >/dev/null
 assert_file_exists "$hook_repo/agent-vault/_assets/hooks/pre-commit"
+assert_file_exists "$hook_repo/agent-vault/_assets/hooks/pre-push"
+assert_file_exists "$hook_repo/agent-vault/_assets/hooks/lib/runtime-note.sh"
 assert_file_exists "$hook_repo/agent-vault/_assets/hooks/README.md"
 assert_executable "$hook_repo/agent-vault/_assets/hooks/pre-commit"
+assert_executable "$hook_repo/agent-vault/_assets/hooks/pre-push"
 if [[ "$(git -C "$hook_repo" config --local --get core.hooksPath)" != "agent-vault/_assets/hooks" ]]; then
   echo "Expected new-project.sh to enable the tracked hooks path." >&2
   exit 1
@@ -177,8 +180,11 @@ git -C "$update_repo" config --local --unset core.hooksPath
 rm -rf "$update_repo/agent-vault/_assets/hooks"
 "$repo_root/scripts/update-project.sh" "$update_repo" >/dev/null
 assert_file_exists "$update_repo/agent-vault/_assets/hooks/pre-commit"
+assert_file_exists "$update_repo/agent-vault/_assets/hooks/pre-push"
+assert_file_exists "$update_repo/agent-vault/_assets/hooks/lib/runtime-note.sh"
 assert_file_exists "$update_repo/agent-vault/_assets/hooks/README.md"
 assert_executable "$update_repo/agent-vault/_assets/hooks/pre-commit"
+assert_executable "$update_repo/agent-vault/_assets/hooks/pre-push"
 if [[ "$(git -C "$update_repo" config --local --get core.hooksPath)" != "agent-vault/_assets/hooks" ]]; then
   echo "Expected update-project.sh to enable the tracked hooks path." >&2
   exit 1

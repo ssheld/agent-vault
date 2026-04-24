@@ -13,6 +13,7 @@ on:
       - "scripts/test-coding-standards-sync.sh"
       - "scripts/test-decision-template-sync.sh"
       - "scripts/test-session-metadata-hook.sh"
+      - "scripts/test-main-push-gate.sh"
       - "scripts/test-new-worktree.sh"
       - "scripts/test-remove-worktree.sh"
       - "scripts/test-worktree-helper-sync.sh"
@@ -31,6 +32,7 @@ on:
       - "scripts/test-coding-standards-sync.sh"
       - "scripts/test-decision-template-sync.sh"
       - "scripts/test-session-metadata-hook.sh"
+      - "scripts/test-main-push-gate.sh"
       - "scripts/test-new-worktree.sh"
       - "scripts/test-remove-worktree.sh"
       - "scripts/test-worktree-helper-sync.sh"
@@ -51,6 +53,8 @@ jobs:
         run: bash scripts/test-decision-template-sync.sh
       - name: Verify session metadata hook behavior
         run: bash scripts/test-session-metadata-hook.sh
+      - name: Verify main push metadata gate
+        run: bash scripts/test-main-push-gate.sh
       - name: Verify worktree creation helper
         run: bash scripts/test-new-worktree.sh
       - name: Verify worktree removal helper

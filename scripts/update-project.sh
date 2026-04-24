@@ -142,7 +142,9 @@ for required in \
   "$vault_scaffold_dir/project-commands.md" \
   "$vault_scaffold_dir/lessons.md" \
   "$vault_scaffold_dir/_assets/hooks/README.md" \
+  "$vault_scaffold_dir/_assets/hooks/lib/runtime-note.sh" \
   "$vault_scaffold_dir/_assets/hooks/pre-commit" \
+  "$vault_scaffold_dir/_assets/hooks/pre-push" \
   "$vault_scaffold_dir/design-log/README.md" \
   "$vault_scaffold_dir/context/handoffs/README.md" \
   "$vault_scaffold_dir/decisions/README.md" \
@@ -219,7 +221,9 @@ preflight_symlink_checks() {
   assert_not_symlink "$project_dir/review-policy.md" "agent-vault/review-policy.md"
   assert_not_symlink "$project_dir/handoff.md" "agent-vault/handoff.md"
   assert_not_symlink "$project_dir/_assets/hooks/README.md" "agent-vault/_assets/hooks/README.md"
+  assert_not_symlink "$project_dir/_assets/hooks/lib/runtime-note.sh" "agent-vault/_assets/hooks/lib/runtime-note.sh"
   assert_not_symlink "$project_dir/_assets/hooks/pre-commit" "agent-vault/_assets/hooks/pre-commit"
+  assert_not_symlink "$project_dir/_assets/hooks/pre-push" "agent-vault/_assets/hooks/pre-push"
   assert_not_symlink "$project_dir/design-log/README.md" "agent-vault/design-log/README.md"
   assert_not_symlink "$project_dir/context/handoffs/README.md" "agent-vault/context/handoffs/README.md"
   assert_not_symlink "$project_dir/decisions/README.md" "agent-vault/decisions/README.md"
@@ -505,6 +509,7 @@ migrate_legacy_context_log_if_needed() {
     printf -- '- `agent-vault/context-log.md`\n'
     printf -- '- `agent-vault/shared-rules.md`\n'
     printf -- '- `agent-vault/_assets/hooks/pre-commit`\n'
+    printf -- '- `agent-vault/_assets/hooks/pre-push`\n'
   } >"$tmp_file"
 
   if [[ -n "$legacy_unindexed_body" ]]; then
@@ -916,7 +921,9 @@ sync_managed_file "$vault_scaffold_dir/GEMINI.md" "$project_dir/GEMINI.md"
 sync_managed_file "$vault_scaffold_dir/handoff.md" "$project_dir/handoff.md"
 migrate_legacy_context_log_if_needed
 sync_managed_file "$vault_scaffold_dir/_assets/hooks/README.md" "$project_dir/_assets/hooks/README.md"
-sync_managed_file "$vault_scaffold_dir/_assets/hooks/pre-commit" "$project_dir/_assets/hooks/pre-commit"
+sync_managed_file "$vault_scaffold_dir/_assets/hooks/lib/runtime-note.sh" "$project_dir/_assets/hooks/lib/runtime-note.sh"
+sync_managed_executable_file "$vault_scaffold_dir/_assets/hooks/pre-commit" "$project_dir/_assets/hooks/pre-commit"
+sync_managed_executable_file "$vault_scaffold_dir/_assets/hooks/pre-push" "$project_dir/_assets/hooks/pre-push"
 sync_managed_file "$vault_scaffold_dir/design-log/README.md" "$project_dir/design-log/README.md"
 sync_managed_file "$vault_scaffold_dir/context/handoffs/README.md" "$project_dir/context/handoffs/README.md"
 sync_managed_file "$vault_scaffold_dir/decisions/README.md" "$project_dir/decisions/README.md"

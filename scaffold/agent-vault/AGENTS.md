@@ -233,6 +233,12 @@ When performing research or writing research-oriented documentation (design-log 
 - Before creating a commit for substantive work, make sure today's daily note, context log, and any new design-log entry do not leave same-session publication mechanics (`git commit`, `git push`, PR creation) in `Carry Forward`, `Next`, or equivalent future-tense text unless those actions will truly remain unfinished after the session.
 - Treat these updates as a commit gate for substantive work, not as optional cleanup after the code is already done.
 
+## Direct Push to Main
+- Direct push to `main` is acceptable only when the repo has explicitly opted into the tracked `pre-push` shortcut and the push records runtime `agent-vault` metadata only.
+- Use direct metadata pushes to record history after a PR merge: what landed, current state, follow-ups, changed decisions, known risks, or cleanup notes.
+- Do not use the shortcut for behavior-changing files. Source code, config, scripts, root docs, `agent-vault/README.md`, `plan.md`, `coding-standards.md`, `project-context.md`, `project-commands.md`, `handoff.md`, policy files, templates, and hook assets still require PR review.
+- If a post-merge metadata refresh would be empty or ceremonial, skip it and say no metadata update was needed.
+
 ## Completion Verification - MUST follow before marking any task done
 Before reporting a task as finished:
 1. Run the Verification Loop appropriate to the repo and change scope.
@@ -280,7 +286,7 @@ Before considering any change complete and before running git commit:
   - `agent-vault/decision-log.md` plus the decision record when a durable decision was made
   - `agent-vault/context/handoffs/` when handing off unfinished work
   - `agent-vault/lessons.md` when a corrected mistake should become a durable prevention rule
-- If the repo enables the tracked hook at `agent-vault/_assets/hooks/pre-commit`, keep it enabled via `git config core.hooksPath agent-vault/_assets/hooks`.
+- If the repo enables the tracked hooks under `agent-vault/_assets/hooks/`, keep them enabled via `git config core.hooksPath agent-vault/_assets/hooks`.
 - If a change is truly trivial and should not update project memory, make that an explicit decision and say so in your final summary instead of silently skipping the metadata step.
 
 ## Additional Guardrails

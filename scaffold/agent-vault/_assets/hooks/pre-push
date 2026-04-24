@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+zero_sha="0000000000000000000000000000000000000000"
+config_key="agent-vault.allowMetadataOnlyMainPush"
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -z "$repo_root" ]]; then
+  exit 0
+fi
+
+cd "$repo_root"
+
+if [[ ! -d "agent-vault" ]]; then
+  exit 0
+fi
+
+config_value=""
+config_rc=0
+config_value="$(git config --local --get --type=bool "$config_key" 2>/dev/null)" || config_rc=$?
+if [[ "$config_rc" -ne 0 && "$config_rc" -ne 1 ]]; then
+  echo "agent-vault main push gate failed." >&2
+  echo "Invalid local git config value for $config_key; expected true or false." >&2
+  exit 1
+fi
+
+if [[ "$config_value" != "true" ]]; then
+  exit 0
+fi
+
+# shellcheck source=./lib/runtime-note.sh
+source "agent-vault/_assets/hooks/lib/runtime-note.sh"
+
+reject_main_push() {
+  local reason="$1"
+
+  echo "agent-vault main push gate failed." >&2
+  echo "$reason" >&2
+  echo "Use the PR flow for source, config, policy, hook, template, or mixed changes." >&2
+  exit 1
+}
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [[ "$remote_ref" == "refs/heads/main" ]] || continue
+
+  if [[ "$local_sha" == "$zero_sha" ]]; then
+    reject_main_push "Direct deletion of main is not allowed."
+  fi
+
+  if [[ "$remote_sha" == "$zero_sha" ]]; then
+    reject_main_push "Direct creation of main is not allowed."
+  fi
+
+  if ! git merge-base --is-ancestor "$remote_sha" "$local_sha"; then
+    reject_main_push "Direct non-fast-forward push to main is not allowed."
+  fi
+
+  blocked_files=()
+  while IFS= read -r file_path; do
+    [[ -n "$file_path" ]] || continue
+
+    if ! is_runtime_note_file "$file_path"; then
+      blocked_files+=("$file_path")
+    fi
+  done < <(git diff --no-renames --name-only "$remote_sha" "$local_sha")
+
+  if [[ "${#blocked_files[@]}" -gt 0 ]]; then
+    echo "agent-vault main push gate failed." >&2
+    echo "Direct push to main is allowed only for runtime agent-vault metadata." >&2
+    echo "Blocked path(s):" >&2
+    for file_path in "${blocked_files[@]}"; do
+      echo "- $file_path" >&2
+    done
+    echo "Use the PR flow for source, config, policy, hook, template, or mixed changes." >&2
+    exit 1
+  fi
+done
