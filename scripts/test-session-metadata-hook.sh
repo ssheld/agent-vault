@@ -337,6 +337,18 @@ if missing_vault_output="$(cd "$missing_vault_repo" && "$repo_root/scaffold/agen
 fi
 assert_output_contains "$missing_vault_output" "Tracked agent-vault directory is missing while staged changes include agent-vault paths."
 
+missing_classifier_repo="$tmp_root/missing-classifier-blocked"
+init_repo "$missing_classifier_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$missing_classifier_repo" >/dev/null
+git -C "$missing_classifier_repo" add .
+(cd "$missing_classifier_repo" && AGENT_VAULT_SKIP_METADATA_GATE=1 git commit -m "Bootstrap missing classifier fixture" >/dev/null)
+git -C "$missing_classifier_repo" rm agent-vault/_assets/hooks/lib/runtime-note.sh >/dev/null
+if missing_classifier_output="$(cd "$missing_classifier_repo" && "$repo_root/scaffold/agent-vault/_assets/hooks/pre-commit" 2>&1)"; then
+  echo "Expected pre-commit hook to fail when the runtime metadata classifier is missing." >&2
+  exit 1
+fi
+assert_output_contains "$missing_classifier_output" "Runtime metadata classifier is missing."
+
 ordering_repo="$tmp_root/context-log-ordering"
 init_repo "$ordering_repo"
 "$repo_root/scripts/new-project.sh" "hook-test" "$ordering_repo" >/dev/null

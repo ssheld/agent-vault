@@ -160,6 +160,16 @@ if missing_vault_output="$(cd "$missing_vault_repo" && printf '%s %s %s %s\n' \
 fi
 assert_output_contains "$missing_vault_output" "Tracked agent-vault directory is missing while agent-vault.allowMetadataOnlyMainPush is enabled."
 
+missing_classifier_repo="$tmp_root/enabled-missing-classifier-blocked"
+seed_project "$missing_classifier_repo"
+enable_gate "$missing_classifier_repo"
+missing_classifier_remote_sha="$(git -C "$missing_classifier_repo" rev-parse HEAD)"
+git -C "$missing_classifier_repo" rm agent-vault/_assets/hooks/lib/runtime-note.sh >/dev/null
+(cd "$missing_classifier_repo" && git -c core.hooksPath=/dev/null commit -m "Remove runtime metadata classifier" >/dev/null)
+missing_classifier_local_sha="$(git -C "$missing_classifier_repo" rev-parse HEAD)"
+missing_classifier_output="$(run_pre_push_expect_failure "$missing_classifier_repo" "refs/heads/main" "$missing_classifier_local_sha" "refs/heads/main" "$missing_classifier_remote_sha")"
+assert_output_contains "$missing_classifier_output" "Runtime metadata classifier is missing while agent-vault.allowMetadataOnlyMainPush is enabled."
+
 global_config_repo="$tmp_root/global-config-ignored"
 global_config_file="$tmp_root/global-config.gitconfig"
 seed_project "$global_config_repo"
@@ -227,6 +237,20 @@ feature_remote_sha="$(git -C "$feature_repo" rev-parse HEAD)"
 commit_source_change "$feature_repo"
 feature_local_sha="$(git -C "$feature_repo" rev-parse HEAD)"
 run_pre_push "$feature_repo" "refs/heads/feature" "$feature_local_sha" "refs/heads/feature" "$feature_remote_sha"
+
+multi_ref_repo="$tmp_root/multi-ref-feature-ignored"
+seed_project "$multi_ref_repo"
+enable_gate "$multi_ref_repo"
+multi_ref_base_sha="$(git -C "$multi_ref_repo" rev-parse HEAD)"
+commit_metadata_change "$multi_ref_repo"
+multi_ref_main_sha="$(git -C "$multi_ref_repo" rev-parse HEAD)"
+git -C "$multi_ref_repo" checkout -b feature-side "$multi_ref_base_sha" >/dev/null 2>&1
+commit_source_change "$multi_ref_repo"
+multi_ref_feature_sha="$(git -C "$multi_ref_repo" rev-parse HEAD)"
+(cd "$multi_ref_repo" && {
+  printf '%s %s %s %s\n' "refs/heads/feature-side" "$multi_ref_feature_sha" "refs/heads/feature-side" "$multi_ref_base_sha"
+  printf '%s %s %s %s\n' "refs/heads/main" "$multi_ref_main_sha" "refs/heads/main" "$multi_ref_base_sha"
+} | agent-vault/_assets/hooks/pre-push)
 
 for blocked_path in \
   agent-vault/AGENTS.md \
