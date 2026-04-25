@@ -137,7 +137,6 @@ init_repo "$no_vault_repo"
 printf 'plain repo\n' >"$no_vault_repo/README.md"
 git -C "$no_vault_repo" add README.md
 git -C "$no_vault_repo" commit -m "Bootstrap plain repo" >/dev/null
-git -C "$no_vault_repo" config --local agent-vault.allowMetadataOnlyMainPush true
 no_vault_remote_sha="$(git -C "$no_vault_repo" rev-parse HEAD)"
 printf 'plain repo update\n' >"$no_vault_repo/README.md"
 git -C "$no_vault_repo" commit -am "Change plain repo" >/dev/null
@@ -145,6 +144,21 @@ no_vault_local_sha="$(git -C "$no_vault_repo" rev-parse HEAD)"
 (cd "$no_vault_repo" && printf '%s %s %s %s\n' \
   "refs/heads/main" "$no_vault_local_sha" "refs/heads/main" "$no_vault_remote_sha" \
   | "$repo_root/scaffold/agent-vault/_assets/hooks/pre-push")
+
+missing_vault_repo="$tmp_root/enabled-missing-agent-vault-blocked"
+seed_project "$missing_vault_repo"
+enable_gate "$missing_vault_repo"
+missing_vault_remote_sha="$(git -C "$missing_vault_repo" rev-parse HEAD)"
+git -C "$missing_vault_repo" rm -r agent-vault >/dev/null
+(cd "$missing_vault_repo" && git -c core.hooksPath=/dev/null commit -m "Remove agent-vault directory" >/dev/null)
+missing_vault_local_sha="$(git -C "$missing_vault_repo" rev-parse HEAD)"
+if missing_vault_output="$(cd "$missing_vault_repo" && printf '%s %s %s %s\n' \
+  "refs/heads/main" "$missing_vault_local_sha" "refs/heads/main" "$missing_vault_remote_sha" \
+  | "$repo_root/scaffold/agent-vault/_assets/hooks/pre-push" 2>&1)"; then
+  echo "Expected pre-push hook to fail when agent-vault is missing but the main push gate is enabled." >&2
+  exit 1
+fi
+assert_output_contains "$missing_vault_output" "Tracked agent-vault directory is missing while agent-vault.allowMetadataOnlyMainPush is enabled."
 
 global_config_repo="$tmp_root/global-config-ignored"
 global_config_file="$tmp_root/global-config.gitconfig"
