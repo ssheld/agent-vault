@@ -17,6 +17,8 @@ git config core.hooksPath agent-vault/_assets/hooks
     - `agent-vault/context-log.md`
     - one note under `agent-vault/daily/`
     - one note under `agent-vault/design-log/`
+  - Rejects staged `agent-vault/` path changes when the generated `agent-vault/`
+    directory or shared runtime metadata classifier is missing.
   - Validates staged `agent-vault/context-log.md` content:
     - entry headings must use `YYYY-MM-DD HH:MM local - <agent> - <topic>`
     - entries must remain newest-first
@@ -26,6 +28,8 @@ git config core.hooksPath agent-vault/_assets/hooks
   - Inert by default.
   - When explicitly enabled with local repo config, blocks direct pushes to `main` unless every pushed path is runtime `agent-vault` metadata.
   - Rejects direct deletion of `main`, first-time creation of `main`, and non-fast-forward pushes.
+  - Rejects `main` pushes when the generated `agent-vault/` directory or shared
+    runtime metadata classifier is missing.
   - Uses the same runtime metadata classifier as `pre-commit`.
 
 ## Optional Direct Push to Main for Runtime Metadata

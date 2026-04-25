@@ -13,8 +13,32 @@ fi
 
 cd "$repo_root"
 
-if [[ ! -d "agent-vault" ]]; then
+all_staged_files=()
+while IFS= read -r file_path; do
+  [[ -n "$file_path" ]] || continue
+  all_staged_files+=("$file_path")
+done < <(git diff --cached --name-only --diff-filter=ACDMRTUXB)
+
+if [[ "${#all_staged_files[@]}" -eq 0 ]]; then
   exit 0
+fi
+
+if [[ ! -d "agent-vault" ]]; then
+  for file_path in "${all_staged_files[@]}"; do
+    if [[ "$file_path" == "agent-vault" || "$file_path" == agent-vault/* ]]; then
+      echo "agent-vault metadata gate failed." >&2
+      echo "Tracked agent-vault directory is missing while staged changes include agent-vault paths." >&2
+      exit 1
+    fi
+  done
+
+  exit 0
+fi
+
+if [[ ! -f "agent-vault/_assets/hooks/lib/runtime-note.sh" ]]; then
+  echo "agent-vault metadata gate failed." >&2
+  echo "Runtime metadata classifier is missing." >&2
+  exit 1
 fi
 
 # shellcheck source=./lib/runtime-note.sh
@@ -157,16 +181,6 @@ validate_staged_context_log() {
   printf '%s\n' "${errors[@]}"
   return 1
 }
-
-all_staged_files=()
-while IFS= read -r file_path; do
-  [[ -n "$file_path" ]] || continue
-  all_staged_files+=("$file_path")
-done < <(git diff --cached --name-only --diff-filter=ACDMRTUXB)
-
-if [[ "${#all_staged_files[@]}" -eq 0 ]]; then
-  exit 0
-fi
 
 non_deleted_staged_files=()
 while IFS= read -r file_path; do

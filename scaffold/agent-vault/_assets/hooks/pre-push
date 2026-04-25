@@ -12,10 +12,6 @@ fi
 
 cd "$repo_root"
 
-if [[ ! -d "agent-vault" ]]; then
-  exit 0
-fi
-
 config_value=""
 config_rc=0
 config_value="$(git config --local --get --type=bool "$config_key" 2>/dev/null)" || config_rc=$?
@@ -29,9 +25,6 @@ if [[ "$config_value" != "true" ]]; then
   exit 0
 fi
 
-# shellcheck source=./lib/runtime-note.sh
-source "agent-vault/_assets/hooks/lib/runtime-note.sh"
-
 reject_main_push() {
   local reason="$1"
 
@@ -39,6 +32,26 @@ reject_main_push() {
   echo "$reason" >&2
   echo "Use the PR flow for source, config, policy, hook, template, or mixed changes." >&2
   exit 1
+}
+
+runtime_note_classifier_loaded="false"
+
+ensure_runtime_note_classifier() {
+  if [[ "$runtime_note_classifier_loaded" == "true" ]]; then
+    return 0
+  fi
+
+  if [[ ! -d "agent-vault" ]]; then
+    reject_main_push "Tracked agent-vault directory is missing while $config_key is enabled."
+  fi
+
+  if [[ ! -f "agent-vault/_assets/hooks/lib/runtime-note.sh" ]]; then
+    reject_main_push "Runtime metadata classifier is missing while $config_key is enabled."
+  fi
+
+  # shellcheck source=./lib/runtime-note.sh
+  source "agent-vault/_assets/hooks/lib/runtime-note.sh"
+  runtime_note_classifier_loaded="true"
 }
 
 collect_commit_changed_files() {
@@ -67,6 +80,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   if ! git merge-base --is-ancestor "$remote_sha" "$local_sha"; then
     reject_main_push "Direct non-fast-forward push to main is not allowed."
   fi
+
+  ensure_runtime_note_classifier
 
   # Check each commit, not just endpoint trees, so blocked files cannot be
   # changed and reverted inside the pushed range.
