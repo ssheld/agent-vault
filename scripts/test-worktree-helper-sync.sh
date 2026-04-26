@@ -121,6 +121,10 @@ assert_executable "$target/scripts/new-worktree.sh" "new-project makes new-workt
 assert_executable "$target/scripts/remove-worktree.sh" "new-project makes remove-worktree executable"
 assert_file_contains "$target/scripts/new-worktree.sh" "# agent-vault-managed: helper-script; file=new-worktree.sh" "new-project seeds new-worktree marker"
 assert_file_contains "$target/scripts/remove-worktree.sh" "# agent-vault-managed: helper-script; file=remove-worktree.sh" "new-project seeds remove-worktree marker"
+assert_file_contains "$target/scripts/new-worktree.sh" 'DEFAULT_ROOT="${PROJECT_DIR}/.worktrees"' "new-project seeds repo-local worktree default"
+assert_file_contains "$target/scripts/new-worktree.sh" "AGENT_VAULT_WORKTREE_ROOT" "new-project seeds env worktree override"
+assert_file_contains "$target/scripts/remove-worktree.sh" "Use only after verifying the PR is merged" "new-project seeds guarded remove-worktree guidance"
+assert_file_contains "$target/docs/runbooks/parallel-agent-worktrees.md" "Cleanup After Merge Or Completion" "new-project seeds cleanup runbook"
 
 # --- Test 2: update-project creates missing helpers in existing vaults ---
 target="$(setup_empty_repo update-missing-target)"
@@ -133,6 +137,8 @@ assert_output_contains "$output" "Created: scripts/new-worktree.sh" "update-proj
 assert_output_contains "$output" "Created: scripts/remove-worktree.sh" "update-project reports remove-worktree creation"
 assert_executable "$target/scripts/new-worktree.sh" "update-project makes new-worktree executable"
 assert_executable "$target/scripts/remove-worktree.sh" "update-project makes remove-worktree executable"
+assert_file_contains "$target/scripts/new-worktree.sh" 'DEFAULT_ROOT="${PROJECT_DIR}/.worktrees"' "update-project creates new helper with repo-local default"
+assert_file_contains "$target/scripts/remove-worktree.sh" "Use only after verifying the PR is merged" "update-project creates remove helper with guarded guidance"
 
 # --- Test 3: update-project skips unmanaged helper scripts by default ---
 target="$(setup_empty_repo unmanaged-skip-target)"
@@ -173,13 +179,23 @@ run_new_project "$target" >/dev/null
   printf '%s\n' '# agent-vault-managed: helper-script; file=new-worktree.sh'
   printf '%s\n' 'echo stale managed helper'
 } > "$target/scripts/new-worktree.sh"
+{
+  printf '%s\n' '#!/usr/bin/env bash'
+  printf '%s\n' '# agent-vault-managed: helper-script; file=remove-worktree.sh'
+  printf '%s\n' 'echo stale managed remove helper'
+} > "$target/scripts/remove-worktree.sh"
 chmod -x "$target/scripts/new-worktree.sh"
+chmod -x "$target/scripts/remove-worktree.sh"
 rc=0
 output="$(run_update_project "$target" 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "update-project managed-refresh exits 0"
 assert_output_contains "$output" "Updated: scripts/new-worktree.sh" "update-project reports managed helper update"
+assert_output_contains "$output" "Updated: scripts/remove-worktree.sh" "update-project reports managed remove helper update"
 assert_file_contains "$target/scripts/new-worktree.sh" "Create or reuse one issue-scoped worktree" "update-project refreshes managed helper content"
+assert_file_contains "$target/scripts/new-worktree.sh" 'DEFAULT_ROOT="${PROJECT_DIR}/.worktrees"' "update-project refreshes new helper default"
+assert_file_contains "$target/scripts/remove-worktree.sh" "Use only after verifying the PR is merged" "update-project refreshes remove helper guidance"
 assert_executable "$target/scripts/new-worktree.sh" "update-project fixes managed helper executable bit"
+assert_executable "$target/scripts/remove-worktree.sh" "update-project fixes managed remove helper executable bit"
 
 # --- Test 6: runbook is seed-only after creation ---
 target="$(setup_empty_repo runbook-seed-target)"

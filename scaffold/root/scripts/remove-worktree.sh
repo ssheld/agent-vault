@@ -2,6 +2,7 @@
 # agent-vault-managed: helper-script; file=remove-worktree.sh
 
 # Safely remove one issue-scoped git worktree created for an agent session.
+# Run from the main checkout or another directory outside the target worktree.
 
 set -euo pipefail
 
@@ -19,14 +20,16 @@ Options:
   --path DIR        Worktree path to remove. Relative paths are resolved from
                     the current repo root.
   --delete-branch   Delete the local branch with git branch -D after removal.
-                    Use only after the PR is merged or the branch is disposable.
-  --force           Pass --force to git worktree remove.
+                    Use only after verifying the PR is merged or after owner
+                    confirmation that the branch is disposable.
+  --force           Pass --force to git worktree remove. Use only after owner
+                    confirmation for an intentionally disposable dirty worktree.
   -h, --help        Show this help
 
 Examples:
   $0 --branch codex/123-feature-slice
   $0 --branch codex/123-feature-slice --delete-branch
-  $0 --path ../example-app-wt/codex-123-feature-slice --force
+  $0 --path .worktrees/codex-123-feature-slice --force
 EOF
 }
 

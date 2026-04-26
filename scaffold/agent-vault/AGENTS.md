@@ -56,6 +56,21 @@
 5. Self-review the result before asking for outside review. Run the Verification Loop, inspect the diff, and fix issues before moving on.
 6. Prepare the change for commit, PR, or handoff. Complete the Pre-Commit Checklist, update required `agent-vault` artifacts, and follow PR Authoring Standards when opening a PR.
 
+## Issue Worktree Workflow
+- For implementation work tied to a numbered issue, create or reuse one issue-scoped worktree before editing source files.
+- From the main checkout, derive a short slug from the issue title when possible, then run `./scripts/new-worktree.sh --agent <agent> --issue <number> --slug <slug>`.
+- Switch to the printed worktree path before code edits, either by launching from that directory or by using that path for all subsequent file operations.
+- Avoid editing the main checkout unless the user explicitly asks not to use a worktree or the work is clearly non-implementation work.
+- Keep the main checkout for integration, review, and cleanup.
+- See `docs/runbooks/parallel-agent-worktrees.md` for the full worktree workflow and cleanup recipe.
+
+## Worktree Cleanup
+- After the PR for an issue branch is merged, or when the issue work is explicitly done or abandoned, clean up the issue worktree from the main checkout or another directory outside the target worktree.
+- Before deleting a branch, verify the PR is merged with `gh pr view <branch> --json state,mergedAt`.
+- If the PR is not proven merged, ask the owner before invoking `--delete-branch`. For `OPEN`, unmerged `CLOSED`, missing PR, stale, or unclear states, default to removing only the worktree, keeping the branch, and reporting what was skipped.
+- If `remove-worktree.sh` refuses cleanup because the current process is inside the target worktree, a branch/path mismatch is unsafe, or a shared `.venv` still points into the target worktree, report the remaining cleanup step instead of forcing through.
+- Never run `--force` autonomously. It is a user-confirmed escape hatch for intentionally disposable dirty worktrees, not part of normal cleanup.
+
 ## Human Decision Gate
 - Humans are the default decision-makers for material trade-offs. When multiple technically valid options exist and the choice materially affects architecture, UX, maintainability, workflow, security posture, performance, cost, or future flexibility, do not choose silently.
 - Material trade-offs include choices such as introducing or replacing core libraries, changing API or data-model shape, relaxing validation or security controls, changing deployment or review workflow, or accepting meaningful maintainability/performance/cost trade-offs to gain speed elsewhere.

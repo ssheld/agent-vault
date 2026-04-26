@@ -168,11 +168,19 @@ scripts without the marker are skipped unless you pass
 `--migrate-root-scripts`, which backs up and replaces them with the managed
 versions.
 
-The default worktree location is a sibling directory named
-`../<repo-name>-wt/`. A writing agent can run the setup helper from the original
-checkout, but the generated runbook recommends launching actual writing
-sessions from inside the generated worktree so agent sandbox permissions use
-that worktree as the active workspace.
+The default worktree location is a repo-local ignored directory named
+`.worktrees/`. A writing agent can run the setup helper from the original
+checkout, but generated instructions require the agent to switch to the printed
+worktree path before making code edits, either by launching from that directory
+or by using that path for all subsequent file operations. Users can override the
+root with `--root` or `AGENT_VAULT_WORKTREE_ROOT`.
+
+Generated guidance also treats post-merge cleanup as the standard cleanup point
+because issue branches usually map to pull requests. Before deleting a local
+branch, agents must verify the PR is merged or get explicit owner confirmation;
+otherwise they should remove only the worktree, keep the branch, and report what
+was skipped. The full cleanup recipe lives in
+`<repo>/docs/runbooks/parallel-agent-worktrees.md`.
 
 When a managed file changes, the script backs up the previous version under:
 - `<repo>/agent-vault/context/updates/<timestamp>/...`
@@ -195,6 +203,7 @@ Both scripts also ensure root `.gitignore` includes managed local-only ignore en
 - `.obsidian/backup/`
 - `.obsidian/plugins/*/data.json`
 - `/agent-vault/context/updates/`
+- `/.worktrees/`
 
 ## Migrating Existing Root Policy Files
 When running `new-project.sh` with `--migrate-existing-root-md`:

@@ -38,10 +38,11 @@ update this file when the canonical workflow changes.
 ./scripts/remove-worktree.sh --branch codex/123-feature-slice --delete-branch
 ```
 
-The helper creates sibling worktrees under `../<repo-name>-wt/` by default.
-Launch the writing agent from inside the generated worktree so that agent
-sandbox permissions use that worktree as the active workspace. Keep the main
-checkout for integration, review, and post-merge cleanup.
+The helper creates repo-local worktrees under `.worktrees/` by default. Launch
+the writing agent from inside the generated worktree, or use that path for all
+subsequent edits. Keep the main checkout for integration, review, and cleanup.
+See `docs/runbooks/parallel-agent-worktrees.md` for the full worktree workflow,
+including branch-deletion guardrails and cleanup for done-but-unmerged work.
 
 ## Release / Operations Commands
 

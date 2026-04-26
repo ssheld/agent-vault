@@ -132,6 +132,8 @@ write_managed_gitignore() {
 .obsidian/plugins/*/data.json
 # Agent Vault -- local sync and migration backups (ignore these)
 /agent-vault/context/updates/
+# Agent Vault -- local worktrees (ignore these)
+/.worktrees/
 EOF
 }
 
@@ -156,17 +158,27 @@ assert_grouped_partial_block_insert() {
   assert_line_count "$file_path" ".obsidian/app.json" 1
 }
 
+assert_managed_worktree_ignore() {
+  local file_path="$1"
+
+  assert_has_line "$file_path" "# Agent Vault -- local worktrees (ignore these)"
+  assert_has_line "$file_path" "/.worktrees/"
+  assert_line_count "$file_path" "/.worktrees/" 1
+}
+
 new_project_repo="$tmp_root/new-project-existing-patterns"
 init_repo "$new_project_repo"
 write_legacy_gitignore "$new_project_repo"
 "$repo_root/scripts/new-project.sh" "gitignore-test" "$new_project_repo" >/dev/null
 assert_no_dangling_comment_append "$new_project_repo/.gitignore"
+assert_managed_worktree_ignore "$new_project_repo/.gitignore"
 
 new_project_partial_repo="$tmp_root/new-project-partial-patterns"
 init_repo "$new_project_partial_repo"
 write_partial_obsidian_gitignore "$new_project_partial_repo"
 "$repo_root/scripts/new-project.sh" "gitignore-test" "$new_project_partial_repo" >/dev/null
 assert_grouped_partial_block_insert "$new_project_partial_repo/.gitignore"
+assert_managed_worktree_ignore "$new_project_partial_repo/.gitignore"
 
 new_project_managed_repo="$tmp_root/new-project-managed-patterns"
 init_repo "$new_project_managed_repo"
@@ -175,6 +187,7 @@ new_project_output="$("$repo_root/scripts/new-project.sh" "gitignore-test" "$new
 assert_output_not_contains "$new_project_output" "unbound variable"
 assert_output_not_contains "$new_project_output" "missing_lines[@]"
 assert_has_line "$new_project_managed_repo/.gitignore" "# Agent Vault -- local sync and migration backups (ignore these)"
+assert_managed_worktree_ignore "$new_project_managed_repo/.gitignore"
 
 update_project_repo="$tmp_root/update-project-existing-patterns"
 init_repo "$update_project_repo"
@@ -182,6 +195,7 @@ init_repo "$update_project_repo"
 write_legacy_gitignore "$update_project_repo"
 "$repo_root/scripts/update-project.sh" "$update_project_repo" >/dev/null
 assert_no_dangling_comment_append "$update_project_repo/.gitignore"
+assert_managed_worktree_ignore "$update_project_repo/.gitignore"
 
 update_project_partial_repo="$tmp_root/update-project-partial-patterns"
 init_repo "$update_project_partial_repo"
@@ -189,6 +203,7 @@ init_repo "$update_project_partial_repo"
 write_partial_obsidian_gitignore "$update_project_partial_repo"
 "$repo_root/scripts/update-project.sh" "$update_project_partial_repo" >/dev/null
 assert_grouped_partial_block_insert "$update_project_partial_repo/.gitignore"
+assert_managed_worktree_ignore "$update_project_partial_repo/.gitignore"
 
 update_project_managed_repo="$tmp_root/update-project-managed-patterns"
 init_repo "$update_project_managed_repo"
@@ -198,5 +213,6 @@ update_project_output="$("$repo_root/scripts/update-project.sh" "$update_project
 assert_output_not_contains "$update_project_output" "unbound variable"
 assert_output_not_contains "$update_project_output" "missing_lines[@]"
 assert_has_line "$update_project_managed_repo/.gitignore" "# Agent Vault -- local sync and migration backups (ignore these)"
+assert_managed_worktree_ignore "$update_project_managed_repo/.gitignore"
 
 echo "gitignore management regression checks passed."
