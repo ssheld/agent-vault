@@ -89,6 +89,28 @@ To prevent accidental drift, run:
 
 CI also enforces this via `.github/workflows/policy-mirror-check.yml` on pull requests and pushes to `main`.
 
+## Style Checks
+Run shell style/static checks before pull requests that touch scripts, generated
+root helper scripts, or tracked hook assets:
+- `bash scripts/check-style.sh`
+
+The command checks the tracked shell surface with:
+- `bash -n` syntax validation
+- `shellcheck --severity=warning -x`
+- `shfmt -i 2 -ci -d`
+
+For local formatting, run:
+- `bash scripts/check-style.sh --fix`
+
+Local runs require ShellCheck and shfmt. On macOS, install them with:
+- `brew install shellcheck shfmt`
+
+CI installs pinned release binaries instead of relying on runner image versions:
+- ShellCheck `v0.11.0`
+- shfmt `v3.13.1`
+
+CI runs the same command via `.github/workflows/style-check.yml`.
+
 ## Scaffold Regression Checks
 Run the scaffold regression scripts locally when changing bootstrap, sync, or tracked hook behavior:
 - `bash scripts/test-gitignore-management.sh`

@@ -21,15 +21,15 @@ usage() {
 expand_path() {
   local p="$1"
   case "$p" in
-    "~")
+    \~)
       printf '%s\n' "$HOME"
       ;;
-    "~/"*)
-      printf '%s/%s\n' "$HOME" "${p#~/}"
+    \~/*)
+      printf '%s/%s\n' "$HOME" "${p#\~/}"
       ;;
-    "/~/"*)
+    /\~/*)
       # Common typo: /~/path should usually be ~/path.
-      printf '%s/%s\n' "$HOME" "${p#/~/}"
+      printf '%s/%s\n' "$HOME" "${p#/\~/}"
       ;;
     *)
       printf '%s\n' "$p"
@@ -80,7 +80,7 @@ for arg in "$@"; do
     --sync-coding-standards)
       sync_coding_standards="true"
       ;;
-    -h|--help)
+    -h | --help)
       usage
       exit 0
       ;;
@@ -150,8 +150,7 @@ for required in \
   "$vault_scaffold_dir/context/handoffs/README.md" \
   "$vault_scaffold_dir/decisions/README.md" \
   "$vault_scaffold_dir/daily/README.md" \
-  "$vault_scaffold_dir/Templates/Decision Record.md"
-do
+  "$vault_scaffold_dir/Templates/Decision Record.md"; do
   if [[ ! -f "$required" ]]; then
     echo "Error: missing scaffold file: $required"
     exit 1
@@ -186,7 +185,7 @@ validate_write_path() {
   local current_path="$destination_path"
 
   case "$destination_path" in
-    "$canonical_repo_path"|"$canonical_repo_path"/*) ;;
+    "$canonical_repo_path" | "$canonical_repo_path"/*) ;;
     *)
       return 2
       ;;
@@ -423,7 +422,7 @@ migrate_legacy_context_log_if_needed() {
   layout="$(classify_context_log_layout "$file_path")"
 
   case "$layout" in
-    missing|current)
+    missing | current)
       return
       ;;
     unknown)
@@ -577,7 +576,7 @@ collect_missing_managed_gitignore_lines() {
 
       missing_block_lines+=("$line")
       missing_pattern_count=$((missing_pattern_count + 1))
-    done <<< "$block"
+    done <<<"$block"
 
     # Skip orphaned comments when the ignore patterns already exist.
     if [[ "$missing_pattern_count" -eq 0 ]]; then
@@ -884,11 +883,11 @@ ensure_managed_gitignore_entries() {
     cp -p "$gitignore_path" "$backup_path"
     backed_up=$((backed_up + 1))
   else
-    : > "$gitignore_path"
+    : >"$gitignore_path"
   fi
 
   for line in "${missing_lines[@]}"; do
-    printf '%s\n' "$line" >> "$gitignore_path"
+    printf '%s\n' "$line" >>"$gitignore_path"
   done
 
   if [[ "$existed" == "true" ]]; then

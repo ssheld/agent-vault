@@ -4,7 +4,7 @@ is_runtime_note_file() {
   local file_path="$1"
 
   case "$file_path" in
-    agent-vault/context-log.md|agent-vault/open-questions.md|agent-vault/decision-log.md|agent-vault/lessons.md)
+    agent-vault/context-log.md | agent-vault/open-questions.md | agent-vault/decision-log.md | agent-vault/lessons.md)
       return 0
       ;;
     agent-vault/daily/*.md)

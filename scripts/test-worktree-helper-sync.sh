@@ -143,7 +143,7 @@ assert_file_contains "$target/scripts/remove-worktree.sh" "Use only after verify
 # --- Test 3: update-project skips unmanaged helper scripts by default ---
 target="$(setup_empty_repo unmanaged-skip-target)"
 run_new_project "$target" >/dev/null
-printf '%s\n' '#!/usr/bin/env bash' 'echo custom helper' > "$target/scripts/new-worktree.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'echo custom helper' >"$target/scripts/new-worktree.sh"
 chmod +x "$target/scripts/new-worktree.sh"
 rc=0
 output="$(run_update_project "$target" 2>&1)" || rc=$?
@@ -154,7 +154,7 @@ assert_file_contains "$target/scripts/new-worktree.sh" "echo custom helper" "upd
 # --- Test 4: --migrate-root-scripts backs up and replaces unmanaged helpers ---
 target="$(setup_empty_repo unmanaged-migrate-target)"
 run_new_project "$target" >/dev/null
-printf '%s\n' '#!/usr/bin/env bash' 'echo custom helper' > "$target/scripts/new-worktree.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'echo custom helper' >"$target/scripts/new-worktree.sh"
 chmod +x "$target/scripts/new-worktree.sh"
 rc=0
 output="$(run_update_project "$target" --migrate-root-scripts 2>&1)" || rc=$?
@@ -178,12 +178,12 @@ run_new_project "$target" >/dev/null
   printf '%s\n' '#!/usr/bin/env bash'
   printf '%s\n' '# agent-vault-managed: helper-script; file=new-worktree.sh'
   printf '%s\n' 'echo stale managed helper'
-} > "$target/scripts/new-worktree.sh"
+} >"$target/scripts/new-worktree.sh"
 {
   printf '%s\n' '#!/usr/bin/env bash'
   printf '%s\n' '# agent-vault-managed: helper-script; file=remove-worktree.sh'
   printf '%s\n' 'echo stale managed remove helper'
-} > "$target/scripts/remove-worktree.sh"
+} >"$target/scripts/remove-worktree.sh"
 chmod -x "$target/scripts/new-worktree.sh"
 chmod -x "$target/scripts/remove-worktree.sh"
 rc=0
@@ -200,7 +200,7 @@ assert_executable "$target/scripts/remove-worktree.sh" "update-project fixes man
 # --- Test 6: runbook is seed-only after creation ---
 target="$(setup_empty_repo runbook-seed-target)"
 run_new_project "$target" >/dev/null
-printf '%s\n' '# Local Worktree Runbook' > "$target/docs/runbooks/parallel-agent-worktrees.md"
+printf '%s\n' '# Local Worktree Runbook' >"$target/docs/runbooks/parallel-agent-worktrees.md"
 rc=0
 output="$(run_update_project "$target" 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "update-project runbook-seed exits 0"

@@ -82,7 +82,7 @@ find_coding_standards_backup() {
 project_owned_repo="$tmp_root/project-owned-by-default"
 init_repo "$project_owned_repo"
 "$repo_root/scripts/new-project.sh" "coding-standards-test" "$project_owned_repo" >/dev/null
-cat <<'EOF' > "$project_owned_repo/agent-vault/coding-standards.md"
+cat <<'EOF' >"$project_owned_repo/agent-vault/coding-standards.md"
 # Coding Standards
 
 ## Custom Rules

@@ -1,0 +1,61 @@
+name: Style Check
+
+on:
+  pull_request:
+    paths:
+      - "README.md"
+      - "scripts/**"
+      - "scaffold/root/scripts/**"
+      - "scaffold/agent-vault/_assets/hooks/**"
+      - ".github/workflows/style-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "README.md"
+      - "scripts/**"
+      - "scaffold/root/scripts/**"
+      - "scaffold/agent-vault/_assets/hooks/**"
+      - ".github/workflows/style-check.yml"
+  workflow_dispatch:
+
+jobs:
+  shell-style:
+    runs-on: ubuntu-latest
+    env:
+      # Pinned so ShellCheck rule changes and shfmt formatting changes are
+      # intentional maintenance bumps rather than runner-image drift.
+      SHELLCHECK_VERSION: v0.11.0
+      SHFMT_VERSION: v3.13.1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pinned shell style tools
+        run: |
+          set -euo pipefail
+
+          tools_dir="$RUNNER_TEMP/shell-style-tools"
+          bin_dir="$tools_dir/bin"
+          mkdir -p "$bin_dir"
+
+          curl -fsSL \
+            -o "$tools_dir/shellcheck.tar.xz" \
+            "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          tar -C "$tools_dir" -xf "$tools_dir/shellcheck.tar.xz"
+          install -m 0755 "$tools_dir/shellcheck-${SHELLCHECK_VERSION}/shellcheck" "$bin_dir/shellcheck"
+
+          curl -fsSL \
+            -o "$bin_dir/shfmt" \
+            "https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_linux_amd64"
+          chmod +x "$bin_dir/shfmt"
+
+          echo "$bin_dir" >> "$GITHUB_PATH"
+
+      - name: Show tool versions
+        run: |
+          shellcheck --version
+          shfmt --version
+
+      - name: Run shell style checks
+        run: bash scripts/check-style.sh
