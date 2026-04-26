@@ -66,7 +66,7 @@ collect_commit_changed_files() {
   fi
 }
 
-while read -r local_ref local_sha remote_ref remote_sha; do
+while read -r _local_ref local_sha remote_ref remote_sha; do
   [[ "$remote_ref" == "refs/heads/main" ]] || continue
 
   if [[ "$local_sha" == "$zero_sha" ]]; then

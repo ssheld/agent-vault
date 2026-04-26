@@ -86,7 +86,7 @@ repo_path="$tmp_root/policy-template-sync"
 init_repo "$repo_path"
 "$repo_root/scripts/new-project.sh" "template-sync-test" "$repo_path" >/dev/null
 
-cat <<'EOF' > "$repo_path/agent-vault/Templates/Decision Record.md"
+cat <<'EOF' >"$repo_path/agent-vault/Templates/Decision Record.md"
 ---
 type: decision-record
 id:
@@ -120,7 +120,7 @@ scope:
 - [ ] Update `agent-vault/decision-log.md`
 EOF
 
-cat <<'EOF' > "$repo_path/agent-vault/Templates/Daily Note.md"
+cat <<'EOF' >"$repo_path/agent-vault/Templates/Daily Note.md"
 # Custom Daily Template
 EOF
 

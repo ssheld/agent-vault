@@ -97,7 +97,7 @@ init_repo() {
 write_legacy_gitignore() {
   local repo_path="$1"
 
-  cat <<'EOF' > "$repo_path/.gitignore"
+  cat <<'EOF' >"$repo_path/.gitignore"
 .obsidian/workspace.json
 .obsidian/app.json
 .obsidian/appearance.json
@@ -111,7 +111,7 @@ EOF
 write_partial_obsidian_gitignore() {
   local repo_path="$1"
 
-  cat <<'EOF' > "$repo_path/.gitignore"
+  cat <<'EOF' >"$repo_path/.gitignore"
 .obsidian/workspace.json
 .obsidian/app.json
 EOF
@@ -120,7 +120,7 @@ EOF
 write_managed_gitignore() {
   local repo_path="$1"
 
-  cat <<'EOF' > "$repo_path/.gitignore"
+  cat <<'EOF' >"$repo_path/.gitignore"
 # Obsidian -- machine-specific & volatile files (ignore these)
 .obsidian/workspace.json
 .obsidian/app.json

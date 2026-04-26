@@ -103,7 +103,7 @@ setup_repo() {
   mkdir -p "$seed/scripts"
   cp "$helper_source" "$seed/scripts/new-worktree.sh"
   chmod +x "$seed/scripts/new-worktree.sh"
-  echo "seed" > "$seed/README.md"
+  echo "seed" >"$seed/README.md"
   git -C "$seed" add README.md scripts/new-worktree.sh
   git -C "$seed" commit -m "seed" >/dev/null
   git -C "$seed" remote add origin "$origin"

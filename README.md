@@ -89,6 +89,36 @@ To prevent accidental drift, run:
 
 CI also enforces this via `.github/workflows/policy-mirror-check.yml` on pull requests and pushes to `main`.
 
+## Style Checks
+Run shell style/static checks before pull requests that touch scripts, generated
+root helper scripts, or tracked hook assets:
+- `bash scripts/check-style.sh`
+
+The command checks the tracked shell surface with:
+- `bash -n` syntax validation
+- `shellcheck --severity=warning -x`
+- `shfmt -i 2 -ci -d`
+
+For local formatting, run:
+- `bash scripts/check-style.sh --fix`
+
+Local runs require ShellCheck and shfmt. On macOS, install them with:
+- `brew install shellcheck shfmt`
+
+On Ubuntu, install ShellCheck from apt and shfmt from the same pinned release
+family CI uses:
+- `sudo apt-get update && sudo apt-get install -y shellcheck`
+- `curl -fsSL -o shfmt https://github.com/mvdan/sh/releases/download/v3.13.1/shfmt_v3.13.1_linux_amd64`
+- `mkdir -p "$HOME/.local/bin"`
+- `install -m 0755 shfmt "$HOME/.local/bin/shfmt"`
+
+CI installs pinned release binaries instead of relying on runner image versions:
+- ShellCheck `v0.11.0`
+- shfmt `v3.13.1`
+and verifies both downloads with pinned SHA-256 digests.
+
+CI runs the same command via `.github/workflows/style-check.yml`.
+
 ## Scaffold Regression Checks
 Run the scaffold regression scripts locally when changing bootstrap, sync, or tracked hook behavior:
 - `bash scripts/test-gitignore-management.sh`
@@ -96,6 +126,7 @@ Run the scaffold regression scripts locally when changing bootstrap, sync, or tr
 - `bash scripts/test-decision-template-sync.sh`
 - `bash scripts/test-session-metadata-hook.sh`
 - `bash scripts/test-main-push-gate.sh`
+- `bash scripts/test-path-expansion.sh`
 - `bash scripts/test-new-worktree.sh`
 - `bash scripts/test-remove-worktree.sh`
 - `bash scripts/test-worktree-helper-sync.sh`

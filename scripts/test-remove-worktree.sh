@@ -87,7 +87,7 @@ setup_repo() {
   mkdir -p "$seed/scripts"
   cp "$helper_source" "$seed/scripts/remove-worktree.sh"
   chmod +x "$seed/scripts/remove-worktree.sh"
-  echo "seed" > "$seed/README.md"
+  echo "seed" >"$seed/README.md"
   git -C "$seed" add README.md scripts/remove-worktree.sh
   git -C "$seed" commit -m "seed" >/dev/null
   git -C "$seed" remote add origin "$origin"
@@ -122,7 +122,7 @@ create_detached_worktree() {
 working="$(setup_repo repo1)"
 worktree_path="$(create_worktree "$working" "codex/123-feature-slice" "codex-123-feature-slice")"
 mkdir -p "$working/.venv/lib/python3.10/site-packages" "$worktree_path/src"
-printf '%s\n' "$worktree_path/src" > "$working/.venv/lib/python3.10/site-packages/editable_project.pth"
+printf '%s\n' "$worktree_path/src" >"$working/.venv/lib/python3.10/site-packages/editable_project.pth"
 rc=0
 output="$(cd "$working" && bash scripts/remove-worktree.sh --branch codex/123-feature-slice 2>&1)" || rc=$?
 assert_exit_code 1 "$rc" "remove-bound-worktree exits 1"
@@ -186,7 +186,7 @@ working="$(setup_repo repo7)"
 worktree_path="$(create_worktree "$working" "codex/126-unrelated-venv" "codex-126-unrelated-venv")"
 unrelated_path="$tmp_root/unrelated-editable/src"
 mkdir -p "$working/.venv/lib/python3.10/site-packages" "$unrelated_path"
-printf '%s\n' "$unrelated_path" > "$working/.venv/lib/python3.10/site-packages/editable_project.pth"
+printf '%s\n' "$unrelated_path" >"$working/.venv/lib/python3.10/site-packages/editable_project.pth"
 rc=0
 output="$(cd "$working" && bash scripts/remove-worktree.sh --branch codex/126-unrelated-venv 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "remove-unrelated-venv exits 0"
@@ -195,7 +195,7 @@ assert_path_missing "$worktree_path" "remove-unrelated-venv deleted target path"
 # --- Test 8: Force removal succeeds for a dirty disposable worktree ---
 working="$(setup_repo repo8)"
 worktree_path="$(create_worktree "$working" "codex/127-force-dirty" "codex-127-force-dirty")"
-echo "dirty" > "$worktree_path/untracked.txt"
+echo "dirty" >"$worktree_path/untracked.txt"
 rc=0
 output="$(cd "$working" && bash scripts/remove-worktree.sh --branch codex/127-force-dirty --force 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "remove-force-dirty exits 0"

@@ -127,7 +127,7 @@ if [[ "$(git -C "$hook_repo" config --local --get core.hooksPath)" != "agent-vau
 fi
 
 mkdir -p "$hook_repo/src"
-printf 'print(\"hello\")\n' > "$hook_repo/src/app.py"
+printf 'print(\"hello\")\n' >"$hook_repo/src/app.py"
 git -C "$hook_repo" add src/app.py
 
 failure_output="$(run_hook_expect_failure "$hook_repo")"
@@ -137,13 +137,13 @@ assert_output_contains "$failure_output" "stage one note under agent-vault/daily
 assert_output_contains "$failure_output" "stage one note under agent-vault/design-log/"
 (cd "$hook_repo" && AGENT_VAULT_SKIP_METADATA_GATE=1 agent-vault/_assets/hooks/pre-commit)
 
-printf '\nHook coverage update.\n' >> "$hook_repo/agent-vault/context-log.md"
-cat <<EOF > "$hook_repo/agent-vault/daily/$today.md"
+printf '\nHook coverage update.\n' >>"$hook_repo/agent-vault/context-log.md"
+cat <<EOF >"$hook_repo/agent-vault/daily/$today.md"
 # Daily Note
 
 - Verified hook coverage.
 EOF
-cat <<EOF > "$hook_repo/agent-vault/design-log/$today-0100-hook-coverage.md"
+cat <<EOF >"$hook_repo/agent-vault/design-log/$today-0100-hook-coverage.md"
 # Design Log
 
 - Verified metadata gate behavior.
@@ -158,7 +158,7 @@ run_hook_expect_success "$hook_repo"
 metadata_only_repo="$tmp_root/metadata-only"
 init_repo "$metadata_only_repo"
 "$repo_root/scripts/new-project.sh" "hook-test" "$metadata_only_repo" >/dev/null
-printf '\nMetadata-only change.\n' >> "$metadata_only_repo/agent-vault/context-log.md"
+printf '\nMetadata-only change.\n' >>"$metadata_only_repo/agent-vault/context-log.md"
 git -C "$metadata_only_repo" add agent-vault/context-log.md
 run_hook_expect_success "$metadata_only_repo"
 
@@ -223,13 +223,13 @@ assert_output_contains "$(cat "$legacy_known_repo/agent-vault/context-log.md")" 
 assert_output_contains "$(cat "$legacy_known_repo/agent-vault/context-log.md")" "## Historical Snapshot"
 assert_output_contains "$(cat "$legacy_known_repo/agent-vault/context-log.md")" "## Historical Indexed Entries"
 mkdir -p "$legacy_known_repo/src"
-printf 'print(\"legacy migration\")\n' > "$legacy_known_repo/src/app.py"
-cat <<EOF > "$legacy_known_repo/agent-vault/daily/$today.md"
+printf 'print(\"legacy migration\")\n' >"$legacy_known_repo/src/app.py"
+cat <<EOF >"$legacy_known_repo/agent-vault/daily/$today.md"
 # Daily Note
 
 - Validate migrated context-log compatibility.
 EOF
-cat <<EOF > "$legacy_known_repo/agent-vault/design-log/$today-0450-context-log-migration.md"
+cat <<EOF >"$legacy_known_repo/agent-vault/design-log/$today-0450-context-log-migration.md"
 # Design Log
 
 - Validate migrated context-log compatibility.
@@ -244,7 +244,7 @@ run_hook_expect_success "$legacy_known_repo"
 unknown_layout_repo="$tmp_root/unknown-context-log-layout"
 init_repo "$unknown_layout_repo"
 "$repo_root/scripts/new-project.sh" "hook-test" "$unknown_layout_repo" >/dev/null
-cat <<EOF > "$unknown_layout_repo/agent-vault/context-log.md"
+cat <<EOF >"$unknown_layout_repo/agent-vault/context-log.md"
 ---
 type: context-log
 project: hook-test
@@ -296,14 +296,14 @@ init_repo "$deletion_repo"
 git -C "$deletion_repo" add .
 (cd "$deletion_repo" && AGENT_VAULT_SKIP_METADATA_GATE=1 git commit -m "Bootstrap hook test fixture" >/dev/null)
 mkdir -p "$deletion_repo/src"
-printf 'print("old")\n' > "$deletion_repo/src/app.py"
-printf '\nDeletion fixture context.\n' >> "$deletion_repo/agent-vault/context-log.md"
-cat <<EOF > "$deletion_repo/agent-vault/daily/$today.md"
+printf 'print("old")\n' >"$deletion_repo/src/app.py"
+printf '\nDeletion fixture context.\n' >>"$deletion_repo/agent-vault/context-log.md"
+cat <<EOF >"$deletion_repo/agent-vault/daily/$today.md"
 # Daily Note
 
 - Seed metadata for deletion coverage.
 EOF
-cat <<EOF > "$deletion_repo/agent-vault/design-log/$today-0200-delete-coverage.md"
+cat <<EOF >"$deletion_repo/agent-vault/design-log/$today-0200-delete-coverage.md"
 # Design Log
 
 - Seed metadata for deletion coverage.
@@ -314,7 +314,7 @@ git -C "$deletion_repo" add \
   "agent-vault/daily/$today.md" \
   "agent-vault/design-log/$today-0200-delete-coverage.md"
 (cd "$deletion_repo" && AGENT_VAULT_SKIP_METADATA_GATE=1 git commit -m "Seed deletion coverage metadata" >/dev/null)
-printf 'print("new")\n' > "$deletion_repo/src/app.py"
+printf 'print("new")\n' >"$deletion_repo/src/app.py"
 git -C "$deletion_repo" add src/app.py
 git -C "$deletion_repo" rm -f \
   agent-vault/context-log.md \
@@ -353,7 +353,7 @@ ordering_repo="$tmp_root/context-log-ordering"
 init_repo "$ordering_repo"
 "$repo_root/scripts/new-project.sh" "hook-test" "$ordering_repo" >/dev/null
 replace_first_context_log_timestamp "$ordering_repo/agent-vault/context-log.md" "$today 09:00"
-cat <<EOF >> "$ordering_repo/agent-vault/context-log.md"
+cat <<EOF >>"$ordering_repo/agent-vault/context-log.md"
 
 ### $today 10:00 local - test-agent - appended newer entry below older one
 #### Goal
@@ -374,18 +374,18 @@ Exercise ordering validation.
 #### References
 - agent-vault/context-log.md
 EOF
-cat <<EOF > "$ordering_repo/agent-vault/daily/$today.md"
+cat <<EOF >"$ordering_repo/agent-vault/daily/$today.md"
 # Daily Note
 
 - Seed ordering validation fixture.
 EOF
-cat <<EOF > "$ordering_repo/agent-vault/design-log/$today-0300-context-log-ordering.md"
+cat <<EOF >"$ordering_repo/agent-vault/design-log/$today-0300-context-log-ordering.md"
 # Design Log
 
 - Seed ordering validation fixture.
 EOF
 mkdir -p "$ordering_repo/src"
-printf 'print("ordering")\n' > "$ordering_repo/src/app.py"
+printf 'print("ordering")\n' >"$ordering_repo/src/app.py"
 git -C "$ordering_repo" add \
   src/app.py \
   agent-vault/context-log.md \
@@ -400,18 +400,18 @@ init_repo "$freshness_repo"
 "$repo_root/scripts/new-project.sh" "hook-test" "$freshness_repo" >/dev/null
 replace_first_match "$freshness_repo/agent-vault/context-log.md" "last_updated: $today" "last_updated: 2000-01-01"
 replace_first_match "$freshness_repo/agent-vault/context-log.md" "- Last updated: $today" "- Last updated: 2000-01-01"
-cat <<EOF > "$freshness_repo/agent-vault/daily/$today.md"
+cat <<EOF >"$freshness_repo/agent-vault/daily/$today.md"
 # Daily Note
 
 - Seed freshness validation fixture.
 EOF
-cat <<EOF > "$freshness_repo/agent-vault/design-log/$today-0400-context-log-freshness.md"
+cat <<EOF >"$freshness_repo/agent-vault/design-log/$today-0400-context-log-freshness.md"
 # Design Log
 
 - Seed freshness validation fixture.
 EOF
 mkdir -p "$freshness_repo/src"
-printf 'print("freshness")\n' > "$freshness_repo/src/app.py"
+printf 'print("freshness")\n' >"$freshness_repo/src/app.py"
 git -C "$freshness_repo" add \
   src/app.py \
   agent-vault/context-log.md \
@@ -471,6 +471,7 @@ if [[ "$dryrun_rc" -ne 0 ]]; then
   echo "Expected configure_tracked_hooks_path to return zero on dry-run activation." >&2
   exit 1
 fi
+assert_output_contains "$dryrun_output" "Dry run: would enable tracked metadata hook via core.hooksPath=agent-vault/_assets/hooks"
 if git -C "$dryrun_rc_repo" config --local --get core.hooksPath >/dev/null 2>&1; then
   echo "Expected core.hooksPath to remain unset after dry-run activation." >&2
   exit 1

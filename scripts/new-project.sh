@@ -14,15 +14,15 @@ usage() {
 expand_path() {
   local p="$1"
   case "$p" in
-    "~")
+    \~)
       printf '%s\n' "$HOME"
       ;;
-    "~/"*)
-      printf '%s/%s\n' "$HOME" "${p#~/}"
+    \~/*)
+      printf '%s/%s\n' "$HOME" "${p#\~/}"
       ;;
-    "/~/"*)
+    /\~/*)
       # Common typo: /~/path should usually be ~/path.
-      printf '%s/%s\n' "$HOME" "${p#/~/}"
+      printf '%s/%s\n' "$HOME" "${p#/\~/}"
       ;;
     *)
       printf '%s\n' "$p"
@@ -35,7 +35,7 @@ validate_write_path() {
   local current_path="$destination_path"
 
   case "$destination_path" in
-    "$canonical_repo_path"|"$canonical_repo_path"/*) ;;
+    "$canonical_repo_path" | "$canonical_repo_path"/*) ;;
     *)
       return 2
       ;;
@@ -124,7 +124,7 @@ append_migrated_root_content() {
     printf '```md\n'
     cat "$source_path"
     printf '\n```\n'
-  } >> "$destination_path"
+  } >>"$destination_path"
 }
 
 # Contract: each block starts with a human-readable comment line followed by
@@ -189,7 +189,7 @@ collect_missing_managed_gitignore_lines() {
 
       missing_block_lines+=("$line")
       missing_pattern_count=$((missing_pattern_count + 1))
-    done <<< "$block"
+    done <<<"$block"
 
     # Skip orphaned comments when the ignore patterns already exist.
     if [[ "$missing_pattern_count" -eq 0 ]]; then
@@ -221,12 +221,12 @@ ensure_managed_gitignore_entries() {
   fi
 
   if [[ ! -e "$gitignore_path" ]]; then
-    : > "$gitignore_path"
+    : >"$gitignore_path"
   fi
 
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
-    printf '%s\n' "$line" >> "$gitignore_path"
+    printf '%s\n' "$line" >>"$gitignore_path"
     added_count=$((added_count + 1))
   done < <(collect_missing_managed_gitignore_lines "$gitignore_path")
 
@@ -246,7 +246,7 @@ for arg in "$@"; do
     --migrate-existing-root-md)
       migrate_existing_root_md="true"
       ;;
-    -h|--help)
+    -h | --help)
       usage
       exit 0
       ;;
@@ -323,8 +323,7 @@ for required in \
   "$root_scaffold_dir/docs/design.md" \
   "$root_scaffold_dir/docs/runbooks/parallel-agent-worktrees.md" \
   "$root_scaffold_dir/scripts/new-worktree.sh" \
-  "$root_scaffold_dir/scripts/remove-worktree.sh"
-do
+  "$root_scaffold_dir/scripts/remove-worktree.sh"; do
   if [[ ! -f "$required" ]]; then
     echo "Error: missing root scaffold file: $required"
     exit 1
@@ -342,8 +341,7 @@ for required in \
   "$scaffold_dir/design-log/README.md" \
   "$scaffold_dir/context/handoffs/README.md" \
   "$scaffold_dir/decisions/README.md" \
-  "$scaffold_dir/daily/README.md"
-do
+  "$scaffold_dir/daily/README.md"; do
   if [[ ! -f "$required" ]]; then
     echo "Error: missing scaffold file: $required"
     exit 1
