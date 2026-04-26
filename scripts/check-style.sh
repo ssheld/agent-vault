@@ -59,7 +59,10 @@ if [[ "${#missing_tools[@]}" -gt 0 ]]; then
 
 Install them locally before running this command:
   macOS:   brew install shellcheck shfmt
-  Ubuntu: install ShellCheck and shfmt from their pinned release binaries.
+  Ubuntu: sudo apt-get update && sudo apt-get install -y shellcheck
+          curl -fsSL -o shfmt https://github.com/mvdan/sh/releases/download/v3.13.1/shfmt_v3.13.1_linux_amd64
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 shfmt "$HOME/.local/bin/shfmt"
 
 CI pins the exact tool versions in .github/workflows/style-check.yml.
 EOF
