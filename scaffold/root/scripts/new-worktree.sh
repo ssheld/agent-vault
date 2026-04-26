@@ -11,8 +11,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
-REPO_NAME="$(basename "$PROJECT_DIR")"
-DEFAULT_ROOT="$(dirname "$PROJECT_DIR")/${REPO_NAME}-wt"
+DEFAULT_ROOT="${PROJECT_DIR}/.worktrees"
 
 usage() {
     cat <<EOF
@@ -27,7 +26,11 @@ Options:
   --base REF     Optional base ref. Defaults to origin/main when available,
                  otherwise main, otherwise the current branch.
   --root DIR     Optional worktree root. Relative paths are resolved from the
-                 current repo root. Default: $DEFAULT_ROOT
+                 current repo root. Overrides AGENT_VAULT_WORKTREE_ROOT.
+                 Default: $DEFAULT_ROOT
+  AGENT_VAULT_WORKTREE_ROOT
+                 Optional environment default for the worktree root. Relative
+                 paths are resolved from the current repo root.
   -h, --help     Show this help
 
 Examples:
@@ -136,7 +139,7 @@ AGENT=""
 ISSUE=""
 SLUG=""
 BASE_REF=""
-ROOT_DIR="$DEFAULT_ROOT"
+ROOT_DIR="${AGENT_VAULT_WORKTREE_ROOT:-$DEFAULT_ROOT}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

@@ -120,7 +120,70 @@ run_new_worktree() {
   bash "$working/scripts/new-worktree.sh" --root "$tmp_root/wt" "$@"
 }
 
-# --- Test 1: Create a new worktree with explicit slug ---
+run_new_worktree_default() {
+  local working="$1"
+  shift
+
+  bash "$working/scripts/new-worktree.sh" "$@"
+}
+
+run_new_worktree_with_env_root() {
+  local working="$1"
+  local root="$2"
+  shift 2
+
+  AGENT_VAULT_WORKTREE_ROOT="$root" bash "$working/scripts/new-worktree.sh" "$@"
+}
+
+# --- Test 1: Default root is repo-local .worktrees and remains idempotent ---
+working="$(setup_repo repo-default-root)"
+rc=0
+output="$(run_new_worktree_default "$working" --agent codex --issue 130 --slug default-root 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "default-root exits 0"
+expected_path="$working/.worktrees/codex-130-default-root"
+assert_path_exists "$expected_path" "default-root created target path"
+assert_path_under_tmp "$expected_path" "default-root stays inside temp root"
+assert_output_contains "$output" "cd $expected_path" "default-root prints cd hint"
+rc=0
+output="$(run_new_worktree_default "$working" --agent codex --issue 130 --slug default-root 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "default-root rerun exits 0"
+assert_output_contains "$output" "Worktree already exists:" "default-root rerun reports existing path"
+assert_output_contains "$output" "$expected_path" "default-root rerun prints existing path"
+
+# --- Test 2: Environment root is honored and relative paths resolve from repo root ---
+working="$(setup_repo repo-env-root)"
+rc=0
+output="$(run_new_worktree_with_env_root "$working" "env-wt" --agent codex --issue 131 --slug env-root 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "env-root exits 0"
+expected_path="$working/env-wt/codex-131-env-root"
+assert_path_exists "$expected_path" "env-root created target path"
+assert_path_under_tmp "$expected_path" "env-root stays inside temp root"
+assert_output_contains "$output" "cd $expected_path" "env-root prints cd hint"
+
+# --- Test 3: --root wins over AGENT_VAULT_WORKTREE_ROOT ---
+working="$(setup_repo repo-root-precedence)"
+override_root="$tmp_root/root-override"
+rc=0
+output="$(run_new_worktree_with_env_root "$working" "env-wt" --root "$override_root" --agent codex --issue 132 --slug root-wins 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "root-precedence exits 0"
+expected_path="$override_root/codex-132-root-wins"
+assert_path_exists "$expected_path" "root-precedence created target path"
+assert_path_under_tmp "$expected_path" "root-precedence stays inside temp root"
+assert_output_contains "$output" "cd $expected_path" "root-precedence prints cd hint"
+assert_path_missing "$working/env-wt/codex-132-root-wins" "root-precedence does not use env root"
+
+# --- Test 4: Invoking from a subdirectory still resolves defaults from repo root ---
+working="$(setup_repo repo-subdir-invoke)"
+mkdir -p "$working/nested"
+rc=0
+output="$(cd "$working/nested" && bash ../scripts/new-worktree.sh --agent codex --issue 133 --slug subdir-invoke 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "subdir-invoke exits 0"
+expected_path="$working/.worktrees/codex-133-subdir-invoke"
+assert_path_exists "$expected_path" "subdir-invoke created target path"
+assert_path_under_tmp "$expected_path" "subdir-invoke stays inside temp root"
+assert_output_contains "$output" "cd $expected_path" "subdir-invoke prints cd hint"
+
+# --- Test 5: Create a new worktree with explicit slug ---
 working="$(setup_repo repo1)"
 rc=0
 output="$(run_new_worktree "$working" --agent codex --issue 123 --slug feature-slice 2>&1)" || rc=$?
@@ -140,14 +203,14 @@ assert_output_contains "$output" "Created worktree:" "create-worktree reports cr
 assert_output_contains "$output" "cd $expected_path" "create-worktree prints cd hint"
 assert_output_contains "$output" "codex" "create-worktree prints codex hint"
 
-# --- Test 2: Re-running the same command is idempotent ---
+# --- Test 6: Re-running the same command is idempotent ---
 rc=0
 output="$(run_new_worktree "$working" --agent codex --issue 123 --slug feature-slice 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "recreate-worktree exits 0"
 assert_output_contains "$output" "Worktree already exists:" "recreate-worktree reports existing path"
 assert_output_contains "$output" "$expected_path" "recreate-worktree prints existing path"
 
-# --- Test 3: Agent and slug values are normalized ---
+# --- Test 7: Agent and slug values are normalized ---
 working="$(setup_repo repo2)"
 rc=0
 output="$(run_new_worktree "$working" --agent "Claude Code" --issue 124 --slug "Review Cleanup" 2>&1)" || rc=$?
@@ -165,14 +228,14 @@ else
 fi
 assert_output_contains "$output" "claude" "normalized-worktree prints claude hint"
 
-# --- Test 4: Gemini launch hint is supported ---
+# --- Test 8: Gemini launch hint is supported ---
 working="$(setup_repo repo3)"
 rc=0
 output="$(run_new_worktree "$working" --agent gemini --issue 125 --slug docs-followup 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "gemini-worktree exits 0"
 assert_output_contains "$output" "gemini" "gemini-worktree prints gemini hint"
 
-# --- Test 5: Stale worktree metadata is pruned and recreated ---
+# --- Test 9: Stale worktree metadata is pruned and recreated ---
 working="$(setup_repo repo4)"
 rc=0
 output="$(run_new_worktree "$working" --agent codex --issue 126 --slug stale-recreate 2>&1)" || rc=$?
@@ -186,26 +249,26 @@ assert_exit_code 0 "$rc" "stale-worktree recreate exits 0"
 assert_output_contains "$output" "Created worktree:" "stale-worktree rerun recreates path"
 assert_path_exists "$expected_path" "stale-worktree recreated target path"
 
-# --- Test 6: Missing required args fail clearly ---
+# --- Test 10: Missing required args fail clearly ---
 working="$(setup_repo repo5)"
 rc=0
 output="$(run_new_worktree "$working" --agent codex 2>&1)" || rc=$?
 assert_exit_code 1 "$rc" "missing-issue exits 1"
 assert_output_contains "$output" "--issue is required" "missing-issue shows error"
 
-# --- Test 7: Invalid issue values fail clearly ---
+# --- Test 11: Invalid issue values fail clearly ---
 rc=0
 output="$(run_new_worktree "$working" --agent codex --issue abc 2>&1)" || rc=$?
 assert_exit_code 1 "$rc" "non-numeric-issue exits 1"
 assert_output_contains "$output" "--issue must be numeric" "non-numeric-issue shows error"
 
-# --- Test 8: Agent values that normalize to empty fail clearly ---
+# --- Test 12: Agent values that normalize to empty fail clearly ---
 rc=0
 output="$(run_new_worktree "$working" --agent "!!!" --issue 127 2>&1)" || rc=$?
 assert_exit_code 1 "$rc" "empty-normalized-agent exits 1"
 assert_output_contains "$output" "--agent must contain letters or numbers" "empty-normalized-agent shows error"
 
-# --- Test 9: Bad base refs fail before creating the worktree root ---
+# --- Test 13: Bad base refs fail before creating the worktree root ---
 working="$(setup_repo repo6)"
 bad_base_root="$tmp_root/bad-base-root"
 rc=0
