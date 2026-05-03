@@ -17,10 +17,12 @@ on:
       - "scripts/test-session-metadata-hook.sh"
       - "scripts/test-main-push-gate.sh"
       - "scripts/test-session-start-load-contract.sh"
+      - "scripts/test-agent-memory-load-measurement.sh"
       - "scripts/test-path-expansion.sh"
       - "scripts/test-new-worktree.sh"
       - "scripts/test-remove-worktree.sh"
       - "scripts/test-worktree-helper-sync.sh"
+      - "scripts/measure-agent-memory-load.sh"
       - ".github/workflows/scaffold-regression-checks.yml"
   push:
     branches:
@@ -40,10 +42,12 @@ on:
       - "scripts/test-session-metadata-hook.sh"
       - "scripts/test-main-push-gate.sh"
       - "scripts/test-session-start-load-contract.sh"
+      - "scripts/test-agent-memory-load-measurement.sh"
       - "scripts/test-path-expansion.sh"
       - "scripts/test-new-worktree.sh"
       - "scripts/test-remove-worktree.sh"
       - "scripts/test-worktree-helper-sync.sh"
+      - "scripts/measure-agent-memory-load.sh"
       - ".github/workflows/scaffold-regression-checks.yml"
   workflow_dispatch:
 
@@ -65,6 +69,8 @@ jobs:
         run: bash scripts/test-main-push-gate.sh
       - name: Verify session-start load contract
         run: bash scripts/test-session-start-load-contract.sh
+      - name: Verify agent memory-load measurement fixture
+        run: bash scripts/test-agent-memory-load-measurement.sh
       - name: Verify path expansion handling
         run: bash scripts/test-path-expansion.sh
       - name: Verify worktree creation helper
