@@ -171,9 +171,12 @@ errors out with a clear message rather than guessing.
 Tool inputs that use absolute paths under the entry's `cwd` are normalized to
 repo-relative form before comparison against the manifest. `Grep` scoped to
 `/fixture/agent-vault/` from a cwd of `/fixture` matches the manifest entry
-`agent-vault/context-log.md` as `high`. Bash commands that begin with
-`cd <target> && <rest>` are parsed: the cd target becomes the effective cwd for
-classifying the rest of the command, so `cd /fixture && cat agent-vault/...`
+`agent-vault/context-log.md` as `high`. Leading `./` prefixes on relative
+paths are stripped (so `./agent-vault/` matches `agent-vault/...`), and
+`Grep` with `path="."` or `path="./"` is treated as a broad cwd-scoped
+search that covers every manifest entry. Bash commands that begin with
+`cd <target> && <rest>` are parsed: the cd target becomes the effective cwd
+for classifying the rest of the command, so `cd /fixture && cat agent-vault/...`
 records as `high` even when the entry's recorded cwd is unrelated.
 
 ### First-Read vs. Strongest-Confidence Separation

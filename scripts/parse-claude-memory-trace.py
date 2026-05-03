@@ -226,6 +226,10 @@ def candidate_token_forms(token: str, entry_cwd: Optional[str]) -> List[str]:
     normalized = normalize_to_repo_relative(token, entry_cwd)
     if normalized != token:
         forms.append(normalized)
+    if token.startswith("./"):
+        stripped = token[2:]
+        if stripped and stripped not in forms:
+            forms.append(stripped)
     return forms
 
 
@@ -326,10 +330,16 @@ def grep_targets_file(
     path_arg = (input_obj.get("path") or "").strip()
     glob_arg = (input_obj.get("glob") or "").strip()
     if path_arg:
+        cleaned_root = path_arg.rstrip("/")
+        # `.` / `./` / empty after normalization scope the search to the entry cwd.
+        # When manifest entries are repo-relative they are presumed to live under
+        # that scope, so a broad cwd search counts as a directory-scoped read.
+        if cleaned_root in (".", "", "./"):
+            return True
         candidate_paths = candidate_token_forms(path_arg, entry_cwd)
         for candidate in candidate_paths:
             cleaned = candidate.rstrip("/")
-            if not cleaned:
+            if not cleaned or cleaned == ".":
                 continue
             if cleaned == file_path:
                 return True

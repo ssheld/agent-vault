@@ -507,6 +507,42 @@ def fixture_first_read_before_strongest():
 
 fixtures["first_read_before_strongest"] = fixture_first_read_before_strongest()
 
+
+def fixture_relative_dot_grep_path():
+    return [
+        main_user("u1", None, "search via ./"),
+        main_assistant_tool(
+            "a1",
+            "u1",
+            "Grep",
+            {
+                "pattern": "TODO",
+                "path": "./agent-vault/",
+                "output_mode": "files_with_matches",
+            },
+            tool_id="t1",
+        ),
+    ]
+
+
+fixtures["relative_dot_grep_path"] = fixture_relative_dot_grep_path()
+
+
+def fixture_dot_only_grep():
+    return [
+        main_user("u1", None, "search the whole repo"),
+        main_assistant_tool(
+            "a1",
+            "u1",
+            "Grep",
+            {"pattern": "TODO", "path": ".", "output_mode": "files_with_matches"},
+            tool_id="t1",
+        ),
+    ]
+
+
+fixtures["dot_only_grep"] = fixture_dot_only_grep()
+
 if fixture_name not in fixtures:
     sys.exit(f"unknown fixture: {fixture_name}")
 
@@ -729,6 +765,28 @@ if [[ "$first_uuid" == "a_medium" ]]; then
 else
   fail "first_read: expected first_read_uuid=a_medium, got '$first_uuid'"
 fi
+
+# 19. relative_dot_grep_path: Grep path="./agent-vault/" → high for files under agent-vault/
+out_path="$tmp_root/out_dotrel_grep.tsv"
+build_fixture "$tmp_root/dotrel_grep.jsonl" "relative_dot_grep_path"
+run_parser "$tmp_root/dotrel_grep.jsonl" "$manifest_path" "$out_path"
+
+assert_grep "$out_path" $'agent-vault/context-log.md\ttrue\thigh' \
+  "dotrel_grep: context-log under ./agent-vault/ is high"
+assert_grep "$out_path" $'agent-vault/plan.md\ttrue\thigh' \
+  "dotrel_grep: plan under ./agent-vault/ is high"
+
+# 20. dot_only_grep: Grep path="." → high for every manifest entry
+out_path="$tmp_root/out_dot_grep.tsv"
+build_fixture "$tmp_root/dot_grep.jsonl" "dot_only_grep"
+run_parser "$tmp_root/dot_grep.jsonl" "$manifest_path" "$out_path"
+
+assert_grep "$out_path" $'agent-vault/context-log.md\ttrue\thigh' \
+  "dot_grep: context-log scoped to . is high"
+assert_grep "$out_path" $'agent-vault/plan.md\ttrue\thigh' \
+  "dot_grep: plan scoped to . is high"
+assert_grep "$out_path" $'agent-vault/coding-standards.md\ttrue\thigh' \
+  "dot_grep: coding-standards scoped to . is high"
 
 echo
 if [[ "$FAIL_COUNT" -gt 0 ]]; then
