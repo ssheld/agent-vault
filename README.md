@@ -137,6 +137,7 @@ Run the scaffold regression scripts locally when changing bootstrap, sync, or tr
 - `bash scripts/test-main-push-gate.sh`
 - `bash scripts/test-session-start-load-contract.sh`
 - `bash scripts/test-agent-memory-load-measurement.sh`
+- `bash scripts/test-parse-claude-memory-trace.sh`
 - `bash scripts/test-path-expansion.sh`
 - `bash scripts/test-new-worktree.sh`
 - `bash scripts/test-remove-worktree.sh`
