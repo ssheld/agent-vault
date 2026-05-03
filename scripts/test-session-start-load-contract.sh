@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/agent-vault-load-contract-test.XXXXXX")"
+
+cleanup() {
+  rm -rf "$tmp_root"
+}
+
+trap cleanup EXIT
+
+assert_file_contains() {
+  local file_path="$1"
+  local expected_text="$2"
+
+  if ! grep -Fqx "$expected_text" "$file_path"; then
+    echo "Expected line not found in $file_path: $expected_text" >&2
+    echo "File contents:" >&2
+    sed -n '1,80p' "$file_path" >&2
+    exit 1
+  fi
+}
+
+init_repo() {
+  local repo_path="$1"
+
+  mkdir -p "$repo_path"
+  git -C "$repo_path" init >/dev/null
+}
+
+assert_file_contains "$repo_root/scaffold/agent-vault/CLAUDE.md" "@./lessons.md"
+assert_file_contains "$repo_root/scaffold/agent-vault/GEMINI.md" "@./lessons.md"
+assert_file_contains "$repo_root/scaffold/root/AGENTS.md" 'At session start, read `agent-vault/lessons.md` if it exists.'
+
+generated_repo="$tmp_root/generated"
+init_repo "$generated_repo"
+"$repo_root/scripts/new-project.sh" "load-contract-test" "$generated_repo" >/dev/null
+
+assert_file_contains "$generated_repo/agent-vault/CLAUDE.md" "@./lessons.md"
+assert_file_contains "$generated_repo/agent-vault/GEMINI.md" "@./lessons.md"
+assert_file_contains "$generated_repo/AGENTS.md" 'At session start, read `agent-vault/lessons.md` if it exists.'
+
+perl -0pi -e 's/\Q@.\/lessons.md\E\n//' "$generated_repo/agent-vault/CLAUDE.md"
+perl -0pi -e 's/\QAt session start, read `agent-vault\/lessons.md` if it exists.\E\n//' "$generated_repo/AGENTS.md"
+"$repo_root/scripts/update-project.sh" "$generated_repo" >/dev/null
+
+assert_file_contains "$generated_repo/agent-vault/CLAUDE.md" "@./lessons.md"
+assert_file_contains "$generated_repo/AGENTS.md" 'At session start, read `agent-vault/lessons.md` if it exists.'
+
+"$repo_root/scripts/check-policy-mirrors.sh" >/dev/null
+
+echo "session-start load contract regression checks passed."

@@ -2,7 +2,7 @@
 
 ## Compatibility Note
 - `agent-vault/AGENTS.md` intentionally mirrors this file for Codex compatibility.
-- `agent-vault/CLAUDE.md` and `agent-vault/GEMINI.md` import this file directly.
+- `agent-vault/CLAUDE.md` and `agent-vault/GEMINI.md` import this file directly and import `agent-vault/lessons.md` separately.
 - Treat duplication as intentional; treat content drift as a defect.
 
 ## PR Feedback Response

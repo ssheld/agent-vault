@@ -75,6 +75,10 @@ This repo should stay template-only. Do not store project-specific session logs 
 
 If you want changes to propagate to future projects, edit files under `scaffold/agent-vault/` and `scaffold/root/`.
 
+Design notes for this template repo live under `docs/`. Start with
+`docs/session-start-load-contract.md` when changing agent startup behavior,
+agent entrypoints, or generated-project memory loading.
+
 ## Policy Mirror Drift Checks
 This repository intentionally keeps three mirrored policy blocks for compatibility:
 - `AGENTS.md` mirrors the review section from `scaffold/agent-vault/review-policy.md` (with a repo-local path alias normalization in the check).
@@ -126,6 +130,7 @@ Run the scaffold regression scripts locally when changing bootstrap, sync, or tr
 - `bash scripts/test-decision-template-sync.sh`
 - `bash scripts/test-session-metadata-hook.sh`
 - `bash scripts/test-main-push-gate.sh`
+- `bash scripts/test-session-start-load-contract.sh`
 - `bash scripts/test-path-expansion.sh`
 - `bash scripts/test-new-worktree.sh`
 - `bash scripts/test-remove-worktree.sh`
@@ -259,7 +264,7 @@ Generated projects get a starter `docs/design.md` that uses Mermaid fenced code 
 `new-project.sh` creates `<repo-path>/agent-vault/` with:
 - `shared-rules.md` (single source of truth for implementation rules)
 - `review-policy.md` (single source of truth for PR review guidelines, including required format for responding to review feedback)
-- `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` (policy files; `agent-vault/CLAUDE.md` and `agent-vault/GEMINI.md` import `shared-rules.md`, `project-context.md`, and `project-commands.md`; root wrappers import `review-policy.md`; and `AGENTS.md` inlines review guidance)
+- `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` (policy files; `agent-vault/CLAUDE.md` and `agent-vault/GEMINI.md` import `shared-rules.md`, `project-context.md`, `project-commands.md`, and `lessons.md`; root wrappers import `review-policy.md`; and `AGENTS.md` inlines review guidance)
 - Compatibility note: `AGENTS.md` files intentionally inline mirrored policy content for Codex review-path compatibility; this duplication is expected, but mirrored files should stay synchronized.
 - `README.md`
 - `context-log.md`
@@ -275,7 +280,7 @@ Generated projects get a starter `docs/design.md` that uses Mermaid fenced code 
 - `Templates/` (copied from template source; instantiated notes belong outside this folder)
 
 It also creates project-root files when missing:
-- `<repo-path>/AGENTS.md` -> contains PR review guidance (inline) for Codex GitHub reviews and points workflow execution to `agent-vault/AGENTS.md`
+- `<repo-path>/AGENTS.md` -> contains PR review guidance (inline) for Codex GitHub reviews, points workflow execution to `agent-vault/AGENTS.md`, and directly tells Codex to read `agent-vault/lessons.md` at session start
 - `<repo-path>/CLAUDE.md` -> imports `agent-vault/CLAUDE.md` and `agent-vault/review-policy.md`
 - `<repo-path>/GEMINI.md` -> imports `agent-vault/GEMINI.md` and `agent-vault/review-policy.md`
 - `<repo-path>/docs/design.md` -> starter architecture/design document with embedded Mermaid diagrams

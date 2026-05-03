@@ -12,6 +12,7 @@ Project agent rules are defined in `agent-vault/AGENTS.md`.
 Read that file before making changes.
 Read `agent-vault/project-context.md` for repository architecture and runtime behavior.
 Read `agent-vault/project-commands.md` for setup, test, and operational commands.
+At session start, read `agent-vault/lessons.md` if it exists.
 
 ## PR Authoring
 - For agent-authored pull requests, follow `agent-vault/AGENTS.md` section `PR Authoring Standards`.

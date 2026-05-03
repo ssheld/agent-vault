@@ -3,3 +3,4 @@
 @./shared-rules.md
 @./project-context.md
 @./project-commands.md
+@./lessons.md
