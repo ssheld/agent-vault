@@ -207,23 +207,74 @@ def split_bash_command_head(command: str) -> Optional[str]:
     return head
 
 
-def file_referenced_in_token(token: str, file_path: str) -> bool:
+def normalize_to_repo_relative(token: str, entry_cwd: Optional[str]) -> str:
+    """Convert an absolute path under entry_cwd to repo-relative form when possible."""
+
+    if not token or not entry_cwd or not os.path.isabs(token):
+        return token
+    try:
+        rel = os.path.relpath(token, entry_cwd)
+    except ValueError:
+        return token
+    if rel.startswith(".."):
+        return token
+    return rel
+
+
+def candidate_token_forms(token: str, entry_cwd: Optional[str]) -> List[str]:
+    forms = [token]
+    normalized = normalize_to_repo_relative(token, entry_cwd)
+    if normalized != token:
+        forms.append(normalized)
+    return forms
+
+
+def file_referenced_in_token(
+    token: str, file_path: str, entry_cwd: Optional[str] = None
+) -> bool:
     """Return True if a Bash word references the file path (exact or basename)."""
 
     candidates = (file_path, "./" + file_path, os.path.basename(file_path))
-    for cand in candidates:
-        if not cand:
-            continue
-        if token == cand:
-            return True
-        if token.endswith(cand):
-            stripped = token[: -len(cand)]
-            if stripped in ("", "/", "./"):
+    for form in candidate_token_forms(token, entry_cwd):
+        for cand in candidates:
+            if not cand:
+                continue
+            if form == cand:
                 return True
+            if form.endswith(cand):
+                stripped = form[: -len(cand)]
+                if stripped in ("", "/", "./"):
+                    return True
     return False
 
 
-def classify_bash_for_file(command: str, file_path: str) -> Tuple[str, str]:
+def parse_cd_prefix(
+    command: str, entry_cwd: Optional[str]
+) -> Tuple[Optional[str], str]:
+    """If command starts with `cd <target> && rest`, return (effective_cwd, rest).
+
+    Returns (None, command) when no leading cd prefix is detected. `effective_cwd`
+    is resolved against entry_cwd when the cd target is relative, so subsequent
+    classification can match relative file arguments correctly.
+    """
+
+    match = re.match(r"^\s*cd\s+([^\s&;]+)\s*&&\s*(.+)$", command, re.DOTALL)
+    if not match:
+        return None, command
+    cd_target = match.group(1).strip("\"'")
+    rest = match.group(2)
+    if os.path.isabs(cd_target):
+        effective_cwd = cd_target
+    elif entry_cwd:
+        effective_cwd = os.path.normpath(os.path.join(entry_cwd, cd_target))
+    else:
+        effective_cwd = cd_target
+    return effective_cwd, rest
+
+
+def classify_bash_for_file(
+    command: str, file_path: str, entry_cwd: Optional[str] = None
+) -> Tuple[str, str]:
     """Classify how strongly a Bash command reads `file_path`.
 
     Returns (read_confidence, read_evidence).
@@ -232,16 +283,29 @@ def classify_bash_for_file(command: str, file_path: str) -> Tuple[str, str]:
 
     if not command or not file_path:
         return ("none", "")
-    if file_path not in command and os.path.basename(file_path) not in command:
+
+    cd_target, effective_command = parse_cd_prefix(command, entry_cwd)
+    effective_cwd = cd_target if cd_target else entry_cwd
+
+    basename = os.path.basename(file_path)
+    if (
+        file_path not in effective_command
+        and basename not in effective_command
+        and (
+            not effective_cwd
+            or os.path.join(effective_cwd, file_path) not in effective_command
+        )
+    ):
         return ("none", "")
 
-    head = split_bash_command_head(command)
+    head = split_bash_command_head(effective_command)
     if head is None:
         return ("low_path_mention_only", f"Bash: path mention in '{command[:60]}'")
 
-    tokens = re.findall(r"[^\s'\"`]+|\"[^\"]*\"|'[^']*'", command)
+    tokens = re.findall(r"[^\s'\"`]+|\"[^\"]*\"|'[^']*'", effective_command)
     references = any(
-        file_referenced_in_token(tok.strip("\"'"), file_path) for tok in tokens
+        file_referenced_in_token(tok.strip("\"'"), file_path, effective_cwd)
+        for tok in tokens
     )
 
     if head in BASH_HIGH_CONFIDENCE_COMMANDS and references:
@@ -256,25 +320,33 @@ def classify_bash_for_file(command: str, file_path: str) -> Tuple[str, str]:
     return ("low_path_mention_only", f"Bash: '{head}' command mentions <file>")
 
 
-def grep_targets_file(input_obj: dict, file_path: str) -> bool:
+def grep_targets_file(
+    input_obj: dict, file_path: str, entry_cwd: Optional[str] = None
+) -> bool:
     path_arg = (input_obj.get("path") or "").strip()
     glob_arg = (input_obj.get("glob") or "").strip()
     if path_arg:
-        path_arg_clean = path_arg.rstrip("/")
-        if path_arg_clean == file_path:
-            return True
-        if path_arg_clean == os.path.dirname(file_path):
-            return True
-        if file_path.startswith(path_arg_clean + "/"):
-            return True
+        candidate_paths = candidate_token_forms(path_arg, entry_cwd)
+        for candidate in candidate_paths:
+            cleaned = candidate.rstrip("/")
+            if not cleaned:
+                continue
+            if cleaned == file_path:
+                return True
+            if cleaned == os.path.dirname(file_path):
+                return True
+            if file_path.startswith(cleaned + "/"):
+                return True
     if glob_arg:
         if file_path.endswith(glob_arg.lstrip("*")):
             return True
     return False
 
 
-def classify_grep_for_file(input_obj: dict, file_path: str) -> Tuple[str, str]:
-    if grep_targets_file(input_obj, file_path):
+def classify_grep_for_file(
+    input_obj: dict, file_path: str, entry_cwd: Optional[str] = None
+) -> Tuple[str, str]:
+    if grep_targets_file(input_obj, file_path, entry_cwd):
         return ("high", "Grep tool scoped to <file> or its directory")
     pattern = (input_obj.get("pattern") or "").strip()
     if pattern and file_path in pattern:
@@ -282,31 +354,35 @@ def classify_grep_for_file(input_obj: dict, file_path: str) -> Tuple[str, str]:
     return ("none", "")
 
 
-def classify_read_for_file(input_obj: dict, file_path: str) -> Tuple[str, str]:
+def classify_read_for_file(
+    input_obj: dict, file_path: str, entry_cwd: Optional[str] = None
+) -> Tuple[str, str]:
     candidate = (input_obj.get("file_path") or "").strip()
     if not candidate:
         return ("none", "")
-    if candidate == file_path or candidate.endswith("/" + file_path):
-        return ("high", "Read tool")
+    forms = candidate_token_forms(candidate, entry_cwd)
+    for form in forms:
+        if form == file_path or form.endswith("/" + file_path):
+            return ("high", "Read tool")
     if os.path.basename(candidate) == os.path.basename(file_path):
         return ("medium", "Read tool: basename match")
     return ("none", "")
 
 
 def classify_tool_use_for_file(
-    tool_use: dict, file_path: str
+    tool_use: dict, file_path: str, entry_cwd: Optional[str] = None
 ) -> Tuple[str, str]:
     name = tool_use.get("name") or ""
     input_obj = tool_use.get("input") or {}
     if not isinstance(input_obj, dict):
         return ("none", "")
     if name == "Read":
-        return classify_read_for_file(input_obj, file_path)
+        return classify_read_for_file(input_obj, file_path, entry_cwd)
     if name == "Grep":
-        return classify_grep_for_file(input_obj, file_path)
+        return classify_grep_for_file(input_obj, file_path, entry_cwd)
     if name == "Bash":
         command = input_obj.get("command") or ""
-        return classify_bash_for_file(command, file_path)
+        return classify_bash_for_file(command, file_path, entry_cwd)
     return ("none", "")
 
 
@@ -322,8 +398,10 @@ def confidence_implies_tool_read(confidence: str) -> bool:
     return confidence in ("high", "medium")
 
 
-def collect_agent_invocations(entries: Sequence[dict]) -> List[dict]:
-    """Return main-agent Agent tool invocations with their subagent_type."""
+def collect_agent_invocations(
+    entries: Sequence[dict], phase_for_uuid: Dict[str, str]
+) -> List[dict]:
+    """Return main-agent Agent tool invocations with subagent_type and phase."""
 
     invocations: List[dict] = []
     for index, entry in enumerate(entries):
@@ -336,12 +414,15 @@ def collect_agent_invocations(entries: Sequence[dict]) -> List[dict]:
             sub_type = "unknown"
             if isinstance(input_obj, dict):
                 sub_type = (input_obj.get("subagent_type") or "unknown").strip() or "unknown"
+            uuid = entry.get("uuid", "")
+            phase = phase_for_uuid.get(uuid, "fresh_start")
             invocations.append(
                 {
                     "subagent_type": sub_type,
                     "event_index": index,
-                    "uuid": entry.get("uuid", ""),
+                    "uuid": uuid,
                     "tool_uuid": tool_use.get("id", ""),
+                    "session_phase": phase,
                 }
             )
     return invocations
@@ -412,20 +493,24 @@ def has_clear_boundary(entries: Sequence[dict]) -> bool:
 
 
 def collect_reads(
-    entries: Sequence[dict], manifest_files: Sequence[str]
+    entries: Sequence[dict],
+    manifest_files: Sequence[str],
+    phase_for_uuid: Dict[str, str],
 ) -> List[dict]:
     """Return one record per (entry, manifest_file) where evidence > none."""
 
     attribution = TaskAttribution(entries)
-    phase_for_uuid = determine_session_phase(entries)
     records: List[dict] = []
     for index, entry in enumerate(entries):
         uuid = entry.get("uuid") or ""
         is_sidechain = bool(entry.get("isSidechain"))
         cwd = entry.get("cwd") or "unknown"
+        entry_cwd = entry.get("cwd") or None
         for tool_use in iter_tool_uses(entry):
             for file_path in manifest_files:
-                confidence, evidence = classify_tool_use_for_file(tool_use, file_path)
+                confidence, evidence = classify_tool_use_for_file(
+                    tool_use, file_path, entry_cwd
+                )
                 if confidence == "none":
                     continue
                 if is_sidechain:
@@ -455,7 +540,14 @@ def collect_observed_cells(
     records: Sequence[dict],
     agent_invocations: Sequence[dict],
 ) -> List[Tuple[str, str, str]]:
-    """Return ordered list of (agent_type, subagent_type, session_phase) cells."""
+    """Return ordered list of (agent_type, subagent_type, session_phase) cells.
+
+    Main-agent cells are emitted for each phase actually traversed in the trace
+    (fresh_start always; post_clear only when a /clear marker was observed).
+    Subagent cells are emitted only for (subagent_type, phase) pairs that were
+    actually observed: the subagent must have been invoked (or surfaced a
+    sidechain tool call, for forward compatibility) in that phase.
+    """
 
     cells: "OrderedDict[Tuple[str, str, str], None]" = OrderedDict()
     saw_clear = has_clear_boundary(entries)
@@ -464,25 +556,28 @@ def collect_observed_cells(
     if saw_clear:
         cells[("main", "", "post_clear")] = None
 
-    seen_subagent_types: "OrderedDict[str, None]" = OrderedDict()
+    observed_subagent_phases: "OrderedDict[Tuple[str, str], None]" = OrderedDict()
     for invocation in agent_invocations:
-        seen_subagent_types[invocation["subagent_type"]] = None
+        key = (invocation["subagent_type"], invocation["session_phase"])
+        observed_subagent_phases[key] = None
     for record in records:
-        if record["agent_type"] == "subagent":
-            seen_subagent_types[record["subagent_type"]] = None
+        if record["agent_type"] != "subagent":
+            continue
+        key = (record["subagent_type"], record["session_phase"])
+        observed_subagent_phases[key] = None
 
-    for sub_type in seen_subagent_types:
-        cells[("subagent", sub_type, "fresh_start")] = None
-        if saw_clear:
-            cells[("subagent", sub_type, "post_clear")] = None
+    for sub_type, phase in observed_subagent_phases:
+        cells[("subagent", sub_type, phase)] = None
 
     return list(cells.keys())
 
 
-def select_best_record(
+def select_strongest_record(
     records: Sequence[dict],
 ) -> Dict[Tuple[str, str, str, str], dict]:
-    best: Dict[Tuple[str, str, str, str], dict] = {}
+    """Pick the highest-confidence read per cell, tiebreaking by earliest index."""
+
+    strongest: Dict[Tuple[str, str, str, str], dict] = {}
     for record in records:
         key = (
             record["agent_type"],
@@ -490,17 +585,36 @@ def select_best_record(
             record["session_phase"],
             record["file"],
         )
-        existing = best.get(key)
+        existing = strongest.get(key)
         if existing is None:
-            best[key] = record
+            strongest[key] = record
             continue
         cur_rank = CONFIDENCE_RANK[record["confidence"]]
         old_rank = CONFIDENCE_RANK[existing["confidence"]]
         if cur_rank > old_rank:
-            best[key] = record
+            strongest[key] = record
         elif cur_rank == old_rank and record["event_index"] < existing["event_index"]:
-            best[key] = record
-    return best
+            strongest[key] = record
+    return strongest
+
+
+def select_earliest_record(
+    records: Sequence[dict],
+) -> Dict[Tuple[str, str, str, str], dict]:
+    """Pick the earliest read per cell regardless of confidence."""
+
+    earliest: Dict[Tuple[str, str, str, str], dict] = {}
+    for record in records:
+        key = (
+            record["agent_type"],
+            record["subagent_type"],
+            record["session_phase"],
+            record["file"],
+        )
+        existing = earliest.get(key)
+        if existing is None or record["event_index"] < existing["event_index"]:
+            earliest[key] = record
+    return earliest
 
 
 def build_rows(
@@ -508,24 +622,24 @@ def build_rows(
     cells: Sequence[Tuple[str, str, str]],
     manifest_files: Sequence[str],
     saw_clear_boundary: bool,
-    agent_invocations: Sequence[dict],
 ) -> List[Dict[str, str]]:
-    best = select_best_record(records)
-    has_subagent_invocations = bool(agent_invocations)
+    strongest = select_strongest_record(records)
+    earliest = select_earliest_record(records)
     rows: List[Dict[str, str]] = []
 
     for agent_type, subagent_type, session_phase in cells:
         for file_path in manifest_files:
             key = (agent_type, subagent_type, session_phase, file_path)
-            record = best.get(key)
-            confidence = record["confidence"] if record else "none"
-            evidence = record["evidence"] if record else ""
+            strong_record = strongest.get(key)
+            first_record = earliest.get(key)
+            confidence = strong_record["confidence"] if strong_record else "none"
+            evidence = strong_record["evidence"] if strong_record else ""
             tool_read = (
                 "true" if confidence_implies_tool_read(confidence) else "false"
             )
-            event_index = str(record["event_index"]) if record else ""
-            uuid = record["uuid"] if record else ""
-            cwd = record["cwd"] if record else ""
+            event_index = str(first_record["event_index"]) if first_record else ""
+            uuid = first_record["uuid"] if first_record else ""
+            cwd = strong_record["cwd"] if strong_record else ""
             notes_parts: List[str] = []
             if agent_type == "subagent":
                 notes_parts.append(
@@ -533,12 +647,10 @@ def build_rows(
                     "JSONL; rows reflect Agent invocation only"
                 )
             if (
-                session_phase == "post_clear"
+                agent_type == "main"
+                and session_phase == "post_clear"
                 and not saw_clear_boundary
-                and agent_type != "main"
             ):
-                notes_parts.append("no /clear boundary observed in trace")
-            if agent_type == "main" and session_phase == "post_clear" and not saw_clear_boundary:
                 notes_parts.append("no /clear boundary observed in trace")
             rows.append(
                 {
@@ -556,11 +668,6 @@ def build_rows(
                     "notes": "; ".join(notes_parts),
                 }
             )
-    if not has_subagent_invocations and any(
-        agent_type == "subagent" for agent_type, _, _ in cells
-    ):
-        # Defensive: if subagent cells exist with no invocations, leave rows as-is.
-        pass
     return rows
 
 
@@ -600,11 +707,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     manifest_files = load_manifest(args.manifest)
     entries = load_jsonl(jsonl_path)
-    records = collect_reads(entries, manifest_files)
-    agent_invocations = collect_agent_invocations(entries)
+    phase_for_uuid = determine_session_phase(entries)
+    records = collect_reads(entries, manifest_files, phase_for_uuid)
+    agent_invocations = collect_agent_invocations(entries, phase_for_uuid)
     cells = collect_observed_cells(entries, records, agent_invocations)
     saw_clear = has_clear_boundary(entries)
-    rows = build_rows(records, cells, manifest_files, saw_clear, agent_invocations)
+    rows = build_rows(records, cells, manifest_files, saw_clear)
 
     if args.output:
         with args.output.open("w") as fh:

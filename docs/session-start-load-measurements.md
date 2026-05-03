@@ -166,6 +166,25 @@ errors out with a clear message rather than guessing.
 | `low_path_mention_only` | `false` | Path appears in command text but command shape does not prove the content was read. Recorded for reviewer inspection without inflating protocol compliance. |
 | `none` | `false` | No evidence for this file in this cell. |
 
+### Path Normalization
+
+Tool inputs that use absolute paths under the entry's `cwd` are normalized to
+repo-relative form before comparison against the manifest. `Grep` scoped to
+`/fixture/agent-vault/` from a cwd of `/fixture` matches the manifest entry
+`agent-vault/context-log.md` as `high`. Bash commands that begin with
+`cd <target> && <rest>` are parsed: the cd target becomes the effective cwd for
+classifying the rest of the command, so `cd /fixture && cat agent-vault/...`
+records as `high` even when the entry's recorded cwd is unrelated.
+
+### First-Read vs. Strongest-Confidence Separation
+
+`first_read_event_index` and `first_read_uuid` always point to the earliest
+read of the file in the cell, regardless of confidence. `read_confidence` and
+`read_evidence` always reflect the strongest evidence found in the cell, with
+ties broken by earliest event. So an early `wc <file>` followed by a later
+`Read` of the same file produces a row with `read_confidence=high` (from the
+later Read) but `first_read_event_index` pointing to the earlier `wc` event.
+
 ### `/clear` Boundary Detection
 
 The parser detects user-role JSONL entries whose text contains the literal
@@ -173,6 +192,16 @@ The parser detects user-role JSONL entries whose text contains the literal
 `fresh_start` and after as `post_clear`. If no marker appears, all events are
 classified `fresh_start`. Variants such as `/cleared` or partial matches do not
 trigger detection.
+
+### Subagent Cell Emission
+
+Subagent rows are emitted only for `(subagent_type, session_phase)` pairs that
+were actually observed: an Agent invocation (or a future `isSidechain: true`
+record, for forward compatibility) must have happened in that phase. A
+subagent invoked only before `/clear` does not get a fabricated `post_clear`
+row, and vice versa. Main-agent cells follow phases actually traversed in the
+trace: `fresh_start` always, `post_clear` only when a `/clear` marker was
+observed.
 
 ### Subagent Visibility Gap
 

@@ -343,6 +343,170 @@ def fixture_malformed_clear():
 
 fixtures["malformed_clear"] = fixture_malformed_clear()
 
+
+def fixture_absolute_grep_path():
+    return [
+        main_user("u1", None, "search"),
+        main_assistant_tool(
+            "a1",
+            "u1",
+            "Grep",
+            {
+                "pattern": "TODO",
+                "path": "/fixture/agent-vault/",
+                "output_mode": "files_with_matches",
+            },
+            tool_id="t1",
+        ),
+    ]
+
+
+fixtures["absolute_grep_path"] = fixture_absolute_grep_path()
+
+
+def fixture_absolute_bash_cat():
+    return [
+        main_user("u1", None, "show file"),
+        main_assistant_tool(
+            "a1",
+            "u1",
+            "Bash",
+            {
+                "command": "cat /fixture/agent-vault/context-log.md",
+                "description": "show context log via absolute path",
+            },
+            tool_id="t1",
+        ),
+    ]
+
+
+fixtures["absolute_bash_cat"] = fixture_absolute_bash_cat()
+
+
+def fixture_cd_prefix_bash_cat():
+    return [
+        main_user("u1", None, "show file via cd"),
+        main_assistant_tool(
+            "a1",
+            "u1",
+            "Bash",
+            {
+                "command": "cd /fixture && cat agent-vault/context-log.md",
+                "description": "show context log via cd",
+            },
+            tool_id="t1",
+            cwd="/elsewhere",
+        ),
+    ]
+
+
+fixtures["cd_prefix_bash_cat"] = fixture_cd_prefix_bash_cat()
+
+
+def fixture_subagent_fresh_only():
+    return [
+        main_user("u1", None, "delegate before any clear"),
+        main_assistant_tool(
+            "a1",
+            "u1",
+            "Agent",
+            {
+                "description": "explore",
+                "prompt": "investigate",
+                "subagent_type": "general-purpose",
+            },
+            tool_id="t_agent",
+        ),
+        main_user(
+            "u2",
+            "a1",
+            [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "t_agent",
+                    "content": [{"type": "text", "text": "done"}],
+                }
+            ],
+        ),
+        main_user_clear("u_clear", "u2"),
+        main_user("u3", "u_clear", "post-clear continuing"),
+        main_assistant_text("a2", "u3", "I do not delegate now."),
+    ]
+
+
+fixtures["subagent_fresh_only"] = fixture_subagent_fresh_only()
+
+
+def fixture_subagent_post_clear_only():
+    return [
+        main_user("u1", None, "main work"),
+        main_assistant_text("a1", "u1", "doing main work"),
+        main_user_clear("u_clear", "a1"),
+        main_user("u2", "u_clear", "post-clear delegate"),
+        main_assistant_tool(
+            "a2",
+            "u2",
+            "Agent",
+            {
+                "description": "review",
+                "prompt": "review the change",
+                "subagent_type": "general-purpose",
+            },
+            tool_id="t_agent",
+        ),
+        main_user(
+            "u3",
+            "a2",
+            [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "t_agent",
+                    "content": [{"type": "text", "text": "approved"}],
+                }
+            ],
+        ),
+    ]
+
+
+fixtures["subagent_post_clear_only"] = fixture_subagent_post_clear_only()
+
+
+def fixture_first_read_before_strongest():
+    return [
+        main_user("u1", None, "search then read"),
+        main_assistant_tool(
+            "a_medium",
+            "u1",
+            "Bash",
+            {
+                "command": "wc -l agent-vault/context-log.md",
+                "description": "count lines",
+            },
+            tool_id="t_med",
+        ),
+        main_user(
+            "u2",
+            "a_medium",
+            [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "t_med",
+                    "content": [{"type": "text", "text": "120 agent-vault/context-log.md"}],
+                }
+            ],
+        ),
+        main_assistant_tool(
+            "a_high",
+            "u2",
+            "Read",
+            {"file_path": "/fixture/agent-vault/context-log.md"},
+            tool_id="t_high",
+        ),
+    ]
+
+
+fixtures["first_read_before_strongest"] = fixture_first_read_before_strongest()
+
 if fixture_name not in fixtures:
     sys.exit(f"unknown fixture: {fixture_name}")
 
@@ -491,6 +655,80 @@ else
 fi
 assert_grep "$missing_out_path" "either --jsonl or both" \
   "missing input: helpful message"
+
+# 13. absolute_grep_path: Grep path="/fixture/agent-vault/" with cwd /fixture → high
+out_path="$tmp_root/out_abs_grep.tsv"
+build_fixture "$tmp_root/abs_grep.jsonl" "absolute_grep_path"
+run_parser "$tmp_root/abs_grep.jsonl" "$manifest_path" "$out_path"
+
+assert_grep "$out_path" $'agent-vault/context-log.md\ttrue\thigh' \
+  "abs_grep: context-log scoped via absolute path is high"
+assert_grep "$out_path" $'agent-vault/plan.md\ttrue\thigh' \
+  "abs_grep: plan scoped via absolute path is high"
+
+# 14. absolute_bash_cat: Bash "cat /fixture/agent-vault/context-log.md" with cwd /fixture → high
+out_path="$tmp_root/out_abs_cat.tsv"
+build_fixture "$tmp_root/abs_cat.jsonl" "absolute_bash_cat"
+run_parser "$tmp_root/abs_cat.jsonl" "$manifest_path" "$out_path"
+
+assert_grep "$out_path" $'agent-vault/context-log.md\ttrue\thigh' \
+  "abs_cat: absolute Bash cat is high"
+assert_grep "$out_path" "Bash: cat <file>" "abs_cat: evidence string"
+
+# 15. cd_prefix_bash_cat: "cd /fixture && cat agent-vault/context-log.md" with cwd /elsewhere → high
+out_path="$tmp_root/out_cd_cat.tsv"
+build_fixture "$tmp_root/cd_cat.jsonl" "cd_prefix_bash_cat"
+run_parser "$tmp_root/cd_cat.jsonl" "$manifest_path" "$out_path"
+
+assert_grep "$out_path" $'agent-vault/context-log.md\ttrue\thigh' \
+  "cd_cat: cd-prefixed cat is high"
+
+# 16. subagent_fresh_only: Agent invoked before /clear; no Agent after → only fresh_start cell
+out_path="$tmp_root/out_sub_fresh.tsv"
+build_fixture "$tmp_root/sub_fresh.jsonl" "subagent_fresh_only"
+run_parser "$tmp_root/sub_fresh.jsonl" "$manifest_path" "$out_path"
+
+assert_grep "$out_path" $'subagent\tgeneral-purpose\tfresh_start' \
+  "sub_fresh: fresh_start subagent cell present"
+assert_no_grep "$out_path" $'subagent\tgeneral-purpose\tpost_clear' \
+  "sub_fresh: no fabricated post_clear subagent cell"
+# Sanity: main post_clear cell still exists since /clear happened
+assert_grep "$out_path" $'main\t\tpost_clear' \
+  "sub_fresh: main post_clear cell still emitted"
+
+# 17. subagent_post_clear_only: Agent invoked after /clear; no Agent before → only post_clear cell
+out_path="$tmp_root/out_sub_post.tsv"
+build_fixture "$tmp_root/sub_post.jsonl" "subagent_post_clear_only"
+run_parser "$tmp_root/sub_post.jsonl" "$manifest_path" "$out_path"
+
+assert_grep "$out_path" $'subagent\tgeneral-purpose\tpost_clear' \
+  "sub_post: post_clear subagent cell present"
+assert_no_grep "$out_path" $'subagent\tgeneral-purpose\tfresh_start' \
+  "sub_post: no fabricated fresh_start subagent cell"
+
+# 18. first_read_before_strongest: medium read at idx=1, high read at idx=3 → first_read_event_index=1, confidence=high
+out_path="$tmp_root/out_first_read.tsv"
+build_fixture "$tmp_root/first_read.jsonl" "first_read_before_strongest"
+run_parser "$tmp_root/first_read.jsonl" "$manifest_path" "$out_path"
+
+# Strongest confidence row should be high (from the Read at later index)
+assert_grep "$out_path" $'agent-vault/context-log.md\ttrue\thigh' \
+  "first_read: strongest is high"
+# But first_read_event_index must point to the earlier medium read at index 1
+context_log_row="$(awk -F'\t' '$6 == "agent-vault/context-log.md" && $4 == "fresh_start"' "$out_path")"
+first_index="$(echo "$context_log_row" | awk -F'\t' '{print $10}')"
+if [[ "$first_index" == "1" ]]; then
+  pass
+else
+  fail "first_read: expected first_read_event_index=1, got '$first_index'"
+  echo "context-log row: $context_log_row" >&2
+fi
+first_uuid="$(echo "$context_log_row" | awk -F'\t' '{print $11}')"
+if [[ "$first_uuid" == "a_medium" ]]; then
+  pass
+else
+  fail "first_read: expected first_read_uuid=a_medium, got '$first_uuid'"
+fi
 
 echo
 if [[ "$FAIL_COUNT" -gt 0 ]]; then
