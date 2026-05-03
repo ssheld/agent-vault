@@ -12,7 +12,9 @@ which files still depend on an agent following the session-start protocol.
 
 The current policy is intentionally conservative: use native import mechanisms
 where they exist, keep project-owned memory in `agent-vault/`, and defer
-generated composition until the host-by-host behavior is specified more fully.
+generated composition until host-by-host behavior is measured more fully.
+
+See `docs/session-start-load-measurements.md` for the current evidence record.
 
 ## Generated Entrypoints
 
@@ -31,6 +33,26 @@ generated composition until the host-by-host behavior is specified more fully.
 | Session-start protocol reads | `agent-vault/README.md`, `context-log.md`, `plan.md`, `coding-standards.md`, `project-context.md`, `project-commands.md`, `open-questions.md`, `decision-log.md`, `lessons.md` | Agents are instructed to read these at session start or when relevant. |
 | Runtime project memory | `agent-vault/context-log.md`, `agent-vault/lessons.md`, daily notes, handoffs, decision records | Seed missing files, but do not overwrite project-owned content during normal updates. |
 | Referenced archives | older daily notes, older handoffs, detailed decision records | Read when the current task or current index points to them. |
+
+## Current Measurement Summary
+
+Issue [#105](https://github.com/ssheld/agent-vault/issues/105) is the evidence
+track for broader session-start loading behavior.
+
+As of 2026-05-03:
+
+- Codex `codex debug prompt-input` showed no sentinel content from the measured
+  canonical memory files when launched from a generated repo root or from
+  `agent-vault/`. This confirms only that those file contents were absent from
+  startup prompt input; it does not measure later protocol reads.
+- Claude Code did not expose resolved `CLAUDE.md` import content through the
+  tested debug/output paths. Claude startup/import measurement therefore needs
+  indirect token-delta evidence plus behavioral recall and JSONL tool traces.
+- The outside-fixture control for Codex was sentinel-free, as expected.
+
+Do not treat these findings as a reason to force-load additional files yet.
+They narrow what is known and define the next measurements needed before #103
+changes generated-project behavior.
 
 ## Current `lessons.md` Decision
 
@@ -55,7 +77,8 @@ mode where an agent skips session-start reads.
 That risk is accepted for #102 because generated composition would add a new
 sync surface across `scripts/new-project.sh`, `scripts/update-project.sh`,
 managed root wrappers, backup behavior, dry-run behavior, and drift checks. The
-larger decision belongs in #103, where the project can decide whether to add:
+larger decision belongs in #103 after #105 establishes which misses are real,
+agent-specific, and material. Follow-up options include:
 
 - generated root `AGENTS.md` composition from `agent-vault/lessons.md`
 - a bounded startup lesson digest

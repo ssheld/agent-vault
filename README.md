@@ -79,6 +79,11 @@ Design notes for this template repo live under `docs/`. Start with
 `docs/session-start-load-contract.md` when changing agent startup behavior,
 agent entrypoints, or generated-project memory loading.
 
+Use `bash scripts/measure-agent-memory-load.sh` to create a temporary generated
+fixture with sentinel-marked memory files and record Codex startup-context
+measurements. Current measurement notes live in
+`docs/session-start-load-measurements.md`.
+
 ## Policy Mirror Drift Checks
 This repository intentionally keeps three mirrored policy blocks for compatibility:
 - `AGENTS.md` mirrors the review section from `scaffold/agent-vault/review-policy.md` (with a repo-local path alias normalization in the check).
@@ -131,6 +136,7 @@ Run the scaffold regression scripts locally when changing bootstrap, sync, or tr
 - `bash scripts/test-session-metadata-hook.sh`
 - `bash scripts/test-main-push-gate.sh`
 - `bash scripts/test-session-start-load-contract.sh`
+- `bash scripts/test-agent-memory-load-measurement.sh`
 - `bash scripts/test-path-expansion.sh`
 - `bash scripts/test-new-worktree.sh`
 - `bash scripts/test-remove-worktree.sh`
