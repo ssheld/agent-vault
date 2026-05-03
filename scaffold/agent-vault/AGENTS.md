@@ -7,7 +7,7 @@
 
 ## Compatibility Note
 - `agent-vault/AGENTS.md` intentionally mirrors `agent-vault/shared-rules.md` for Codex compatibility.
-- `agent-vault/CLAUDE.md` and `agent-vault/GEMINI.md` import `shared-rules.md`.
+- `agent-vault/CLAUDE.md` and `agent-vault/GEMINI.md` import `shared-rules.md` and `lessons.md`.
 - Do not flag duplication itself; only flag drift between mirrored policy files.
 
 ## PR Feedback Response
