@@ -100,6 +100,9 @@ MEASURED_LABELS=(
   "LESSONS"
 )
 
+[[ ${#MEASURED_FILES[@]} -eq ${#MEASURED_LABELS[@]} ]] ||
+  die "MEASURED_FILES and MEASURED_LABELS must have the same length"
+
 SENTINELS=()
 
 append_measurement_block() {
@@ -234,6 +237,12 @@ write_codex_table() {
     note="codex_not_found"
   else
     note="codex_failed_rc_${rc}"
+    echo "Warning: codex debug prompt-input failed for $cwd_kind (rc=$rc)." >&2
+    echo "Codex stderr path: $stderr_path" >&2
+    if [[ -s "$stderr_path" ]]; then
+      echo "Codex stderr excerpt:" >&2
+      sed -n '1,20p' "$stderr_path" >&2
+    fi
   fi
 
   for index in "${!MEASURED_FILES[@]}"; do
