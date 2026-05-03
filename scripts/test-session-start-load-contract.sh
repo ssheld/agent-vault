@@ -42,6 +42,13 @@ assert_file_contains "$generated_repo/agent-vault/CLAUDE.md" "@./lessons.md"
 assert_file_contains "$generated_repo/agent-vault/GEMINI.md" "@./lessons.md"
 assert_file_contains "$generated_repo/AGENTS.md" 'At session start, read `agent-vault/lessons.md` if it exists.'
 
+perl -0pi -e 's/\Q@.\/lessons.md\E\n//' "$generated_repo/agent-vault/CLAUDE.md"
+perl -0pi -e 's/\QAt session start, read `agent-vault\/lessons.md` if it exists.\E\n//' "$generated_repo/AGENTS.md"
+"$repo_root/scripts/update-project.sh" "$generated_repo" >/dev/null
+
+assert_file_contains "$generated_repo/agent-vault/CLAUDE.md" "@./lessons.md"
+assert_file_contains "$generated_repo/AGENTS.md" 'At session start, read `agent-vault/lessons.md` if it exists.'
+
 "$repo_root/scripts/check-policy-mirrors.sh" >/dev/null
 
 echo "session-start load contract regression checks passed."
