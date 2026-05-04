@@ -45,14 +45,27 @@ As of 2026-05-03:
   canonical memory files when launched from a generated repo root or from
   `agent-vault/`. This confirms only that those file contents were absent from
   startup prompt input; it does not measure later protocol reads.
+- A controlled `codex exec --json --ephemeral` run from a generated repo root
+  read all 9 measured canonical files by command execution during session
+  start. This is protocol-read evidence, not startup-context evidence.
 - Claude Code did not expose resolved `CLAUDE.md` import content through the
   tested debug/output paths. Claude startup/import measurement therefore needs
   indirect token-delta evidence plus behavioral recall and JSONL tool traces.
+- A controlled Claude Code fresh-start run read 6 of the 9 measured files by
+  JSONL-visible `Read` tool calls: `README.md`, `context-log.md`, `plan.md`,
+  `coding-standards.md`, `open-questions.md`, and `decision-log.md`.
+- A tool-disabled Claude Code recall probe answered the expected sentinels for
+  `project-context.md`, `project-commands.md`, and `lessons.md`, and returned
+  `UNKNOWN` for the other 6 measured files. This supports the current split:
+  those 3 files are visible through Claude's import path, while the other 6 are
+  protocol-read dependent.
 - The outside-fixture control for Codex was sentinel-free, as expected.
 
 Do not treat these findings as a reason to force-load additional files yet.
-They narrow what is known and define the next measurements needed before #103
-changes generated-project behavior.
+They narrow what is known and show that both Claude and Codex can follow the
+current protocol in controlled fresh-start runs. Repeated task-type coverage and
+post-`/clear` traces are still needed before #103 changes generated-project
+behavior.
 
 ## Current `lessons.md` Decision
 

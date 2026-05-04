@@ -663,7 +663,59 @@ assert_no_grep "$out_path" "post_clear" "malformed_clear: no post_clear cells"
 assert_grep "$out_path" $'fresh_start\t/fixture\tagent-vault/context-log.md\ttrue\thigh' \
   "malformed_clear: read still recorded under fresh_start"
 
-# 11. session-id resolution failure
+# 11. session-id candidate encoding is pinned for known punctuation cases
+candidate_names_path="$tmp_root/session_candidate_names.txt"
+python3 - "$parser" >"$candidate_names_path" <<'PYEOF'
+import importlib.util
+import pathlib
+import sys
+
+parser_path = pathlib.Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location("parse_claude_memory_trace", parser_path)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+
+for cwd in (
+    pathlib.Path("/fixture/session.root_with_punctuation/generated.repo"),
+    pathlib.Path("/fixture/consecutive._punctuation/generated.repo"),
+):
+    print(f"cwd={cwd}")
+    for candidate in module.claude_project_dir_candidates(cwd):
+        print(candidate.name)
+PYEOF
+assert_grep "$candidate_names_path" "-fixture-session.root_with_punctuation-generated.repo" \
+  "session-id candidates: slash-only punctuation path is pinned"
+assert_grep "$candidate_names_path" "-fixture-session-root-with-punctuation-generated-repo" \
+  "session-id candidates: punctuation-normalized path is pinned"
+assert_grep "$candidate_names_path" "-fixture-consecutive--punctuation-generated-repo" \
+  "session-id candidates: consecutive punctuation is not collapsed"
+assert_no_grep "$candidate_names_path" "-fixture-consecutive-punctuation-generated-repo" \
+  "session-id candidates: collapsed consecutive punctuation is not emitted"
+
+# 12. session-id resolution supports Claude's punctuation-normalized cwd encoding
+session_home="$tmp_root/home"
+session_cwd="$tmp_root/session.root_with_punctuation/generated.repo"
+session_id="11111111-1111-1111-1111-111111111111"
+mkdir -p "$session_cwd"
+session_cwd="$(cd "$session_cwd" && pwd -P)"
+slash_only_session_cwd="${session_cwd//\//-}"
+encoded_session_cwd="${slash_only_session_cwd//./-}"
+encoded_session_cwd="${encoded_session_cwd//_/-}"
+session_jsonl="$session_home/.claude/projects/$encoded_session_cwd/$session_id.jsonl"
+mkdir -p "$(dirname "$session_jsonl")"
+build_fixture "$session_jsonl" "basic_main_read"
+
+out_path="$tmp_root/out_session_success.tsv"
+HOME="$session_home" python3 "$parser" \
+  --session-id "$session_id" \
+  --cwd "$session_cwd" \
+  --manifest "$manifest_path" \
+  --output "$out_path"
+assert_grep "$out_path" $'agent-vault/context-log.md\ttrue\thigh' \
+  "session-id success: punctuation-normalized cwd resolved"
+
+# 13. session-id resolution failure
 session_out_path="$tmp_root/out_session_err.txt"
 session_rc=0
 python3 "$parser" \
@@ -680,7 +732,7 @@ fi
 assert_grep "$session_out_path" "could not resolve session id" \
   "session-id missing: error message present"
 
-# 12. require either --jsonl or --session-id
+# 14. require either --jsonl or --session-id
 missing_out_path="$tmp_root/out_missing.txt"
 missing_rc=0
 python3 "$parser" --manifest "$manifest_path" >"$missing_out_path" 2>&1 || missing_rc=$?
