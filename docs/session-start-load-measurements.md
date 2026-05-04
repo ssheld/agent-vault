@@ -154,6 +154,11 @@ parser tries both the older slash-only form and the punctuation-normalized form.
 If resolution fails the parser errors out with a clear message rather than
 guessing.
 
+Claude Code `2.1.118` was checked with a consecutive-punctuation cwd
+(`/private/tmp/agent-vault-encoding/foo._bar/generated.repo`) and created the
+project directory `-private-tmp-agent-vault-encoding-foo--bar-generated-repo`,
+so the parser intentionally does not collapse adjacent dashes.
+
 ### Output Columns
 
 `agent`, `agent_type`, `subagent_type`, `session_phase`, `cwd`, `file`,
@@ -280,8 +285,9 @@ Tooling:
 - JSONL parsed with `scripts/parse-claude-memory-trace.py`
 
 The CLI run reached its configured cost cap after producing a persistent JSONL
-trace. The CLI result was not used as a behavioral answer, but the trace was
-valid protocol-read evidence.
+trace. The cap fired after the protocol reads recorded below, so the CLI result
+was not used as a behavioral answer but the trace remains valid protocol-read
+evidence.
 
 Parsed fresh-start rows:
 
