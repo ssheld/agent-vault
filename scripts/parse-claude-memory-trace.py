@@ -120,10 +120,33 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def resolve_jsonl_path(session_id: str, cwd: Path) -> Path:
-    encoded_cwd = str(cwd.resolve()).replace("/", "-")
-    base = Path.home() / ".claude" / "projects" / encoded_cwd
-    return base / f"{session_id}.jsonl"
+def claude_project_dir_candidates(cwd: Path) -> List[Path]:
+    """Return known Claude Code project-directory encodings for `cwd`.
+
+    Current Claude Code versions normalize more than path separators in some
+    generated temp paths: punctuation such as `_` and `.` is also replaced by
+    `-`. Keep the older slash-only form as a candidate because existing stable
+    worktree paths without punctuation resolve to the same value either way, and
+    older traces may already live under that directory.
+    """
+
+    raw_cwd = str(cwd.resolve())
+    encoded_names: "OrderedDict[str, None]" = OrderedDict()
+    slash_only = raw_cwd.replace("/", "-")
+    encoded_names[slash_only] = None
+    encoded_names[re.sub(r"[^A-Za-z0-9-]", "-", slash_only)] = None
+    return [Path.home() / ".claude" / "projects" / name for name in encoded_names]
+
+
+def resolve_jsonl_path(session_id: str, cwd: Path) -> Tuple[Optional[Path], List[Path]]:
+    candidates = [
+        project_dir / f"{session_id}.jsonl"
+        for project_dir in claude_project_dir_candidates(cwd)
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate, candidates
+    return None, candidates
 
 
 def load_manifest(path: Path) -> List[str]:
@@ -697,11 +720,13 @@ def resolve_input_path(args: argparse.Namespace) -> Path:
     if args.jsonl:
         return args.jsonl
     if args.session_id and args.cwd:
-        candidate = resolve_jsonl_path(args.session_id, args.cwd)
-        if not candidate.is_file():
+        candidate, attempted_paths = resolve_jsonl_path(args.session_id, args.cwd)
+        if candidate is None:
+            attempted = ", ".join(str(path) for path in attempted_paths)
             raise SystemExit(
                 f"could not resolve session id '{args.session_id}' under cwd "
-                f"'{args.cwd}': expected file at {candidate}. Pass --jsonl explicitly."
+                f"'{args.cwd}': expected file at one of: {attempted}. "
+                "Pass --jsonl explicitly."
             )
         return candidate
     raise SystemExit("either --jsonl or both --session-id and --cwd are required")

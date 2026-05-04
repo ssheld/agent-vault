@@ -663,7 +663,36 @@ assert_no_grep "$out_path" "post_clear" "malformed_clear: no post_clear cells"
 assert_grep "$out_path" $'fresh_start\t/fixture\tagent-vault/context-log.md\ttrue\thigh' \
   "malformed_clear: read still recorded under fresh_start"
 
-# 11. session-id resolution failure
+# 11. session-id resolution supports Claude's punctuation-normalized cwd encoding
+session_home="$tmp_root/home"
+session_cwd="$tmp_root/session.root_with_punctuation/generated.repo"
+session_id="11111111-1111-1111-1111-111111111111"
+mkdir -p "$session_cwd"
+encoded_session_cwd="$(
+  python3 - "$session_cwd" <<'PYEOF'
+import pathlib
+import re
+import sys
+
+cwd = str(pathlib.Path(sys.argv[1]).resolve())
+slash_only = cwd.replace("/", "-")
+print(re.sub(r"[^A-Za-z0-9-]", "-", slash_only))
+PYEOF
+)"
+session_jsonl="$session_home/.claude/projects/$encoded_session_cwd/$session_id.jsonl"
+mkdir -p "$(dirname "$session_jsonl")"
+build_fixture "$session_jsonl" "basic_main_read"
+
+out_path="$tmp_root/out_session_success.tsv"
+HOME="$session_home" python3 "$parser" \
+  --session-id "$session_id" \
+  --cwd "$session_cwd" \
+  --manifest "$manifest_path" \
+  --output "$out_path"
+assert_grep "$out_path" $'agent-vault/context-log.md\ttrue\thigh' \
+  "session-id success: punctuation-normalized cwd resolved"
+
+# 12. session-id resolution failure
 session_out_path="$tmp_root/out_session_err.txt"
 session_rc=0
 python3 "$parser" \
@@ -680,7 +709,7 @@ fi
 assert_grep "$session_out_path" "could not resolve session id" \
   "session-id missing: error message present"
 
-# 12. require either --jsonl or --session-id
+# 13. require either --jsonl or --session-id
 missing_out_path="$tmp_root/out_missing.txt"
 missing_rc=0
 python3 "$parser" --manifest "$manifest_path" >"$missing_out_path" 2>&1 || missing_rc=$?
