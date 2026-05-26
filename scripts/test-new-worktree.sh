@@ -253,7 +253,25 @@ else
 fi
 assert_output_contains "$output" $'\n  grok' "grok-worktree prints grok launch hint"
 
-# --- Test 10: Stale worktree metadata is pruned and recreated ---
+# --- Test 10: Lowercase Grok agent creates canonical grok branch and path ---
+working="$(setup_repo repo-grok-lowercase)"
+rc=0
+output="$(run_new_worktree "$working" --agent grok --issue 127 --slug lowercase-grok 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "grok-lowercase exits 0"
+expected_path="$tmp_root/wt/grok-127-lowercase-grok"
+assert_path_exists "$expected_path" "grok-lowercase created canonical path"
+assert_path_under_tmp "$expected_path" "grok-lowercase stays inside temp root"
+branch_name="$(git -C "$expected_path" branch --show-current)"
+if [[ "$branch_name" == "grok/127-lowercase-grok" ]]; then
+  echo "PASS: grok-lowercase branch name"
+  passed=$((passed + 1))
+else
+  echo "FAIL: grok-lowercase branch name (got $branch_name)" >&2
+  failed=$((failed + 1))
+fi
+assert_output_contains "$output" $'\n  grok' "grok-lowercase prints grok launch hint"
+
+# --- Test 11: Stale worktree metadata is pruned and recreated ---
 working="$(setup_repo repo4)"
 rc=0
 output="$(run_new_worktree "$working" --agent codex --issue 126 --slug stale-recreate 2>&1)" || rc=$?
@@ -267,26 +285,26 @@ assert_exit_code 0 "$rc" "stale-worktree recreate exits 0"
 assert_output_contains "$output" "Created worktree:" "stale-worktree rerun recreates path"
 assert_path_exists "$expected_path" "stale-worktree recreated target path"
 
-# --- Test 11: Missing required args fail clearly ---
+# --- Test 12: Missing required args fail clearly ---
 working="$(setup_repo repo5)"
 rc=0
 output="$(run_new_worktree "$working" --agent codex 2>&1)" || rc=$?
 assert_exit_code 1 "$rc" "missing-issue exits 1"
 assert_output_contains "$output" "--issue is required" "missing-issue shows error"
 
-# --- Test 12: Invalid issue values fail clearly ---
+# --- Test 13: Invalid issue values fail clearly ---
 rc=0
 output="$(run_new_worktree "$working" --agent codex --issue abc 2>&1)" || rc=$?
 assert_exit_code 1 "$rc" "non-numeric-issue exits 1"
 assert_output_contains "$output" "--issue must be numeric" "non-numeric-issue shows error"
 
-# --- Test 13: Agent values that normalize to empty fail clearly ---
+# --- Test 14: Agent values that normalize to empty fail clearly ---
 rc=0
 output="$(run_new_worktree "$working" --agent "!!!" --issue 127 2>&1)" || rc=$?
 assert_exit_code 1 "$rc" "empty-normalized-agent exits 1"
 assert_output_contains "$output" "--agent must contain letters or numbers" "empty-normalized-agent shows error"
 
-# --- Test 14: Bad base refs fail before creating the worktree root ---
+# --- Test 15: Bad base refs fail before creating the worktree root ---
 working="$(setup_repo repo6)"
 bad_base_root="$tmp_root/bad-base-root"
 rc=0
