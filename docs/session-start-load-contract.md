@@ -6,9 +6,10 @@ instructions and durable memory visible to common coding agents.
 ## Purpose
 
 Generated projects use several agent entrypoints because Codex, Claude, Gemini,
-and other tools do not load Markdown instructions the same way. This contract
-keeps the scaffold explicit about which files are force-loaded by the host and
-which files still depend on an agent following the session-start protocol.
+Grok Build, and other tools do not load Markdown instructions the same way.
+This contract keeps the scaffold explicit about which files are force-loaded by
+the host and which files still depend on an agent following the session-start
+protocol.
 
 The current policy is intentionally conservative: use native import mechanisms
 where they exist, keep project-owned memory in `agent-vault/`, and defer
@@ -23,13 +24,14 @@ See `docs/session-start-load-measurements.md` for the current evidence record.
 | Codex | root `AGENTS.md` | Codex loads `AGENTS.md` files along the current working-directory ancestry. A normal repo-root launch receives root `AGENTS.md`, not nested `agent-vault/AGENTS.md`. |
 | Claude Code | root `CLAUDE.md` | Root wrapper imports `agent-vault/CLAUDE.md`; `agent-vault/CLAUDE.md` imports shared workflow files. |
 | Gemini CLI | root `GEMINI.md` | Root wrapper imports `agent-vault/GEMINI.md`; `agent-vault/GEMINI.md` imports shared workflow files. |
+| Grok Build | root `AGENTS.md` | Grok documents `AGENTS.md` family discovery from cwd to repo root and Claude-compatible instruction-file discovery, including `CLAUDE.md` ([xAI docs](https://docs.x.ai/build/features/skills-plugins-marketplaces)). For generated projects, root `AGENTS.md` is canonical for Grok. `CLAUDE.md` may also be discovered, but Claude-style `@` import expansion is unmeasured and not relied on. On overlap, `AGENTS.md` is authoritative. Local startup and protocol-read measurements are pending. |
 
 ## File Categories
 
 | Category | Files | Contract |
 | --- | --- | --- |
 | Force-loaded or imported workflow | `agent-vault/CLAUDE.md`, `agent-vault/GEMINI.md`, their imported files | Use native imports where the host supports them. |
-| Codex root startup instructions | root `AGENTS.md` | Keep concise instructions that must be visible when Codex starts from the repo root. |
+| `AGENTS.md` root startup instructions | root `AGENTS.md` | Keep concise instructions that must be visible when Codex or Grok starts from the repo root. |
 | Session-start protocol reads | `agent-vault/README.md`, `context-log.md`, `plan.md`, `coding-standards.md`, `project-context.md`, `project-commands.md`, `open-questions.md`, `decision-log.md`, `lessons.md` | Agents are instructed to read these at session start or when relevant. |
 | Runtime project memory | `agent-vault/context-log.md`, `agent-vault/lessons.md`, daily notes, handoffs, decision records | Seed missing files, but do not overwrite project-owned content during normal updates. |
 | Referenced archives | older daily notes, older handoffs, detailed decision records | Read when the current task or current index points to them. |

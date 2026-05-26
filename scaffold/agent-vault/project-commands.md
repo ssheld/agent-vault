@@ -34,6 +34,9 @@ update this file when the canonical workflow changes.
 # Create one issue-scoped worktree for Gemini
 ./scripts/new-worktree.sh --agent gemini --issue 125 --slug docs-followup
 
+# Create one issue-scoped worktree for Grok Build
+./scripts/new-worktree.sh --agent grok --issue 126 --slug grok-build-support
+
 # After merge, remove the worktree from the main checkout or another safe cwd
 ./scripts/remove-worktree.sh --branch codex/123-feature-slice --delete-branch
 ```
