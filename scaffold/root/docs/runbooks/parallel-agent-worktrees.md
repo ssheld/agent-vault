@@ -48,6 +48,7 @@ Other agent examples:
 ```bash
 ./scripts/new-worktree.sh --agent claude --issue 124 --slug review-cleanup
 ./scripts/new-worktree.sh --agent gemini --issue 125 --slug docs-followup
+./scripts/new-worktree.sh --agent grok --issue 126 --slug grok-build-support
 ```
 
 By default the helper creates repo-local worktrees under:
@@ -59,10 +60,11 @@ By default the helper creates repo-local worktrees under:
 For a repository named `example-app`, the layout is:
 
 ```text
-example-app/                                      # main checkout
-example-app/.worktrees/codex-123-feature-slice/   # issue worktree
-example-app/.worktrees/claude-124-review-cleanup/ # issue worktree
-example-app/.worktrees/gemini-125-docs-followup/  # issue worktree
+example-app/                                        # main checkout
+example-app/.worktrees/codex-123-feature-slice/     # issue worktree
+example-app/.worktrees/claude-124-review-cleanup/   # issue worktree
+example-app/.worktrees/gemini-125-docs-followup/    # issue worktree
+example-app/.worktrees/grok-126-grok-build-support/ # issue worktree
 ```
 
 The helper creates:
@@ -71,7 +73,7 @@ The helper creates:
 - a worktree directory named like `codex-123-feature-slice`
 
 Then it prints the `cd` command and a best-effort launch hint such as `codex`,
-`claude`, or `gemini`.
+`claude`, `gemini`, or `grok`.
 
 ## Custom Worktree Root
 Use `--root` to place worktrees somewhere else:
@@ -125,6 +127,9 @@ claude
 
 cd .worktrees/gemini-125-docs-followup
 gemini
+
+cd .worktrees/grok-126-grok-build-support
+grok
 ```
 
 Many agent clients treat the launch directory as the active writable workspace.
@@ -218,6 +223,9 @@ the project commands:
 
 # Create one issue-scoped worktree for Gemini
 ./scripts/new-worktree.sh --agent gemini --issue 125 --slug docs-followup
+
+# Create one issue-scoped worktree for Grok Build
+./scripts/new-worktree.sh --agent grok --issue 126 --slug grok-build-support
 
 # After merge, remove the worktree from the main checkout or another safe cwd
 ./scripts/remove-worktree.sh --branch codex/123-feature-slice --delete-branch

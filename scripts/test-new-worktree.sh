@@ -235,7 +235,25 @@ output="$(run_new_worktree "$working" --agent gemini --issue 125 --slug docs-fol
 assert_exit_code 0 "$rc" "gemini-worktree exits 0"
 assert_output_contains "$output" "gemini" "gemini-worktree prints gemini hint"
 
-# --- Test 9: Stale worktree metadata is pruned and recreated ---
+# --- Test 9: Grok launch hint is supported ---
+working="$(setup_repo repo-grok)"
+rc=0
+output="$(run_new_worktree "$working" --agent "Grok Build" --issue 126 --slug grok-build-support 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "grok-worktree exits 0"
+expected_path="$tmp_root/wt/grok-build-126-grok-build-support"
+assert_path_exists "$expected_path" "grok-worktree created normalized path"
+assert_path_under_tmp "$expected_path" "grok-worktree stays inside temp root"
+branch_name="$(git -C "$expected_path" branch --show-current)"
+if [[ "$branch_name" == "grok-build/126-grok-build-support" ]]; then
+  echo "PASS: grok-worktree branch name"
+  passed=$((passed + 1))
+else
+  echo "FAIL: grok-worktree branch name (got $branch_name)" >&2
+  failed=$((failed + 1))
+fi
+assert_output_contains "$output" $'\n  grok' "grok-worktree prints grok launch hint"
+
+# --- Test 10: Stale worktree metadata is pruned and recreated ---
 working="$(setup_repo repo4)"
 rc=0
 output="$(run_new_worktree "$working" --agent codex --issue 126 --slug stale-recreate 2>&1)" || rc=$?
@@ -249,26 +267,26 @@ assert_exit_code 0 "$rc" "stale-worktree recreate exits 0"
 assert_output_contains "$output" "Created worktree:" "stale-worktree rerun recreates path"
 assert_path_exists "$expected_path" "stale-worktree recreated target path"
 
-# --- Test 10: Missing required args fail clearly ---
+# --- Test 11: Missing required args fail clearly ---
 working="$(setup_repo repo5)"
 rc=0
 output="$(run_new_worktree "$working" --agent codex 2>&1)" || rc=$?
 assert_exit_code 1 "$rc" "missing-issue exits 1"
 assert_output_contains "$output" "--issue is required" "missing-issue shows error"
 
-# --- Test 11: Invalid issue values fail clearly ---
+# --- Test 12: Invalid issue values fail clearly ---
 rc=0
 output="$(run_new_worktree "$working" --agent codex --issue abc 2>&1)" || rc=$?
 assert_exit_code 1 "$rc" "non-numeric-issue exits 1"
 assert_output_contains "$output" "--issue must be numeric" "non-numeric-issue shows error"
 
-# --- Test 12: Agent values that normalize to empty fail clearly ---
+# --- Test 13: Agent values that normalize to empty fail clearly ---
 rc=0
 output="$(run_new_worktree "$working" --agent "!!!" --issue 127 2>&1)" || rc=$?
 assert_exit_code 1 "$rc" "empty-normalized-agent exits 1"
 assert_output_contains "$output" "--agent must contain letters or numbers" "empty-normalized-agent shows error"
 
-# --- Test 13: Bad base refs fail before creating the worktree root ---
+# --- Test 14: Bad base refs fail before creating the worktree root ---
 working="$(setup_repo repo6)"
 bad_base_root="$tmp_root/bad-base-root"
 rc=0

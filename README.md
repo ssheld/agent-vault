@@ -6,7 +6,7 @@ Public template repository for generating a per-project `agent-vault/` folder.
 MIT. See `LICENSE`.
 
 ## What This Is
-This repo is a reusable scaffold for teams using AI coding agents (for example Codex, Claude, and Gemini CLI) and Obsidian.
+This repo is a reusable scaffold for teams using AI coding agents (for example Codex, Claude, Gemini CLI, and Grok Build) and Obsidian.
 
 It gives each code repository a standard `agent-vault/` directory with Markdown files for:
 - shared context

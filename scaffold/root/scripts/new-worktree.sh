@@ -20,7 +20,7 @@ Usage: $0 --agent NAME --issue NUMBER [--slug TEXT] [--base REF] [--root DIR]
 Create or reuse one issue-scoped worktree for one writing agent.
 
 Options:
-  --agent NAME   Agent label, for example: codex, claude, gemini
+  --agent NAME   Agent label, for example: codex, claude, gemini, grok
   --issue N      Issue number
   --slug TEXT    Optional short slug, for example: feature-slice
   --base REF     Optional base ref. Defaults to origin/main when available,
@@ -37,6 +37,7 @@ Examples:
   $0 --agent codex --issue 123 --slug feature-slice
   $0 --agent claude --issue 124 --slug review-cleanup
   $0 --agent gemini --issue 125 --slug docs-followup
+  $0 --agent grok --issue 126 --slug grok-build-support
 EOF
 }
 
@@ -106,6 +107,9 @@ launch_hint() {
       ;;
     gemini*)
       printf 'gemini\n'
+      ;;
+    grok*)
+      printf 'grok\n'
       ;;
     *)
       printf '\n'
