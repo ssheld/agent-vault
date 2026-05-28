@@ -23,6 +23,27 @@ assert_file_contains() {
   fi
 }
 
+assert_file_missing() {
+  local file_path="$1"
+
+  if [[ -e "$file_path" ]]; then
+    echo "Expected file to be missing: $file_path" >&2
+    exit 1
+  fi
+}
+
+assert_output_contains() {
+  local output="$1"
+  local expected_text="$2"
+
+  if [[ "$output" != *"$expected_text"* ]]; then
+    echo "Expected output to contain: $expected_text" >&2
+    echo "Output:" >&2
+    printf '%s\n' "$output" >&2
+    exit 1
+  fi
+}
+
 init_repo() {
   local repo_path="$1"
 
@@ -59,6 +80,22 @@ if grep -Fqx 'local cursor rule edit' "$generated_repo/.cursor/rules/agent-vault
   echo "Expected update-project.sh to refresh managed Cursor rule." >&2
   exit 1
 fi
+
+dry_run_create_repo="$tmp_root/dry-run-create"
+init_repo "$dry_run_create_repo"
+"$repo_root/scripts/new-project.sh" "load-contract-test" "$dry_run_create_repo" >/dev/null
+rm "$dry_run_create_repo/.cursor/rules/agent-vault.mdc"
+dry_run_create_output="$("$repo_root/scripts/update-project.sh" "$dry_run_create_repo" --dry-run)"
+assert_output_contains "$dry_run_create_output" "Create: .cursor/rules/agent-vault.mdc"
+assert_file_missing "$dry_run_create_repo/.cursor/rules/agent-vault.mdc"
+
+dry_run_update_repo="$tmp_root/dry-run-update"
+init_repo "$dry_run_update_repo"
+"$repo_root/scripts/new-project.sh" "load-contract-test" "$dry_run_update_repo" >/dev/null
+printf '\nlocal cursor rule edit\n' >>"$dry_run_update_repo/.cursor/rules/agent-vault.mdc"
+dry_run_update_output="$("$repo_root/scripts/update-project.sh" "$dry_run_update_repo" --dry-run)"
+assert_output_contains "$dry_run_update_output" "Update: .cursor/rules/agent-vault.mdc"
+assert_file_contains "$dry_run_update_repo/.cursor/rules/agent-vault.mdc" 'local cursor rule edit'
 
 unmanaged_cursor_repo="$tmp_root/unmanaged-cursor"
 init_repo "$unmanaged_cursor_repo"
