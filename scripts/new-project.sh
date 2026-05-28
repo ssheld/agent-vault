@@ -319,6 +319,7 @@ for required in \
   "$root_scaffold_dir/AGENTS.md" \
   "$root_scaffold_dir/CLAUDE.md" \
   "$root_scaffold_dir/GEMINI.md" \
+  "$root_scaffold_dir/.cursor/rules/agent-vault.mdc" \
   "$root_scaffold_dir/.github/pull_request_template.md" \
   "$root_scaffold_dir/docs/design.md" \
   "$root_scaffold_dir/docs/runbooks/parallel-agent-worktrees.md" \
@@ -467,6 +468,7 @@ seed_root_executable_file_if_missing() {
 process_root_policy_file "AGENTS.md" "$project_dir/AGENTS.md" "$ROOT_AGENTS_MARKER"
 process_root_policy_file "CLAUDE.md" "$project_dir/CLAUDE.md" "$ROOT_CLAUDE_MARKER"
 process_root_policy_file "GEMINI.md" "$project_dir/GEMINI.md" "$ROOT_GEMINI_MARKER"
+seed_root_file_if_missing "$root_scaffold_dir/.cursor/rules/agent-vault.mdc" "$canonical_repo_path/.cursor/rules/agent-vault.mdc"
 seed_root_file_if_missing "$root_scaffold_dir/.github/pull_request_template.md" "$canonical_repo_path/.github/pull_request_template.md"
 seed_root_file_if_missing "$root_scaffold_dir/docs/design.md" "$canonical_repo_path/docs/design.md"
 seed_root_file_if_missing "$root_scaffold_dir/docs/runbooks/parallel-agent-worktrees.md" "$canonical_repo_path/docs/runbooks/parallel-agent-worktrees.md"

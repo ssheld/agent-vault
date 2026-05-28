@@ -6,7 +6,7 @@ Public template repository for generating a per-project `agent-vault/` folder.
 MIT. See `LICENSE`.
 
 ## What This Is
-This repo is a reusable scaffold for teams using AI coding agents (for example Codex, Claude, Gemini CLI, and Grok Build) and Obsidian.
+This repo is a reusable scaffold for teams using AI coding agents (for example Cursor CLI, Codex, Claude, Gemini CLI, and Grok Build) and Obsidian.
 
 It gives each code repository a standard `agent-vault/` directory with Markdown files for:
 - shared context
@@ -167,6 +167,9 @@ CI also runs these checks via `.github/workflows/scaffold-regression-checks.yml`
   - `<repo>/AGENTS.md`
   - `<repo>/CLAUDE.md`
   - `<repo>/GEMINI.md`
+- Cursor project rule (managed only when the rule has the `agent-vault-managed`
+  marker):
+  - `<repo>/.cursor/rules/agent-vault.mdc`
 - Root helper scripts (managed only when the script has the `agent-vault-managed`
   marker, or when created by `update-project.sh` because it was missing):
   - `<repo>/scripts/new-worktree.sh`
@@ -256,6 +259,8 @@ When running `new-project.sh` with `--migrate-existing-root-md`:
   - `<repo>/AGENTS.md`
   - `<repo>/CLAUDE.md`
   - `<repo>/GEMINI.md`
+- The managed Cursor project rule from `scaffold/root/.cursor/rules/` is seeded
+  at `<repo>/.cursor/rules/agent-vault.mdc` when that path is missing.
 - The `CLAUDE.md` and `GEMINI.md` root wrappers include `agent-vault/CLAUDE.md` and `agent-vault/GEMINI.md` so migrated legacy guidance remains part of root entrypoint context.
 
 Without this flag, `new-project.sh` leaves pre-existing root files unchanged and prints a notice.
@@ -288,6 +293,7 @@ Generated projects get a starter `docs/design.md` that uses Mermaid fenced code 
 
 It also creates project-root files when missing:
 - `<repo-path>/AGENTS.md` -> contains PR review guidance (inline) for Codex GitHub reviews, points workflow execution to `agent-vault/AGENTS.md`, and directly tells Codex to read `agent-vault/lessons.md` at session start
+- `<repo-path>/.cursor/rules/agent-vault.mdc` -> small always-applied Cursor project rule that points Cursor IDE and Cursor CLI back to root `AGENTS.md` and the Agent Vault startup files
 - `<repo-path>/CLAUDE.md` -> imports `agent-vault/CLAUDE.md` and `agent-vault/review-policy.md`
 - `<repo-path>/GEMINI.md` -> imports `agent-vault/GEMINI.md` and `agent-vault/review-policy.md`
 - `<repo-path>/docs/design.md` -> starter architecture/design document with embedded Mermaid diagrams
