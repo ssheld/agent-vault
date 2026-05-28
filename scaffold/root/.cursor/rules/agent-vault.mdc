@@ -12,8 +12,8 @@ a separate source of truth.
 - Follow the project-root `AGENTS.md` first. Cursor CLI also loads that file as
   a project rule.
 - Before changing files, read `agent-vault/AGENTS.md`.
-- Read `agent-vault/project-context.md`, `agent-vault/project-commands.md`, and
-  `agent-vault/lessons.md` when present.
+- Read `agent-vault/project-context.md`, `agent-vault/project-commands.md`,
+  `agent-vault/coding-standards.md`, and `agent-vault/lessons.md` when present.
 - For pull request reviews or review-feedback responses, follow the project-root
   `AGENTS.md` review policy and `agent-vault/review-policy.md`.
 - Keep substantive workflow changes in the Agent Vault scaffold sources and

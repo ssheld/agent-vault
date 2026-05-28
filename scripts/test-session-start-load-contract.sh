@@ -56,6 +56,7 @@ assert_file_contains "$repo_root/scaffold/agent-vault/GEMINI.md" "@./lessons.md"
 assert_file_contains "$repo_root/scaffold/root/AGENTS.md" 'At session start, read `agent-vault/lessons.md` if it exists.'
 assert_file_contains "$repo_root/scaffold/root/.cursor/rules/agent-vault.mdc" '<!-- agent-vault-managed: cursor-rule; file=.cursor/rules/agent-vault.mdc -->'
 assert_file_contains "$repo_root/scaffold/root/.cursor/rules/agent-vault.mdc" 'alwaysApply: true'
+assert_file_contains "$repo_root/scaffold/root/.cursor/rules/agent-vault.mdc" '  `agent-vault/coding-standards.md`, and `agent-vault/lessons.md` when present.'
 
 generated_repo="$tmp_root/generated"
 init_repo "$generated_repo"
@@ -66,6 +67,7 @@ assert_file_contains "$generated_repo/agent-vault/GEMINI.md" "@./lessons.md"
 assert_file_contains "$generated_repo/AGENTS.md" 'At session start, read `agent-vault/lessons.md` if it exists.'
 assert_file_contains "$generated_repo/.cursor/rules/agent-vault.mdc" '<!-- agent-vault-managed: cursor-rule; file=.cursor/rules/agent-vault.mdc -->'
 assert_file_contains "$generated_repo/.cursor/rules/agent-vault.mdc" 'alwaysApply: true'
+assert_file_contains "$generated_repo/.cursor/rules/agent-vault.mdc" '  `agent-vault/coding-standards.md`, and `agent-vault/lessons.md` when present.'
 
 perl -0pi -e 's/\Q@.\/lessons.md\E\n//' "$generated_repo/agent-vault/CLAUDE.md"
 perl -0pi -e 's/\QAt session start, read `agent-vault\/lessons.md` if it exists.\E\n//' "$generated_repo/AGENTS.md"
@@ -75,6 +77,7 @@ printf '\nlocal cursor rule edit\n' >>"$generated_repo/.cursor/rules/agent-vault
 assert_file_contains "$generated_repo/agent-vault/CLAUDE.md" "@./lessons.md"
 assert_file_contains "$generated_repo/AGENTS.md" 'At session start, read `agent-vault/lessons.md` if it exists.'
 assert_file_contains "$generated_repo/.cursor/rules/agent-vault.mdc" '<!-- agent-vault-managed: cursor-rule; file=.cursor/rules/agent-vault.mdc -->'
+assert_file_contains "$generated_repo/.cursor/rules/agent-vault.mdc" '  `agent-vault/coding-standards.md`, and `agent-vault/lessons.md` when present.'
 
 if grep -Fqx 'local cursor rule edit' "$generated_repo/.cursor/rules/agent-vault.mdc"; then
   echo "Expected update-project.sh to refresh managed Cursor rule." >&2
