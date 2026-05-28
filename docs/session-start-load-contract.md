@@ -22,6 +22,7 @@ See `docs/session-start-load-measurements.md` for the current evidence record.
 | Agent surface | Generated entrypoint | Current load behavior |
 | --- | --- | --- |
 | Codex | root `AGENTS.md` | Codex loads `AGENTS.md` files along the current working-directory ancestry. A normal repo-root launch receives root `AGENTS.md`, not nested `agent-vault/AGENTS.md`. |
+| Cursor CLI | root `AGENTS.md`; `.cursor/rules/agent-vault.mdc` | Cursor documents that the CLI reads project-root `AGENTS.md` and `CLAUDE.md` and applies them alongside `.cursor/rules` ([Cursor CLI rules](https://cursor.com/docs/cli/using)). The managed Cursor rule is an always-applied project rule shim so Cursor IDE and CLI surface the Agent Vault startup path through Cursor's native rules system ([Cursor project rules](https://cursor.com/docs/rules)). |
 | Claude Code | root `CLAUDE.md` | Root wrapper imports `agent-vault/CLAUDE.md`; `agent-vault/CLAUDE.md` imports shared workflow files. |
 | Gemini CLI | root `GEMINI.md` | Root wrapper imports `agent-vault/GEMINI.md`; `agent-vault/GEMINI.md` imports shared workflow files. |
 | Grok Build | root `AGENTS.md` | Grok documents `AGENTS.md` family discovery from cwd to repo root and Claude-compatible instruction-file discovery, including `CLAUDE.md` ([xAI docs](https://docs.x.ai/build/features/skills-plugins-marketplaces)). For generated projects, root `AGENTS.md` is canonical for Grok. `CLAUDE.md` may also be discovered, but Claude-style `@` import expansion is unmeasured and not relied on. On overlap, `AGENTS.md` is authoritative. Local startup and protocol-read measurements are pending. |
@@ -31,7 +32,8 @@ See `docs/session-start-load-measurements.md` for the current evidence record.
 | Category | Files | Contract |
 | --- | --- | --- |
 | Force-loaded or imported workflow | `agent-vault/CLAUDE.md`, `agent-vault/GEMINI.md`, their imported files | Use native imports where the host supports them. |
-| `AGENTS.md` root startup instructions | root `AGENTS.md` | Keep concise instructions that must be visible when Codex or Grok starts from the repo root. |
+| Cursor native rule shim | `.cursor/rules/agent-vault.mdc` | Keep this small and always applied. It points Cursor back to root `AGENTS.md` and the Agent Vault files instead of duplicating the full workflow. |
+| `AGENTS.md` root startup instructions | root `AGENTS.md` | Keep concise instructions that must be visible when Codex, Cursor, or Grok starts from the repo root. |
 | Session-start protocol reads | `agent-vault/README.md`, `context-log.md`, `plan.md`, `coding-standards.md`, `project-context.md`, `project-commands.md`, `open-questions.md`, `decision-log.md`, `lessons.md` | Agents are instructed to read these at session start or when relevant. |
 | Runtime project memory | `agent-vault/context-log.md`, `agent-vault/lessons.md`, daily notes, handoffs, decision records | Seed missing files, but do not overwrite project-owned content during normal updates. |
 | Referenced archives | older daily notes, older handoffs, detailed decision records | Read when the current task or current index points to them. |
@@ -41,7 +43,7 @@ See `docs/session-start-load-measurements.md` for the current evidence record.
 Issue [#105](https://github.com/ssheld/agent-vault/issues/105) is the evidence
 track for broader session-start loading behavior.
 
-As of 2026-05-03:
+As of 2026-05-03 for measured agents and 2026-05-28 for Cursor documentation:
 
 - Codex `codex debug prompt-input` showed no sentinel content from the measured
   canonical memory files when launched from a generated repo root or from
@@ -62,6 +64,8 @@ As of 2026-05-03:
   those 3 files are visible through Claude's import path, while the other 6 are
   protocol-read dependent.
 - The outside-fixture control for Codex was sentinel-free, as expected.
+- Cursor CLI load behavior is documented by Cursor but not yet covered by a
+  local agent-vault measurement run.
 
 Do not treat these findings as a reason to force-load additional files yet.
 They narrow what is known and show that both Claude and Codex can follow the

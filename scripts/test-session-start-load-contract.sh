@@ -33,6 +33,8 @@ init_repo() {
 assert_file_contains "$repo_root/scaffold/agent-vault/CLAUDE.md" "@./lessons.md"
 assert_file_contains "$repo_root/scaffold/agent-vault/GEMINI.md" "@./lessons.md"
 assert_file_contains "$repo_root/scaffold/root/AGENTS.md" 'At session start, read `agent-vault/lessons.md` if it exists.'
+assert_file_contains "$repo_root/scaffold/root/.cursor/rules/agent-vault.mdc" '<!-- agent-vault-managed: cursor-rule; file=.cursor/rules/agent-vault.mdc -->'
+assert_file_contains "$repo_root/scaffold/root/.cursor/rules/agent-vault.mdc" 'alwaysApply: true'
 
 generated_repo="$tmp_root/generated"
 init_repo "$generated_repo"
@@ -41,13 +43,30 @@ init_repo "$generated_repo"
 assert_file_contains "$generated_repo/agent-vault/CLAUDE.md" "@./lessons.md"
 assert_file_contains "$generated_repo/agent-vault/GEMINI.md" "@./lessons.md"
 assert_file_contains "$generated_repo/AGENTS.md" 'At session start, read `agent-vault/lessons.md` if it exists.'
+assert_file_contains "$generated_repo/.cursor/rules/agent-vault.mdc" '<!-- agent-vault-managed: cursor-rule; file=.cursor/rules/agent-vault.mdc -->'
+assert_file_contains "$generated_repo/.cursor/rules/agent-vault.mdc" 'alwaysApply: true'
 
 perl -0pi -e 's/\Q@.\/lessons.md\E\n//' "$generated_repo/agent-vault/CLAUDE.md"
 perl -0pi -e 's/\QAt session start, read `agent-vault\/lessons.md` if it exists.\E\n//' "$generated_repo/AGENTS.md"
+printf '\nlocal cursor rule edit\n' >>"$generated_repo/.cursor/rules/agent-vault.mdc"
 "$repo_root/scripts/update-project.sh" "$generated_repo" >/dev/null
 
 assert_file_contains "$generated_repo/agent-vault/CLAUDE.md" "@./lessons.md"
 assert_file_contains "$generated_repo/AGENTS.md" 'At session start, read `agent-vault/lessons.md` if it exists.'
+assert_file_contains "$generated_repo/.cursor/rules/agent-vault.mdc" '<!-- agent-vault-managed: cursor-rule; file=.cursor/rules/agent-vault.mdc -->'
+
+if grep -Fqx 'local cursor rule edit' "$generated_repo/.cursor/rules/agent-vault.mdc"; then
+  echo "Expected update-project.sh to refresh managed Cursor rule." >&2
+  exit 1
+fi
+
+unmanaged_cursor_repo="$tmp_root/unmanaged-cursor"
+init_repo "$unmanaged_cursor_repo"
+mkdir -p "$unmanaged_cursor_repo/.cursor/rules"
+printf '%s\n' 'custom cursor rule' >"$unmanaged_cursor_repo/.cursor/rules/agent-vault.mdc"
+"$repo_root/scripts/new-project.sh" "load-contract-test" "$unmanaged_cursor_repo" >/dev/null
+"$repo_root/scripts/update-project.sh" "$unmanaged_cursor_repo" >/dev/null
+assert_file_contains "$unmanaged_cursor_repo/.cursor/rules/agent-vault.mdc" 'custom cursor rule'
 
 "$repo_root/scripts/check-policy-mirrors.sh" >/dev/null
 
