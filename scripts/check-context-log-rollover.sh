@@ -104,10 +104,14 @@ require_exactly_one() {
   fi
 }
 
+# Match the standard 7-character Git conflict markers, including a leftover
+# "=======" separator on its own line (which a partial manual cleanup can leave
+# behind after removing the <<<<<<< / >>>>>>> sides) and the "|||||||" diff3
+# base marker.
 check_conflict_markers() {
   local file="$1"
   local marker_lines
-  marker_lines="$(grep -nE '^(<<<<<<<|>>>>>>>)' "$file" || true)"
+  marker_lines="$(grep -nE '^(<<<<<<<|>>>>>>>|\|\|\|\|\|\|\||=======$)' "$file" || true)"
 
   if [[ -n "$marker_lines" ]]; then
     findings+=("Git conflict markers present: $(printf '%s' "$marker_lines" | tr '\n' ';')")

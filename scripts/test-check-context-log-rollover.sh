@@ -147,6 +147,23 @@ cat >"$tmp_root/conflict-live.md" <<'EOF'
 - Body.
 EOF
 
+# Leftover "=======" separator only (other conflict sides removed in a bad cleanup).
+cat >"$tmp_root/separator-conflict-live.md" <<'EOF'
+# Context Log
+
+## Usage Rules
+- Newest entry at top.
+
+## Current Snapshot
+- Active branch: `main`
+=======
+
+## Entries
+
+### 2026-05-30 09:00 local - agent - recent work
+- Body.
+EOF
+
 # Declared latest-handoff pointer with no value.
 cat >"$tmp_root/empty-handoff-live.md" <<'EOF'
 # Context Log
@@ -208,6 +225,7 @@ expect_result 0 "passed" "$tmp_root/no-handoff-live.md"
 expect_result 1 'duplicate "## Current Snapshot"' "$tmp_root/dup-snapshot-live.md"
 expect_result 1 'duplicate "## Usage Rules"' "$tmp_root/dup-usage-rules-live.md"
 expect_result 1 "Git conflict markers" "$tmp_root/conflict-live.md"
+expect_result 1 "Git conflict markers" "$tmp_root/separator-conflict-live.md"
 expect_result 1 "latest-handoff pointer" "$tmp_root/empty-handoff-live.md"
 expect_result 1 'missing "## Entries"' "$tmp_root/missing-entries-live.md"
 

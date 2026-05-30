@@ -111,6 +111,35 @@ printf 'file_budget=200000\nchain_budget=200000\n' >"$project/agent-vault/memory
 expect_result 0 "Config:" --repo "$project"
 expect_result 0 "Within budget" --repo "$project" --strict
 expect_result 1 "over file budget" --repo "$project" --file-budget 500 --strict
+
+# A chain_exception in the config (not only @chain in the exceptions file)
+# clears a strict @-chain overage.
+printf 'file_budget=200000\nchain_budget=1000\nchain_exception=intentional during a migration\n' \
+  >"$project/agent-vault/memory-budget.config"
+expect_result 0 "Within budget" --repo "$project" --strict
+
+# The documented config shape (full-line comments only) parses cleanly, and
+# agents=discover still triggers discovery rather than a literal "discover" path.
+printf 'agent-vault/project-context.md\tdocumented per-file overage\n' \
+  >"$project/agent-vault/budget.exceptions.tsv"
+cat >"$project/agent-vault/memory-budget.config" <<'CFG'
+# all keys optional; full-line comments only
+file_budget=200000
+chain_budget=200000
+# protocol_read overrides bucket 3:
+protocol_read=agent-vault/context-log.md agent-vault/plan.md
+# agents discovery (the default):
+agents=discover
+# per-file exceptions file:
+exceptions=agent-vault/budget.exceptions.tsv
+# chain exception note:
+chain_exception=intentional total overage during migration X
+CFG
+expect_result 0 "Within budget" --repo "$project" --strict
+mapfile -t cfg_agents < <(bucket_paths agents)
+assert_in_set "subpkg/AGENTS.md" "${cfg_agents[@]}"
+rm -f "$project/agent-vault/budget.exceptions.tsv"
+
 printf 'bogus_key=1\n' >"$project/agent-vault/memory-budget.config"
 expect_result 2 "unknown config key" --repo "$project"
 rm -f "$project/agent-vault/memory-budget.config"

@@ -80,12 +80,19 @@ config file** > **built-in default**. A repo records its own budget once in
 choice is durable and discoverable rather than re-typed per invocation:
 
 ```
-# agent-vault/memory-budget.config (all keys optional)
+# agent-vault/memory-budget.config -- all keys optional.
+# Comments must be on their own line ('#' at the start). Inline trailing
+# comments are NOT stripped: a key's value is the literal text after '=' (so
+# values may safely contain '#').
 file_budget=40000
 chain_budget=120000
-protocol_read=agent-vault/context-log.md agent-vault/plan.md   # override the bucket-3 set
-agents=discover                                                 # or an explicit space-separated list
-exceptions=agent-vault/memory-budget.exceptions.tsv            # path<TAB>reason lines
+# protocol_read overrides the bucket-3 file set:
+protocol_read=agent-vault/context-log.md agent-vault/plan.md
+# agents: "discover" (default) finds every AGENTS.md, or give an explicit list:
+agents=discover
+# exceptions points at a path<TAB>reason file of per-file documented overages:
+exceptions=agent-vault/memory-budget.exceptions.tsv
+# chain_exception documents an intentional @-chain total overage:
 chain_exception=intentional total overage during migration X
 ```
 
