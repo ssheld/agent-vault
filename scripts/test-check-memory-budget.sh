@@ -118,27 +118,40 @@ printf 'file_budget=200000\nchain_budget=1000\nchain_exception=intentional durin
   >"$project/agent-vault/memory-budget.config"
 expect_result 0 "Within budget" --repo "$project" --strict
 
-# The documented config shape (full-line comments only) parses cleanly, and
-# agents=discover still triggers discovery rather than a literal "discover" path.
-printf 'agent-vault/project-context.md\tdocumented per-file overage\n' \
-  >"$project/agent-vault/budget.exceptions.tsv"
-cat >"$project/agent-vault/memory-budget.config" <<'CFG'
-# all keys optional; full-line comments only
-file_budget=200000
-chain_budget=200000
-# protocol_read overrides bucket 3:
-protocol_read=agent-vault/context-log.md agent-vault/plan.md
-# agents discovery (the default):
-agents=discover
-# per-file exceptions file:
-exceptions=agent-vault/budget.exceptions.tsv
-# chain exception note:
-chain_exception=intentional total overage during migration X
-CFG
-expect_result 0 "Within budget" --repo "$project" --strict
-mapfile -t cfg_agents < <(bucket_paths agents)
-assert_in_set "subpkg/AGENTS.md" "${cfg_agents[@]}"
-rm -f "$project/agent-vault/budget.exceptions.tsv"
+# Regression: the PRIMARY config sample shown in docs/memory-budgets.md must run
+# as-is in a fresh project with no extra files pre-created (it must not enable an
+# exceptions file that does not exist). Extract the exact displayed sample.
+sample_project="$tmp_root/sample-project"
+mkdir -p "$sample_project"
+git -C "$sample_project" init -q
+"$repo_root/scripts/new-project.sh" "sample" "$sample_project" >/dev/null
+awk '
+  /^```/ {
+    if (infence) {
+      if (grab) exit
+      infence = 0
+    } else {
+      infence = 1
+    }
+    next
+  }
+  infence && /agent-vault\/memory-budget\.config/ { grab = 1 }
+  infence && grab { print }
+' "$repo_root/docs/memory-budgets.md" >"$sample_project/agent-vault/memory-budget.config"
+[[ -s "$sample_project/agent-vault/memory-budget.config" ]] ||
+  {
+    echo "FAIL: could not extract the docs config sample" >&2
+    exit 1
+  }
+set +e
+sample_out="$("$checker" --repo "$sample_project" --strict 2>&1)"
+sample_rc=$?
+set -e
+if [[ "$sample_rc" -ne 0 ]]; then
+  echo "FAIL: documented config sample is not runnable as-is (exit $sample_rc)" >&2
+  printf '%s\n' "$sample_out" >&2
+  exit 1
+fi
 
 printf 'bogus_key=1\n' >"$project/agent-vault/memory-budget.config"
 expect_result 2 "unknown config key" --repo "$project"
