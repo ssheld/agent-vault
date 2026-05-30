@@ -38,6 +38,11 @@ See `docs/session-start-load-measurements.md` for the current evidence record.
 | Runtime project memory | `agent-vault/context-log.md`, `agent-vault/lessons.md`, daily notes, handoffs, decision records | Seed missing files, but do not overwrite project-owned content during normal updates. |
 | Referenced archives | older daily notes, older handoffs, detailed decision records | Read when the current task or current index points to them. |
 
+The session-start `context-log.md` read is bounded: agents read its Current
+Snapshot and recent entries, and consult `agent-vault/context/archive/` only
+when researching older or closed work. Keeping the always-on and protocol-read
+tiers within budget is covered by [memory-budgets.md](memory-budgets.md).
+
 ## Current Measurement Summary
 
 Issue [#105](https://github.com/ssheld/agent-vault/issues/105) is the evidence

@@ -25,6 +25,10 @@ on:
       - "scripts/test-worktree-helper-sync.sh"
       - "scripts/measure-agent-memory-load.sh"
       - "scripts/parse-claude-memory-trace.py"
+      - "scripts/check-memory-budget.sh"
+      - "scripts/check-context-log-rollover.sh"
+      - "scripts/test-check-memory-budget.sh"
+      - "scripts/test-check-context-log-rollover.sh"
       - ".github/workflows/scaffold-regression-checks.yml"
   push:
     branches:
@@ -52,6 +56,10 @@ on:
       - "scripts/test-worktree-helper-sync.sh"
       - "scripts/measure-agent-memory-load.sh"
       - "scripts/parse-claude-memory-trace.py"
+      - "scripts/check-memory-budget.sh"
+      - "scripts/check-context-log-rollover.sh"
+      - "scripts/test-check-memory-budget.sh"
+      - "scripts/test-check-context-log-rollover.sh"
       - ".github/workflows/scaffold-regression-checks.yml"
   workflow_dispatch:
 
@@ -85,3 +93,7 @@ jobs:
         run: bash scripts/test-remove-worktree.sh
       - name: Verify worktree helper scaffold sync
         run: bash scripts/test-worktree-helper-sync.sh
+      - name: Verify memory budget checker
+        run: bash scripts/test-check-memory-budget.sh
+      - name: Verify context-log rollover checker
+        run: bash scripts/test-check-context-log-rollover.sh
