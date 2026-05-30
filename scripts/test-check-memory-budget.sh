@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-checker="$repo_root/scripts/check-memory-budget.sh"
+checker="$repo_root/scaffold/root/scripts/check-memory-budget.sh"
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/agent-vault-budget-test.XXXXXX")"
 
 cleanup() {

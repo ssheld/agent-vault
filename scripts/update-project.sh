@@ -53,6 +53,8 @@ ROOT_GEMINI_MARKER="<!-- agent-vault-managed: root-wrapper; file=GEMINI.md -->"
 CURSOR_AGENT_VAULT_RULE_MARKER="<!-- agent-vault-managed: cursor-rule; file=.cursor/rules/agent-vault.mdc -->"
 NEW_WORKTREE_HELPER_MARKER="# agent-vault-managed: helper-script; file=new-worktree.sh"
 REMOVE_WORKTREE_HELPER_MARKER="# agent-vault-managed: helper-script; file=remove-worktree.sh"
+CHECK_MEMORY_BUDGET_HELPER_MARKER="# agent-vault-managed: helper-script; file=check-memory-budget.sh"
+CHECK_CONTEXT_LOG_ROLLOVER_HELPER_MARKER="# agent-vault-managed: helper-script; file=check-context-log-rollover.sh"
 POLICY_TEMPLATE_REL_PATHS=(
   "Decision Record.md"
 )
@@ -134,6 +136,8 @@ for required in \
   "$root_scaffold_dir/docs/runbooks/parallel-agent-worktrees.md" \
   "$root_scaffold_dir/scripts/new-worktree.sh" \
   "$root_scaffold_dir/scripts/remove-worktree.sh" \
+  "$root_scaffold_dir/scripts/check-memory-budget.sh" \
+  "$root_scaffold_dir/scripts/check-context-log-rollover.sh" \
   "$vault_scaffold_dir/AGENTS.md" \
   "$vault_scaffold_dir/CLAUDE.md" \
   "$vault_scaffold_dir/GEMINI.md" \
@@ -948,6 +952,8 @@ seed_if_missing "$root_scaffold_dir/docs/design.md" "$canonical_repo_path/docs/d
 seed_if_missing "$root_scaffold_dir/docs/runbooks/parallel-agent-worktrees.md" "$canonical_repo_path/docs/runbooks/parallel-agent-worktrees.md"
 sync_root_helper_script_if_managed "$root_scaffold_dir/scripts/new-worktree.sh" "$canonical_repo_path/scripts/new-worktree.sh" "$NEW_WORKTREE_HELPER_MARKER"
 sync_root_helper_script_if_managed "$root_scaffold_dir/scripts/remove-worktree.sh" "$canonical_repo_path/scripts/remove-worktree.sh" "$REMOVE_WORKTREE_HELPER_MARKER"
+sync_root_helper_script_if_managed "$root_scaffold_dir/scripts/check-memory-budget.sh" "$canonical_repo_path/scripts/check-memory-budget.sh" "$CHECK_MEMORY_BUDGET_HELPER_MARKER"
+sync_root_helper_script_if_managed "$root_scaffold_dir/scripts/check-context-log-rollover.sh" "$canonical_repo_path/scripts/check-context-log-rollover.sh" "$CHECK_CONTEXT_LOG_ROLLOVER_HELPER_MARKER"
 sync_project_owned_file_if_requested "$vault_scaffold_dir/coding-standards.md" "$project_dir/coding-standards.md" "--sync-coding-standards" "$sync_coding_standards"
 seed_if_missing "$vault_scaffold_dir/project-context.md" "$project_dir/project-context.md"
 seed_if_missing "$vault_scaffold_dir/project-commands.md" "$project_dir/project-commands.md"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# agent-vault-managed: helper-script; file=check-memory-budget.sh
 
 set -euo pipefail
 

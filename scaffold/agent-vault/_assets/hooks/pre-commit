@@ -44,6 +44,40 @@ fi
 # shellcheck source=./lib/runtime-note.sh
 source "agent-vault/_assets/hooks/lib/runtime-note.sh"
 
+# Non-blocking memory-budget warning: when memory files are staged and the
+# budget checker is installed, surface any over-budget bucket/file but never
+# block the commit (the budget is advisory -- relocate content or document an
+# exception at leisure). Skip with AGENT_VAULT_SKIP_MEMORY_BUDGET=1.
+warn_memory_budget() {
+  if [[ "${AGENT_VAULT_SKIP_MEMORY_BUDGET:-}" == "1" ]]; then
+    return 0
+  fi
+  [[ -x scripts/check-memory-budget.sh ]] || return 0
+
+  local touched_memory="false" file_path
+  for file_path in "${all_staged_files[@]}"; do
+    case "$file_path" in
+      agent-vault/* | CLAUDE.md | GEMINI.md | AGENTS.md | */AGENTS.md)
+        touched_memory="true"
+        break
+        ;;
+    esac
+  done
+  [[ "$touched_memory" == "true" ]] || return 0
+
+  local budget_output
+  if budget_output="$(scripts/check-memory-budget.sh --strict 2>&1)"; then
+    return 0
+  fi
+
+  echo "agent-vault memory-budget warning (non-blocking; set AGENT_VAULT_SKIP_MEMORY_BUDGET=1 to silence):" >&2
+  printf '%s\n' "$budget_output" | grep -E 'OVER|overage' >&2 || true
+  echo "Run scripts/check-memory-budget.sh for the full report." >&2
+  return 0
+}
+
+warn_memory_budget
+
 extract_context_log_frontmatter_value() {
   local file_path="$1"
   local field_name="$2"

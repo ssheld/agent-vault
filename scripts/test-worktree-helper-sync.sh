@@ -125,11 +125,18 @@ assert_file_contains "$target/scripts/new-worktree.sh" 'DEFAULT_ROOT="${PROJECT_
 assert_file_contains "$target/scripts/new-worktree.sh" "AGENT_VAULT_WORKTREE_ROOT" "new-project seeds env worktree override"
 assert_file_contains "$target/scripts/remove-worktree.sh" "Use only after verifying the PR is merged" "new-project seeds guarded remove-worktree guidance"
 assert_file_contains "$target/docs/runbooks/parallel-agent-worktrees.md" "Cleanup After Merge Or Completion" "new-project seeds cleanup runbook"
+assert_path_exists "$target/scripts/check-memory-budget.sh" "new-project creates memory-budget checker"
+assert_path_exists "$target/scripts/check-context-log-rollover.sh" "new-project creates rollover checker"
+assert_executable "$target/scripts/check-memory-budget.sh" "new-project makes memory-budget checker executable"
+assert_executable "$target/scripts/check-context-log-rollover.sh" "new-project makes rollover checker executable"
+assert_file_contains "$target/scripts/check-memory-budget.sh" "# agent-vault-managed: helper-script; file=check-memory-budget.sh" "new-project seeds memory-budget checker marker"
+assert_file_contains "$target/scripts/check-context-log-rollover.sh" "# agent-vault-managed: helper-script; file=check-context-log-rollover.sh" "new-project seeds rollover checker marker"
 
 # --- Test 2: update-project creates missing helpers in existing vaults ---
 target="$(setup_empty_repo update-missing-target)"
 run_new_project "$target" >/dev/null
-rm "$target/scripts/new-worktree.sh" "$target/scripts/remove-worktree.sh"
+rm "$target/scripts/new-worktree.sh" "$target/scripts/remove-worktree.sh" \
+  "$target/scripts/check-memory-budget.sh" "$target/scripts/check-context-log-rollover.sh"
 rc=0
 output="$(run_update_project "$target" 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "update-project missing-helper exits 0"
@@ -139,6 +146,10 @@ assert_executable "$target/scripts/new-worktree.sh" "update-project makes new-wo
 assert_executable "$target/scripts/remove-worktree.sh" "update-project makes remove-worktree executable"
 assert_file_contains "$target/scripts/new-worktree.sh" 'DEFAULT_ROOT="${PROJECT_DIR}/.worktrees"' "update-project creates new helper with repo-local default"
 assert_file_contains "$target/scripts/remove-worktree.sh" "Use only after verifying the PR is merged" "update-project creates remove helper with guarded guidance"
+assert_output_contains "$output" "Created: scripts/check-memory-budget.sh" "update-project reports memory-budget checker creation"
+assert_output_contains "$output" "Created: scripts/check-context-log-rollover.sh" "update-project reports rollover checker creation"
+assert_executable "$target/scripts/check-memory-budget.sh" "update-project restores memory-budget checker executable"
+assert_executable "$target/scripts/check-context-log-rollover.sh" "update-project restores rollover checker executable"
 
 # --- Test 3: update-project skips unmanaged helper scripts by default ---
 target="$(setup_empty_repo unmanaged-skip-target)"
