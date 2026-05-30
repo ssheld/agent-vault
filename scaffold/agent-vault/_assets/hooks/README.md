@@ -24,6 +24,13 @@ git config core.hooksPath agent-vault/_assets/hooks
     - entries must remain newest-first
     - frontmatter and Current Snapshot `Last updated` must match the top entry date
   - This is a baseline gate only. Conditional artifacts such as `open-questions.md`, decision records, handoff notes, and `lessons.md` still depend on the actual session outcome.
+  - Emits a **non-blocking** memory-budget warning when the staged commit touches
+    memory files (`agent-vault/`, `CLAUDE.md`, `GEMINI.md`, or any `AGENTS.md`)
+    and `scripts/check-memory-budget.sh` is installed. It measures the **staged**
+    content (the index, not the working tree), surfaces any over-budget
+    `@`-chain or file, and always exits `0` — the budget is advisory and never
+    blocks a commit. It runs even when `AGENT_VAULT_SKIP_METADATA_GATE=1` is set;
+    silence it independently with `AGENT_VAULT_SKIP_MEMORY_BUDGET=1`.
 - `pre-push`
   - Inert by default.
   - When explicitly enabled with local repo config, blocks direct pushes to `main` unless every pushed path is runtime `agent-vault` metadata.
@@ -68,3 +75,10 @@ AGENT_VAULT_SKIP_METADATA_GATE=1 git commit ...
 ```
 
 Use that escape hatch sparingly and explain the skip in the task summary or commit context.
+
+The non-blocking memory-budget warning is independent of the metadata gate.
+Silence it on its own (it never blocks a commit either way):
+
+```bash
+AGENT_VAULT_SKIP_MEMORY_BUDGET=1 git commit ...
+```

@@ -15,6 +15,7 @@ on:
       - "scripts/test-coding-standards-sync.sh"
       - "scripts/test-decision-template-sync.sh"
       - "scripts/test-session-metadata-hook.sh"
+      - "scripts/test-memory-budget-hook.sh"
       - "scripts/test-main-push-gate.sh"
       - "scripts/test-session-start-load-contract.sh"
       - "scripts/test-agent-memory-load-measurement.sh"
@@ -44,6 +45,7 @@ on:
       - "scripts/test-coding-standards-sync.sh"
       - "scripts/test-decision-template-sync.sh"
       - "scripts/test-session-metadata-hook.sh"
+      - "scripts/test-memory-budget-hook.sh"
       - "scripts/test-main-push-gate.sh"
       - "scripts/test-session-start-load-contract.sh"
       - "scripts/test-agent-memory-load-measurement.sh"
@@ -73,6 +75,8 @@ jobs:
         run: bash scripts/test-decision-template-sync.sh
       - name: Verify session metadata hook behavior
         run: bash scripts/test-session-metadata-hook.sh
+      - name: Verify memory budget pre-commit hook behavior
+        run: bash scripts/test-memory-budget-hook.sh
       - name: Verify main push metadata gate
         run: bash scripts/test-main-push-gate.sh
       - name: Verify session-start load contract
