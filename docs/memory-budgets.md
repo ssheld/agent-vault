@@ -23,8 +23,9 @@ separates three buckets:
 
 | Bucket | What it is | How it loads |
 | --- | --- | --- |
-| Claude/Gemini `@`-chain | `CLAUDE.md`/`GEMINI.md` plus everything they `@`-import, transitively | Auto-loaded into every session; the always-on cost |
-| Codex `AGENTS` chain | all `AGENTS.md` files in the repo (discovered, including nested package/module ones) | Codex concatenates them along the working-directory ancestry up to its own `project_doc_max_bytes` cap (32 KiB by default), dropping the most specific files first when over |
+| Claude `@`-chain | `CLAUDE.md` plus everything it `@`-imports, transitively | Auto-loaded into every Claude session |
+| Gemini `@`-chain | `GEMINI.md` plus everything it `@`-imports, transitively | Auto-loaded into every Gemini session (reported and budgeted **separately** from the Claude chain — a session loads one, not the union) |
+| Codex `AGENTS` chain | all `AGENTS.md` files in the repo (discovered, including nested package/module ones) | Codex concatenates them along the working-directory ancestry up to its own `project_doc_max_bytes` cap (32 KiB by default); reported as **informational** (the per-file budget still flags an individual oversized `AGENTS.md`) |
 | Protocol-read files | Files the session-start rules tell agents to read (`context-log.md`, `plan.md`, etc.) | Read when an agent follows the protocol; not auto-imported |
 
 Keeping the buckets separate matters because the same file can be cheap in one
@@ -45,11 +46,13 @@ scripts/check-memory-budget.sh --repo <path> --exceptions exceptions.tsv
 
 Design choices that matter:
 
-- **Auto-discovery, not a hard-coded file set.** The `@`-chain is resolved by
-  following `@`-imports from `CLAUDE.md`/`GEMINI.md`, and the Codex bucket
-  discovers every `AGENTS.md` in the repo (tracked or present, respecting
-  `.gitignore`), including nested ones, so the report reflects what an agent
-  actually loads rather than assuming one project's layout.
+- **Auto-discovery, not a hard-coded file set.** The Claude and Gemini chains
+  are resolved separately by following `@`-imports from `CLAUDE.md` and
+  `GEMINI.md` (a session loads one chain, not the union), and the Codex bucket
+  discovers every `AGENTS.md` in the repo (in a git repo: tracked or present,
+  honoring `.gitignore`; in a non-git directory: a plain filesystem walk that
+  does not consult `.gitignore`), including nested ones, so the report reflects
+  what an agent actually loads rather than assuming one project's layout.
 - **Tolerant of missing files.** Absent optional files are reported as
   `MISSING` and skipped; they never make the check fail.
 - **Warn, do not block, by default.** A plain run reports and warns but exits
@@ -66,12 +69,16 @@ Design choices that matter:
 
 ## Budgets and per-repo configuration
 
-Defaults: per-file budget **40000 characters** and `@`-chain total budget
-**120000 characters**. The per-file default is not arbitrary -- it mirrors the
-threshold at which Claude Code warns that a memory file is large enough to hurt
-performance, so a file over it is over a real signal. The `@`-chain default is a
-softer "standing context is getting heavy" line (~33K tokens) and is the more
-project-dependent of the two.
+Defaults: per-file budget **40000 bytes** and per `@`-chain total budget
+**120000 bytes** (each chain budgeted separately). Sizes are measured in bytes
+(`wc -c`) for portability; for the mostly-ASCII memory files this tracks
+characters closely and is conservative for multibyte content. The per-file
+default mirrors the threshold at which Claude Code warns that a memory file is
+large enough to hurt performance, so a file over it is over a real signal. The
+`@`-chain default is a softer "standing context is getting heavy" line
+(~33K tokens) and is the more project-dependent of the two. The Codex AGENTS
+total is informational (Codex enforces its own `project_doc_max_bytes` cap, and
+a fresh scaffold already exceeds the 32 KiB default).
 
 Both are starting points, not law. Budgets resolve at three levels, highest
 priority first: **CLI flag** (`--file-budget` / `--chain-budget`) > **committed
@@ -82,13 +89,18 @@ choice is durable and discoverable rather than re-typed per invocation:
 ```
 # agent-vault/memory-budget.config -- all keys optional; full-line comments only.
 # The parser keeps each value literal (the text after '='), so values may
-# contain '#'. This block is runnable as-is; uncomment overrides as needed.
+# contain '#'. This block is runnable as-is; each commented override below is a
+# complete key=value with no trailing text, so uncommenting one stays valid.
 file_budget=40000
 chain_budget=120000
-# protocol_read=agent-vault/context-log.md agent-vault/plan.md    override the bucket-3 file set
-# agents=discover    default: finds every AGENTS.md, or give an explicit space-separated list
-# exceptions=agent-vault/memory-budget.exceptions.tsv    a path<TAB>reason file you create first
-# chain_exception=intentional total overage during migration X
+# Override the bucket-3 (protocol-read) file set:
+# protocol_read=agent-vault/context-log.md agent-vault/plan.md
+# Pin the AGENTS.md set (the default discovers every AGENTS.md):
+# agents=discover
+# Point at a path<TAB>reason file of per-file documented overages (create it first):
+# exceptions=agent-vault/memory-budget.exceptions.tsv
+# Document an intentional always-on @-chain total overage:
+# chain_exception=intentional total overage during migration
 ```
 
 ## `check-context-log-rollover.sh`

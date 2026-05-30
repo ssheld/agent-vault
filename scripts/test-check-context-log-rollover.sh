@@ -237,4 +237,159 @@ expect_result 1 "not labeled superseded" "$tmp_root/good-live.md" --archive "$tm
 expect_result 2 "context log not found" "$tmp_root/does-not-exist.md"
 expect_result 2 "" --quiet
 
+# diff3 base marker (|||||||) is a conflict.
+cat >"$tmp_root/diff3-live.md" <<'EOF'
+# Context Log
+
+## Usage Rules
+- x
+
+## Current Snapshot
+- a
+
+## Entries
+
+### 2026-05-30 09:00 local - a - b
+||||||| base
+- c
+EOF
+expect_result 1 "Git conflict markers" "$tmp_root/diff3-live.md"
+
+# Fence-aware: a snapshot heading and a conflict marker quoted inside a fenced
+# code block are ignored (no false failure).
+cat >"$tmp_root/fenced-live.md" <<'EOF'
+# Context Log
+
+## Usage Rules
+- x
+
+## Current Snapshot
+- a
+
+## Entries
+
+### 2026-05-30 09:00 local - a - b
+Example of the stale-snapshot bug:
+```
+## Current Snapshot
+=======
+```
+- c
+EOF
+expect_result 0 "passed" "$tmp_root/fenced-live.md"
+
+# Exact heading anchor: a distinct section sharing a name prefix is not a duplicate.
+cat >"$tmp_root/distinct-heading-live.md" <<'EOF'
+# Context Log
+
+## Usage Rules
+- x
+
+## Current Snapshot
+- a
+
+## Entries
+
+### 2026-05-30 09:00 local - a - b
+- c
+
+## Current Snapshot Format Notes
+- doc
+EOF
+expect_result 0 "passed" "$tmp_root/distinct-heading-live.md"
+
+# A bolded but empty handoff pointer is flagged.
+cat >"$tmp_root/bold-handoff-live.md" <<'EOF'
+# Context Log
+
+## Usage Rules
+- x
+
+## Current Snapshot
+- **Latest handoff:**
+
+## Entries
+
+### 2026-05-30 09:00 local - a - b
+- c
+EOF
+expect_result 1 "latest-handoff pointer" "$tmp_root/bold-handoff-live.md"
+
+# require_exactly_one matrix: missing snapshot, missing usage rules, duplicate entries.
+cat >"$tmp_root/missing-snapshot-live.md" <<'EOF'
+# Context Log
+
+## Usage Rules
+- x
+
+## Entries
+
+### 2026-05-30 09:00 local - a - b
+- c
+EOF
+expect_result 1 'missing "## Current Snapshot"' "$tmp_root/missing-snapshot-live.md"
+
+cat >"$tmp_root/missing-usage-live.md" <<'EOF'
+# Context Log
+
+## Current Snapshot
+- a
+
+## Entries
+
+### 2026-05-30 09:00 local - a - b
+- c
+EOF
+expect_result 1 'missing "## Usage Rules"' "$tmp_root/missing-usage-live.md"
+
+cat >"$tmp_root/dup-entries-live.md" <<'EOF'
+# Context Log
+
+## Usage Rules
+- x
+
+## Current Snapshot
+- a
+
+## Entries
+
+### 2026-05-30 09:00 local - a - b
+- c
+
+## Entries
+- leftover
+EOF
+expect_result 1 'duplicate "## Entries"' "$tmp_root/dup-entries-live.md"
+
+# CRLF: a CRLF-terminated good log passes (CR is tolerated).
+sed 's/$/\r/' "$tmp_root/good-live.md" >"$tmp_root/good-crlf-live.md"
+expect_result 0 "passed" "$tmp_root/good-crlf-live.md"
+
+# Archive: a body mention of "superseded" does NOT label the heading.
+cat >"$tmp_root/archive-body-mention.md" <<'EOF'
+# Context Log Archive (2026)
+
+## Current Snapshot
+- This work was later superseded by a newer plan.
+
+### 2026-03-01 09:00 local - a - b
+- c
+EOF
+expect_result 1 "not labeled superseded" "$tmp_root/good-live.md" --archive "$tmp_root/archive-body-mention.md"
+
+# --quiet suppresses success output but never suppresses failures.
+quiet_out="$("$checker" "$tmp_root/good-live.md" --quiet 2>&1)"
+[[ -z "$quiet_out" ]] || {
+  echo "FAIL: --quiet should print nothing on success; got: $quiet_out" >&2
+  exit 1
+}
+set +e
+quiet_fail="$("$checker" "$tmp_root/dup-snapshot-live.md" --quiet 2>&1)"
+quiet_fail_rc=$?
+set -e
+[[ "$quiet_fail_rc" -eq 1 && -n "$quiet_fail" ]] || {
+  echo "FAIL: --quiet must still report failures" >&2
+  exit 1
+}
+
 echo "context-log rollover checker regression checks passed."
