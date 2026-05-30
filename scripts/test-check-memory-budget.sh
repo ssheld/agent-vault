@@ -36,37 +36,88 @@ expect_result() {
   fi
 }
 
+assert_in_set() {
+  local needle="$1"
+  shift
+  if ! printf '%s\n' "$@" | grep -qxF "$needle"; then
+    echo "FAIL: expected '$needle' in set:" >&2
+    printf '  %s\n' "$@" >&2
+    exit 1
+  fi
+}
+
+bucket_paths() {
+  local bucket="$1"
+  "$checker" --repo "$project" --format tsv | awk -F'\t' -v b="$bucket" '$1 == b { print $2 }'
+}
+
 project="$tmp_root/project"
 mkdir -p "$project"
 git -C "$project" init -q
 "$repo_root/scripts/new-project.sh" "budget-test" "$project" >/dev/null
 
-# A fresh project is within budget, and the @-chain is auto-discovered (not a
-# hard-coded list): the report must include a transitively-imported file.
+# Fresh project is within budget; the @-chain is auto-discovered (not hard-coded).
 expect_result 0 "Within budget" --repo "$project"
-expect_result 0 "agent-vault/shared-rules.md" --repo "$project" --format tsv
+mapfile -t chain_paths < <(bucket_paths chain)
+assert_in_set "agent-vault/shared-rules.md" "${chain_paths[@]}"
 
-# Inflate exactly one always-on file past the default per-file budget (40000).
-# No other canonical file is that large, so it is the only overage.
+# Bucket 3 default must match the session-start contract's protocol-read set,
+# including project-context.md / project-commands.md / lessons.md.
+mapfile -t protocol_paths < <(bucket_paths protocol)
+assert_in_set "agent-vault/project-context.md" "${protocol_paths[@]}"
+assert_in_set "agent-vault/project-commands.md" "${protocol_paths[@]}"
+assert_in_set "agent-vault/lessons.md" "${protocol_paths[@]}"
+while IFS= read -r contract_file; do
+  [[ -n "$contract_file" ]] || continue
+  assert_in_set "agent-vault/$contract_file" "${protocol_paths[@]}"
+done < <(grep -i 'Session-start protocol reads' \
+  "$repo_root/docs/session-start-load-contract.md" |
+  grep -oE '[A-Za-z0-9_-]+\.md' | sort -u)
+
+# Bucket 2 discovers every AGENTS.md, including nested non-agent-vault ones.
+mkdir -p "$project/subpkg"
+printf 'nested codex rules\n' >"$project/subpkg/AGENTS.md"
+mapfile -t agents_paths < <(bucket_paths agents)
+assert_in_set "AGENTS.md" "${agents_paths[@]}"
+assert_in_set "agent-vault/AGENTS.md" "${agents_paths[@]}"
+assert_in_set "subpkg/AGENTS.md" "${agents_paths[@]}"
+
+# A chain-only overage (no per-file overage) is a strict violation, and a
+# documented @chain exception clears it.
+expect_result 1 "@-chain total" --repo "$project" --chain-budget 1000 --strict
+printf '@chain\tintentional total during a migration\n' >"$tmp_root/exc-chain.tsv"
+expect_result 0 "Within budget" --repo "$project" --chain-budget 1000 --strict \
+  --exceptions "$tmp_root/exc-chain.tsv"
+
+# Inflate one always-on file past the default per-file budget (40000).
 head -c 45000 /dev/zero | tr '\0' 'x' >>"$project/agent-vault/project-context.md"
 
 # Non-strict reports + warns but never blocks (exit 0); strict fails.
 expect_result 0 "over file budget" --repo "$project"
 expect_result 1 "project-context.md" --repo "$project" --strict
 
-# A documented exception clears the strict violation (and prints the reason).
-printf 'agent-vault/project-context.md\tdocumented >budget exception; preserves live invariants\n' \
-  >"$tmp_root/exceptions.tsv"
-expect_result 0 "Within budget" --repo "$project" --strict --exceptions "$tmp_root/exceptions.tsv"
-expect_result 0 "documented: documented >budget exception" \
-  --repo "$project" --exceptions "$tmp_root/exceptions.tsv"
+# A per-file exception clears the per-file violation but NOT the chain total
+# (the file still loads into context); only an @chain exception clears the chain.
+printf 'agent-vault/project-context.md\tdocumented per-file overage\n' >"$tmp_root/exc-file.tsv"
+expect_result 0 "Within budget" --repo "$project" --strict --exceptions "$tmp_root/exc-file.tsv"
+expect_result 1 "@-chain total" --repo "$project" --chain-budget 1000 --strict \
+  --exceptions "$tmp_root/exc-file.tsv"
+printf '@chain\tdocumented chain overage\n' >>"$tmp_root/exc-file.tsv"
+expect_result 0 "Within budget" --repo "$project" --chain-budget 1000 --strict \
+  --exceptions "$tmp_root/exc-file.tsv"
+
+# A committed per-repo config sets budgets; CLI flags override the config.
+printf 'file_budget=200000\nchain_budget=200000\n' >"$project/agent-vault/memory-budget.config"
+expect_result 0 "Config:" --repo "$project"
+expect_result 0 "Within budget" --repo "$project" --strict
+expect_result 1 "over file budget" --repo "$project" --file-budget 500 --strict
+printf 'bogus_key=1\n' >"$project/agent-vault/memory-budget.config"
+expect_result 2 "unknown config key" --repo "$project"
+rm -f "$project/agent-vault/memory-budget.config"
 
 # Missing optional files are reported, never fatal.
 rm -f "$project/agent-vault/open-questions.md"
 expect_result 0 "MISSING" --repo "$project"
-
-# A chain-budget overage is a strict violation.
-expect_result 1 "@-chain total" --repo "$project" --chain-budget 1000 --strict
 
 # Usage / IO errors.
 expect_result 2 "must be text or tsv" --repo "$project" --format bogus

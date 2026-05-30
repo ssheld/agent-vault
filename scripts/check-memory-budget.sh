@@ -6,17 +6,25 @@ set -euo pipefail
 # against budgets, in three buckets:
 #   1. Claude/Gemini @-import chain   (auto-discovered from CLAUDE.md, loaded
 #                                      into every session)
-#   2. Codex AGENTS chain             (AGENTS.md files Codex concatenates up to
-#                                      its own project_doc_max_bytes cap)
+#   2. Codex AGENTS chain             (all AGENTS.md files Codex can concatenate
+#                                      up to its own project_doc_max_bytes cap)
 #   3. Protocol-read files            (named by session-start rules; read, not
 #                                      auto-imported)
 #
-# Defaults are sane but configurable, and the check is tolerant of missing
-# files (reported, never fatal). By default it REPORTS and WARNS but exits 0 so
-# it never blocks unrelated commits on a mature repo; pass --strict to fail on
-# a non-excepted over-budget file or bucket. A file may be listed in an
-# exceptions file (path<TAB>reason) to document an intentional overage -- the
-# reason is printed and the file does not count as a strict violation.
+# Budgets are configurable at three levels (CLI flag > config file > built-in
+# default). The built-in per-file default is 40000 chars, which mirrors the
+# Claude Code memory-file performance-warning threshold; the @-chain default is
+# 120000 chars (~33K tokens) as a "standing context is getting heavy" line.
+# A repo can override either, plus the protocol-read and AGENTS file sets, in a
+# committed config file (default: agent-vault/memory-budget.config). The check
+# is tolerant of missing files (reported, never fatal). By default it REPORTS
+# and WARNS but exits 0 so it never blocks unrelated commits on a mature repo;
+# pass --strict to fail on a non-excepted over-budget file or bucket.
+#
+# An exceptions file (path<TAB>reason) documents intentional per-file overages.
+# The reserved path "@chain" documents an intentional @-chain total overage
+# (an excepted per-file overage still counts toward the chain total, because the
+# file still loads into context; clear the chain total separately with @chain).
 
 usage() {
   cat <<EOF
@@ -24,16 +32,22 @@ Usage: $0 [options]
 
 Options:
   --repo <path>            Project root to inspect (default: git top-level or cwd).
+  --config <file>          Budget config file (default: <repo>/agent-vault/memory-budget.config
+                           when present). Keys: file_budget, chain_budget,
+                           protocol_read, agents, exceptions, chain_exception.
   --file-budget <chars>    Per-file budget in characters (default: 40000).
   --chain-budget <chars>   Always-on @-chain total budget (default: 120000).
-  --protocol-read "<list>" Space-separated repo-relative protocol-read files
-                           (default: the canonical agent-vault session-start set).
+  --protocol-read "<list>" Space-separated protocol-read files (default: the
+                           canonical session-start set).
+  --agents "<list>"        Space-separated AGENTS.md files, or "discover" to find
+                           every AGENTS.md in the repo (default: discover).
   --exceptions <file>      File of "path<TAB>reason" lines documenting allowed
-                           overages (does not count as a strict violation).
+                           overages. Use path "@chain" for the chain total.
   --strict                 Exit 1 when a non-excepted file or bucket is over budget.
   --format text|tsv        Output format (default: text).
   -h, --help               Show this help.
 
+Precedence for budgets/lists: CLI flag > config file > built-in default.
 Exit status: 0 = within budget or non-strict; 1 = strict violation; 2 = usage/IO error.
 EOF
 }
@@ -44,10 +58,12 @@ die() {
 }
 
 repo=""
-file_budget=40000
-chain_budget=120000
-protocol_read_override=""
-exceptions_file=""
+config_file=""
+file_budget=""
+chain_budget=""
+protocol_read_cli=""
+agents_cli=""
+exceptions_cli=""
 strict="false"
 format="text"
 
@@ -56,6 +72,11 @@ while [[ $# -gt 0 ]]; do
     --repo)
       [[ $# -ge 2 ]] || die "--repo requires a path"
       repo="$2"
+      shift 2
+      ;;
+    --config)
+      [[ $# -ge 2 ]] || die "--config requires a path"
+      config_file="$2"
       shift 2
       ;;
     --file-budget)
@@ -70,12 +91,17 @@ while [[ $# -gt 0 ]]; do
       ;;
     --protocol-read)
       [[ $# -ge 2 ]] || die "--protocol-read requires a value"
-      protocol_read_override="$2"
+      protocol_read_cli="$2"
+      shift 2
+      ;;
+    --agents)
+      [[ $# -ge 2 ]] || die "--agents requires a value"
+      agents_cli="$2"
       shift 2
       ;;
     --exceptions)
       [[ $# -ge 2 ]] || die "--exceptions requires a path"
-      exceptions_file="$2"
+      exceptions_cli="$2"
       shift 2
       ;;
     --strict)
@@ -97,8 +123,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ "$file_budget" =~ ^[0-9]+$ ]] || die "--file-budget must be a non-negative integer"
-[[ "$chain_budget" =~ ^[0-9]+$ ]] || die "--chain-budget must be a non-negative integer"
 [[ "$format" == "text" || "$format" == "tsv" ]] || die "--format must be text or tsv"
 
 if [[ -z "$repo" ]]; then
@@ -107,18 +131,72 @@ if [[ -z "$repo" ]]; then
 fi
 repo="$(cd "$repo" 2>/dev/null && pwd -P)" || die "repo path not found: $repo"
 
-if [[ -n "$exceptions_file" && ! -f "$exceptions_file" ]]; then
-  die "exceptions file not found: $exceptions_file"
+# --- config file (CLI > config > default) --------------------------------
+
+config_file_budget=""
+config_chain_budget=""
+config_protocol_read=""
+config_agents=""
+config_exceptions=""
+config_chain_exception=""
+
+if [[ -z "$config_file" && -f "$repo/agent-vault/memory-budget.config" ]]; then
+  config_file="$repo/agent-vault/memory-budget.config"
+fi
+
+if [[ -n "$config_file" ]]; then
+  [[ -f "$config_file" ]] || die "config file not found: $config_file"
+  while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
+    local_line="${raw_line#"${raw_line%%[![:space:]]*}"}"
+    [[ -z "$local_line" || "$local_line" == \#* ]] && continue
+    [[ "$local_line" == *=* ]] || continue
+    cfg_key="${local_line%%=*}"
+    cfg_val="${local_line#*=}"
+    cfg_key="${cfg_key%"${cfg_key##*[![:space:]]}"}"
+    cfg_val="${cfg_val#"${cfg_val%%[![:space:]]*}"}"
+    cfg_val="${cfg_val%"${cfg_val##*[![:space:]]}"}"
+    case "$cfg_key" in
+      file_budget) config_file_budget="$cfg_val" ;;
+      chain_budget) config_chain_budget="$cfg_val" ;;
+      protocol_read) config_protocol_read="$cfg_val" ;;
+      agents) config_agents="$cfg_val" ;;
+      exceptions) config_exceptions="$cfg_val" ;;
+      chain_exception) config_chain_exception="$cfg_val" ;;
+      *) die "unknown config key in $config_file: $cfg_key" ;;
+    esac
+  done <"$config_file"
+fi
+
+file_budget="${file_budget:-${config_file_budget:-40000}}"
+chain_budget="${chain_budget:-${config_chain_budget:-120000}}"
+[[ -n "$protocol_read_cli" ]] && config_protocol_read="$protocol_read_cli"
+[[ -n "$agents_cli" ]] && config_agents="$agents_cli"
+exceptions_file="${exceptions_cli:-$config_exceptions}"
+chain_exception_reason="$config_chain_exception"
+
+[[ "$file_budget" =~ ^[0-9]+$ ]] || die "file_budget must be a non-negative integer"
+[[ "$chain_budget" =~ ^[0-9]+$ ]] || die "chain_budget must be a non-negative integer"
+
+if [[ -n "$exceptions_file" ]]; then
+  case "$exceptions_file" in
+    /*) : ;;
+    *) exceptions_file="$repo/$exceptions_file" ;;
+  esac
+  [[ -f "$exceptions_file" ]] || die "exceptions file not found: $exceptions_file"
 fi
 
 # --- exceptions ----------------------------------------------------------
 
 declare -A EXCEPTION_REASON=()
 if [[ -n "$exceptions_file" ]]; then
-  while IFS=$'\t' read -r ex_path ex_reason; do
+  while IFS=$'\t' read -r ex_path ex_reason || [[ -n "$ex_path" ]]; do
     [[ -n "$ex_path" ]] || continue
     [[ "$ex_path" == \#* ]] && continue
-    EXCEPTION_REASON["$ex_path"]="${ex_reason:-documented exception}"
+    if [[ "$ex_path" == "@chain" ]]; then
+      chain_exception_reason="${ex_reason:-documented chain exception}"
+    else
+      EXCEPTION_REASON["$ex_path"]="${ex_reason:-documented exception}"
+    fi
   done <"$exceptions_file"
 fi
 
@@ -167,29 +245,48 @@ resolve_at_imports() {
   done < <(grep -E '^@[^[:space:]]' "$abs" || true)
 }
 
-# The always-on chain entry points: a project root CLAUDE.md / GEMINI.md.
 for entry in "CLAUDE.md" "GEMINI.md"; do
   [[ -f "$repo/$entry" ]] && resolve_at_imports "$entry" 0
 done
 
 # --- bucket file lists ---------------------------------------------------
 
+# Codex bucket: by default discover every AGENTS.md in the repo (tracked or
+# present-but-untracked, respecting .gitignore), since Codex concatenates
+# AGENTS.md along the working-directory ancestry including nested ones. A repo
+# can pin an explicit list via config/--agents.
+discover_agents_files() {
+  if git -C "$repo" rev-parse >/dev/null 2>&1; then
+    git -C "$repo" ls-files --cached --others --exclude-standard -- 'AGENTS.md' '**/AGENTS.md' 2>/dev/null | sort -u
+  else
+    (cd "$repo" && find . -name AGENTS.md -not -path '*/.git/*' -printf '%P\n' 2>/dev/null | sort -u)
+  fi
+}
+
 agents_files=()
-for candidate in "AGENTS.md" "agent-vault/AGENTS.md"; do
-  agents_files+=("$candidate")
-done
+if [[ -z "$config_agents" || "$config_agents" == "discover" ]]; then
+  while IFS= read -r agents_path; do
+    [[ -n "$agents_path" ]] || continue
+    agents_files+=("$agents_path")
+  done < <(discover_agents_files)
+else
+  read -r -a agents_files <<<"$config_agents"
+fi
 
 default_protocol_read=(
+  "agent-vault/README.md"
   "agent-vault/context-log.md"
   "agent-vault/plan.md"
+  "agent-vault/coding-standards.md"
+  "agent-vault/project-context.md"
+  "agent-vault/project-commands.md"
   "agent-vault/open-questions.md"
   "agent-vault/decision-log.md"
-  "agent-vault/coding-standards.md"
-  "agent-vault/README.md"
+  "agent-vault/lessons.md"
 )
 protocol_read_files=()
-if [[ -n "$protocol_read_override" ]]; then
-  read -r -a protocol_read_files <<<"$protocol_read_override"
+if [[ -n "$config_protocol_read" ]]; then
+  read -r -a protocol_read_files <<<"$config_protocol_read"
 else
   protocol_read_files=("${default_protocol_read[@]}")
 fi
@@ -251,6 +348,7 @@ measure_bucket() {
 if [[ "$format" == "text" ]]; then
   echo "Memory budget report for: $repo"
   echo "Per-file budget: $file_budget chars | @-chain budget: $chain_budget chars"
+  [[ -n "$config_file" ]] && echo "Config: $config_file"
   echo
 fi
 
@@ -267,9 +365,13 @@ fi
 
 if [[ "$format" == "text" ]]; then
   echo
-  echo "[2] Codex AGENTS chain (concatenated up to Codex project_doc_max_bytes):"
+  echo "[2] Codex AGENTS chain (all discovered AGENTS.md, concatenated up to Codex project_doc_max_bytes):"
 fi
-measure_bucket "agents" agents_total "${agents_files[@]}"
+if [[ "${#agents_files[@]}" -eq 0 ]]; then
+  emit_row "agents" "(no AGENTS.md found)" "MISSING" "-" ""
+else
+  measure_bucket "agents" agents_total "${agents_files[@]}"
+fi
 
 if [[ "$format" == "text" ]]; then
   echo
@@ -279,18 +381,26 @@ measure_bucket "protocol" protocol_total "${protocol_read_files[@]}"
 
 chain_status="ok"
 if [[ "$chain_total" -gt "$chain_budget" ]]; then
-  chain_status="OVER"
-  violations=$((violations + 1))
+  if [[ -n "$chain_exception_reason" ]]; then
+    chain_status="EXCEPT"
+  else
+    chain_status="OVER"
+    violations=$((violations + 1))
+  fi
 fi
 
 if [[ "$format" == "tsv" ]]; then
-  printf 'TOTAL\tchain\t%s\t%s\t\n' "$chain_status" "$chain_total"
+  printf 'TOTAL\tchain\t%s\t%s\t%s\n' "$chain_status" "$chain_total" "$chain_exception_reason"
   printf 'TOTAL\tagents\t-\t%s\t\n' "$agents_total"
   printf 'TOTAL\tprotocol\t-\t%s\t\n' "$protocol_total"
 else
   echo
   echo "Totals:"
-  printf '  %-7s %-44s %10s  %s\n' "$chain_status" "@-chain total" "$chain_total" "(budget $chain_budget)"
+  if [[ "$chain_status" == "EXCEPT" ]]; then
+    printf '  %-7s %-44s %10s  %s\n' "$chain_status" "@-chain total" "$chain_total" "over budget $chain_budget; documented: $chain_exception_reason"
+  else
+    printf '  %-7s %-44s %10s  %s\n' "$chain_status" "@-chain total" "$chain_total" "(budget $chain_budget)"
+  fi
   printf '  %-7s %-44s %10s\n' "ok" "Codex AGENTS total" "$agents_total"
   printf '  %-7s %-44s %10s\n' "ok" "protocol-read total" "$protocol_total"
   echo
@@ -299,7 +409,7 @@ else
   else
     echo "$violations non-excepted overage(s) found."
     echo "Relocate historical/low-frequency content to docs/ (leave a pointer), or"
-    echo "record an intentional overage in an --exceptions file with a reason."
+    echo "record an intentional overage in an exceptions file with a reason."
   fi
 fi
 

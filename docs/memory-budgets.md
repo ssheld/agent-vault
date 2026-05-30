@@ -24,7 +24,7 @@ separates three buckets:
 | Bucket | What it is | How it loads |
 | --- | --- | --- |
 | Claude/Gemini `@`-chain | `CLAUDE.md`/`GEMINI.md` plus everything they `@`-import, transitively | Auto-loaded into every session; the always-on cost |
-| Codex `AGENTS` chain | `AGENTS.md` files | Codex concatenates them up to its own `project_doc_max_bytes` cap (32 KiB by default), dropping the most specific files first when over |
+| Codex `AGENTS` chain | all `AGENTS.md` files in the repo (discovered, including nested package/module ones) | Codex concatenates them along the working-directory ancestry up to its own `project_doc_max_bytes` cap (32 KiB by default), dropping the most specific files first when over |
 | Protocol-read files | Files the session-start rules tell agents to read (`context-log.md`, `plan.md`, etc.) | Read when an agent follows the protocol; not auto-imported |
 
 Keeping the buckets separate matters because the same file can be cheap in one
@@ -37,29 +37,57 @@ Reports the three buckets for a project and flags files/buckets over budget.
 
 ```bash
 scripts/check-memory-budget.sh [--repo <path>]
-scripts/check-memory-budget.sh --repo <path> --strict          # exit 1 on overage
-scripts/check-memory-budget.sh --repo <path> --format tsv      # machine-readable
+scripts/check-memory-budget.sh --repo <path> --strict           # exit 1 on overage
+scripts/check-memory-budget.sh --repo <path> --format tsv       # machine-readable
+scripts/check-memory-budget.sh --repo <path> --config <file>    # per-repo budget config
 scripts/check-memory-budget.sh --repo <path> --exceptions exceptions.tsv
 ```
 
 Design choices that matter:
 
 - **Auto-discovery, not a hard-coded file set.** The `@`-chain is resolved by
-  following `@`-imports from `CLAUDE.md`/`GEMINI.md`, so the tool reports
-  whatever a project actually imports rather than assuming one project's layout.
+  following `@`-imports from `CLAUDE.md`/`GEMINI.md`, and the Codex bucket
+  discovers every `AGENTS.md` in the repo (tracked or present, respecting
+  `.gitignore`), including nested ones, so the report reflects what an agent
+  actually loads rather than assuming one project's layout.
 - **Tolerant of missing files.** Absent optional files are reported as
   `MISSING` and skipped; they never make the check fail.
 - **Warn, do not block, by default.** A plain run reports and warns but exits
   `0`, so it can never block an unrelated commit on a mature repo. Pass
   `--strict` to exit `1` on a non-excepted overage (for example in a dedicated
   CI check), once a project has been brought within budget.
-- **Documented exceptions.** A file may legitimately stay over its per-file
-  budget when shrinking it further would mean deleting a live invariant. Record
-  it in an exceptions file (one `path<TAB>reason` line per entry); the report
-  prints the reason and the file does not count as a strict violation.
+- **Documented exceptions, per file and chain.** A file may legitimately stay
+  over its per-file budget when shrinking it further would mean deleting a live
+  invariant. Record it in an exceptions file (one `path<TAB>reason` line per
+  entry); the report prints the reason and the file is not a strict violation.
+  An excepted file still counts toward the `@`-chain total (it still loads into
+  context), so an intentional chain-total overage is documented separately with
+  the reserved path `@chain` (or `chain_exception` in the config).
 
-Defaults: per-file budget 40000 characters, `@`-chain total budget 120000
-characters. Override with `--file-budget` / `--chain-budget`.
+## Budgets and per-repo configuration
+
+Defaults: per-file budget **40000 characters** and `@`-chain total budget
+**120000 characters**. The per-file default is not arbitrary -- it mirrors the
+threshold at which Claude Code warns that a memory file is large enough to hurt
+performance, so a file over it is over a real signal. The `@`-chain default is a
+softer "standing context is getting heavy" line (~33K tokens) and is the more
+project-dependent of the two.
+
+Both are starting points, not law. Budgets resolve at three levels, highest
+priority first: **CLI flag** (`--file-budget` / `--chain-budget`) > **committed
+config file** > **built-in default**. A repo records its own budget once in
+`agent-vault/memory-budget.config` (read automatically when present) so the
+choice is durable and discoverable rather than re-typed per invocation:
+
+```
+# agent-vault/memory-budget.config (all keys optional)
+file_budget=40000
+chain_budget=120000
+protocol_read=agent-vault/context-log.md agent-vault/plan.md   # override the bucket-3 set
+agents=discover                                                 # or an explicit space-separated list
+exceptions=agent-vault/memory-budget.exceptions.tsv            # path<TAB>reason lines
+chain_exception=intentional total overage during migration X
+```
 
 ## `check-context-log-rollover.sh`
 
