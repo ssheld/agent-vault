@@ -195,18 +195,36 @@ run_new_project "$target" >/dev/null
   printf '%s\n' '# agent-vault-managed: helper-script; file=remove-worktree.sh'
   printf '%s\n' 'echo stale managed remove helper'
 } >"$target/scripts/remove-worktree.sh"
+{
+  printf '%s\n' '#!/usr/bin/env bash'
+  printf '%s\n' '# agent-vault-managed: helper-script; file=check-memory-budget.sh'
+  printf '%s\n' 'echo stale managed budget checker'
+} >"$target/scripts/check-memory-budget.sh"
+{
+  printf '%s\n' '#!/usr/bin/env bash'
+  printf '%s\n' '# agent-vault-managed: helper-script; file=check-context-log-rollover.sh'
+  printf '%s\n' 'echo stale managed rollover checker'
+} >"$target/scripts/check-context-log-rollover.sh"
 chmod -x "$target/scripts/new-worktree.sh"
 chmod -x "$target/scripts/remove-worktree.sh"
+chmod -x "$target/scripts/check-memory-budget.sh"
+chmod -x "$target/scripts/check-context-log-rollover.sh"
 rc=0
 output="$(run_update_project "$target" 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "update-project managed-refresh exits 0"
 assert_output_contains "$output" "Updated: scripts/new-worktree.sh" "update-project reports managed helper update"
 assert_output_contains "$output" "Updated: scripts/remove-worktree.sh" "update-project reports managed remove helper update"
+assert_output_contains "$output" "Updated: scripts/check-memory-budget.sh" "update-project reports memory-budget checker update"
+assert_output_contains "$output" "Updated: scripts/check-context-log-rollover.sh" "update-project reports rollover checker update"
 assert_file_contains "$target/scripts/new-worktree.sh" "Create or reuse one issue-scoped worktree" "update-project refreshes managed helper content"
 assert_file_contains "$target/scripts/new-worktree.sh" 'DEFAULT_ROOT="${PROJECT_DIR}/.worktrees"' "update-project refreshes new helper default"
 assert_file_contains "$target/scripts/remove-worktree.sh" "Use only after verifying the PR is merged" "update-project refreshes remove helper guidance"
+assert_file_contains "$target/scripts/check-memory-budget.sh" "Keys: file_budget, chain_budget" "update-project refreshes stale memory-budget checker content"
+assert_file_contains "$target/scripts/check-context-log-rollover.sh" "stale duplicate \"## Current Snapshot\"" "update-project refreshes stale rollover checker content"
 assert_executable "$target/scripts/new-worktree.sh" "update-project fixes managed helper executable bit"
 assert_executable "$target/scripts/remove-worktree.sh" "update-project fixes managed remove helper executable bit"
+assert_executable "$target/scripts/check-memory-budget.sh" "update-project fixes memory-budget checker executable bit"
+assert_executable "$target/scripts/check-context-log-rollover.sh" "update-project fixes rollover checker executable bit"
 
 # --- Test 6: runbook is seed-only after creation ---
 target="$(setup_empty_repo runbook-seed-target)"
