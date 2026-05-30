@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# agent-vault-managed: helper-script; file=check-context-log-rollover.sh
 
 set -euo pipefail
 

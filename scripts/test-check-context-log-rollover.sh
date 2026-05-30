@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-checker="$repo_root/scripts/check-context-log-rollover.sh"
+checker="$repo_root/scaffold/root/scripts/check-context-log-rollover.sh"
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/agent-vault-rollover-test.XXXXXX")"
 
 cleanup() {

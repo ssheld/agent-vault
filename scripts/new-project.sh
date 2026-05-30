@@ -324,7 +324,9 @@ for required in \
   "$root_scaffold_dir/docs/design.md" \
   "$root_scaffold_dir/docs/runbooks/parallel-agent-worktrees.md" \
   "$root_scaffold_dir/scripts/new-worktree.sh" \
-  "$root_scaffold_dir/scripts/remove-worktree.sh"; do
+  "$root_scaffold_dir/scripts/remove-worktree.sh" \
+  "$root_scaffold_dir/scripts/check-memory-budget.sh" \
+  "$root_scaffold_dir/scripts/check-context-log-rollover.sh"; do
   if [[ ! -f "$required" ]]; then
     echo "Error: missing root scaffold file: $required"
     exit 1
@@ -474,6 +476,8 @@ seed_root_file_if_missing "$root_scaffold_dir/docs/design.md" "$canonical_repo_p
 seed_root_file_if_missing "$root_scaffold_dir/docs/runbooks/parallel-agent-worktrees.md" "$canonical_repo_path/docs/runbooks/parallel-agent-worktrees.md"
 seed_root_executable_file_if_missing "$root_scaffold_dir/scripts/new-worktree.sh" "$canonical_repo_path/scripts/new-worktree.sh"
 seed_root_executable_file_if_missing "$root_scaffold_dir/scripts/remove-worktree.sh" "$canonical_repo_path/scripts/remove-worktree.sh"
+seed_root_executable_file_if_missing "$root_scaffold_dir/scripts/check-memory-budget.sh" "$canonical_repo_path/scripts/check-memory-budget.sh"
+seed_root_executable_file_if_missing "$root_scaffold_dir/scripts/check-context-log-rollover.sh" "$canonical_repo_path/scripts/check-context-log-rollover.sh"
 
 ensure_managed_gitignore_entries "$canonical_repo_path"
 hook_rc=0

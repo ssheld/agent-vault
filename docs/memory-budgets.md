@@ -154,9 +154,15 @@ When a file is over budget:
    retained as a quick-rule, covered by a named always-on rule, or
    archival-only with low recurrence risk.
 
-## Scope note
+## Installation
 
-This capability ships the policy, the two checkers, their tests, and CI
-registration. Wiring the budget check into a generated project's pre-commit
-hook (which requires scaffolding the checker into projects) is intentionally a
-follow-up so the detection/validation foundation can land focused first.
+`new-project.sh` seeds both checkers into a generated project's `scripts/`, and
+`update-project.sh` keeps them in sync (they carry an `agent-vault-managed`
+marker, like the worktree helpers). The scaffolded pre-commit hook runs
+`scripts/check-memory-budget.sh` as a **non-blocking** warning when memory files
+are staged -- it surfaces any over-budget bucket/file but never blocks a commit
+(silence it with `AGENT_VAULT_SKIP_MEMORY_BUDGET=1`).
+
+In the agent-vault template repo itself the checkers live at
+`scaffold/root/scripts/`; the commands above assume a generated project where
+they have been seeded to `scripts/`.
