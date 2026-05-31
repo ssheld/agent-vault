@@ -239,16 +239,42 @@ select_boundaries() {
   ' "$1"
 }
 
-# Canonical "<real-parent-dir>/<basename>" for a path that need not exist yet, so
-# two spellings of the same destination compare equal.
+# Lexically collapse "/", ".", "//", and ".." in an absolute path (no FS access),
+# so equivalent spellings of a not-yet-created path compare equal.
+normalize_lexical() {
+  awk -v p="$1" 'BEGIN {
+    n = split(p, a, "/")
+    m = 0
+    for (i = 1; i <= n; i++) {
+      c = a[i]
+      if (c == "" || c == ".") continue
+      if (c == "..") { if (m > 0) m--; continue }
+      out[++m] = c
+    }
+    s = ""
+    for (i = 1; i <= m; i++) s = s "/" out[i]
+    print (s == "" ? "/" : s)
+  }'
+}
+
+# Canonical absolute path for a destination that need not exist yet: resolve the
+# nearest existing ancestor through "pwd -P" (so symlinks in the existing prefix
+# collapse), then lexically normalize the missing tail. Two spellings of the same
+# destination compare equal even when the parent directory does not exist yet.
 canonical_path() {
-  local p="$1" dir base
-  base="$(basename "$p")"
-  if dir="$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)"; then
-    printf '%s/%s\n' "$dir" "$base"
-  else
-    printf '%s\n' "$p"
-  fi
+  local p="$1" dir rest=""
+  case "$p" in
+    /*) ;;
+    *) p="$PWD/$p" ;;
+  esac
+  dir="$p"
+  while [[ ! -d "$dir" ]]; do
+    rest="${dir##*/}${rest:+/}$rest"
+    dir="${dir%/*}"
+    [[ -n "$dir" ]] || dir="/"
+  done
+  dir="$(cd "$dir" && pwd -P)"
+  normalize_lexical "$dir${rest:+/}$rest"
 }
 
 # --- preconditions (no writes) -------------------------------------------

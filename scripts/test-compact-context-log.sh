@@ -311,6 +311,13 @@ assert_rc 2 "$COMPACT_RC" "manifest==log rejected"
 run_compact "$d/log.md" --keep 2 --archive "$d/log.md" \
   --manifest "$d/archive/m.md" --require-top-entry "rollover session"
 assert_rc 2 "$COMPACT_RC" "archive==log rejected"
+# Equivalent spellings under a not-yet-created parent must also be rejected
+# (the parent gets mkdir -p'd at commit, so a missed collision would clobber).
+run_compact "$d/log.md" --keep 2 --archive "$d/fresh/a.md" \
+  --manifest "$d/fresh/./a.md" --require-top-entry "rollover session"
+assert_rc 2 "$COMPACT_RC" "missing-parent equivalent paths rejected"
+assert_contains "$COMPACT_OUT" "must differ" "missing-parent collision message"
+assert_not_exists "$d/fresh" "collide: missing parent not created on rejected collision"
 [[ "$(cksum "$d/log.md")" == "$before" ]] || fail "collide: live log must be unchanged"
 pass=$((pass + 1))
 assert_not_exists "$d/archive/same.md" "collide: no colliding file written"
