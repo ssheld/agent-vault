@@ -241,6 +241,49 @@ derived from the moved entries; pass them to override. `--dry-run` builds and
 self-validates without writing. Exit status: `0` rolled over (or nothing to do),
 `1` precondition/validation failure (no writes), `2` usage/IO error.
 
+## `check-lessons-archive.sh`
+
+When `lessons.md` is compacted, each archived lesson must be **classified** so it
+is not silently lost (the #116 AC5 requirement). The canonical home for the
+archive and its classification manifest is alongside the context-log archive:
+
+- archive: `agent-vault/context/archive/lessons-archive.md`
+- manifest: `agent-vault/context/archive/lessons-manifest.md`
+
+One manifest record per archived lesson, keyed by the lesson's archived heading:
+
+```md
+## lesson: Avoid SC2178 local-var name collisions across functions
+- classification: retained-as-quick-rule
+- quick_rule: Watch SC2178/SC2128 from local-var name collisions
+
+## lesson: Old workaround for the pre-2025 hook bug
+- classification: covered-by-a-named-always-on-rule
+- covered_by: Always use real date timestamps in durable memory
+```
+
+```bash
+scripts/check-lessons-archive.sh <manifest>
+scripts/check-lessons-archive.sh <manifest> --strict        # exit 1 + completeness
+scripts/check-lessons-archive.sh <manifest> --rules <file>  # add a live-rule source
+```
+
+The checker validates that every record declares one of the three classes
+(`retained-as-quick-rule`, `covered-by-a-named-always-on-rule`, `archival-only`),
+that keys are unique, and that a `covered-by-a-named-always-on-rule` record names
+a non-empty `covered_by` rule that still appears in a live always-on file. An
+optional `quick_rule` on a `retained-as-quick-rule` record is liveness-checked
+the same way, so a retained lesson whose one-liner was dropped is caught. Rule
+liveness is a substring match, so use distinctive rule text; the project
+`lessons.md` is always a source when present and `--rules` **adds** more (e.g.
+`shared-rules.md`) rather than replacing it. The checker **warns by default**
+(exit 0, so it never blocks an unrelated commit and `--quiet` stays silent);
+`--strict` exits 1 on any finding (always reported, even with `--quiet`) and
+additionally enforces **completeness** against the archive — every archived
+lesson (a `###` heading) has a manifest record, and no record points at a lesson
+absent from the archive. The archive defaults to `lessons-archive.md` next to the
+manifest.
+
 ## Compaction conventions
 
 When a file is over budget:
@@ -257,15 +300,19 @@ When a file is over budget:
    it were closed-issue history. When a narrative file cannot reach its budget
    without deleting a live invariant, keep it within reason and record the
    documented exception instead.
-4. **Classify archived lessons.** Each archived `lessons.md` entry should be
-   retained as a quick-rule, covered by a named always-on rule, or
-   archival-only with low recurrence risk.
+4. **Classify archived lessons.** Move archived `lessons.md` write-ups into
+   `agent-vault/context/archive/lessons-archive.md` and record each one in
+   `agent-vault/context/archive/lessons-manifest.md` as retained-as-quick-rule,
+   covered-by-a-named-always-on-rule, or archival-only with low recurrence risk.
+   Validate with `scripts/check-lessons-archive.sh` (see above).
 
 ## Installation
 
-`new-project.sh` seeds both checkers and the `compact-context-log.sh` compactor
-into a generated project's `scripts/`, and `update-project.sh` keeps them in sync
-(they carry an `agent-vault-managed` marker, like the worktree helpers). The scaffolded pre-commit hook runs
+`new-project.sh` seeds the memory checkers (`check-memory-budget.sh`,
+`check-context-log-rollover.sh`, `check-lessons-archive.sh`) and the
+`compact-context-log.sh` compactor into a generated project's `scripts/`, and
+`update-project.sh` keeps them in sync (they carry an `agent-vault-managed`
+marker, like the worktree helpers). The scaffolded pre-commit hook runs
 `scripts/check-memory-budget.sh` as a **non-blocking** warning when memory files
 are staged -- it surfaces any over-budget bucket/file but never blocks a commit
 (silence it with `AGENT_VAULT_SKIP_MEMORY_BUDGET=1`).

@@ -56,6 +56,7 @@ REMOVE_WORKTREE_HELPER_MARKER="# agent-vault-managed: helper-script; file=remove
 CHECK_MEMORY_BUDGET_HELPER_MARKER="# agent-vault-managed: helper-script; file=check-memory-budget.sh"
 CHECK_CONTEXT_LOG_ROLLOVER_HELPER_MARKER="# agent-vault-managed: helper-script; file=check-context-log-rollover.sh"
 COMPACT_CONTEXT_LOG_HELPER_MARKER="# agent-vault-managed: helper-script; file=compact-context-log.sh"
+CHECK_LESSONS_ARCHIVE_HELPER_MARKER="# agent-vault-managed: helper-script; file=check-lessons-archive.sh"
 POLICY_TEMPLATE_REL_PATHS=(
   "Decision Record.md"
 )
@@ -140,6 +141,7 @@ for required in \
   "$root_scaffold_dir/scripts/check-memory-budget.sh" \
   "$root_scaffold_dir/scripts/check-context-log-rollover.sh" \
   "$root_scaffold_dir/scripts/compact-context-log.sh" \
+  "$root_scaffold_dir/scripts/check-lessons-archive.sh" \
   "$vault_scaffold_dir/AGENTS.md" \
   "$vault_scaffold_dir/CLAUDE.md" \
   "$vault_scaffold_dir/GEMINI.md" \
@@ -957,6 +959,7 @@ sync_root_helper_script_if_managed "$root_scaffold_dir/scripts/remove-worktree.s
 sync_root_helper_script_if_managed "$root_scaffold_dir/scripts/check-memory-budget.sh" "$canonical_repo_path/scripts/check-memory-budget.sh" "$CHECK_MEMORY_BUDGET_HELPER_MARKER"
 sync_root_helper_script_if_managed "$root_scaffold_dir/scripts/check-context-log-rollover.sh" "$canonical_repo_path/scripts/check-context-log-rollover.sh" "$CHECK_CONTEXT_LOG_ROLLOVER_HELPER_MARKER"
 sync_root_helper_script_if_managed "$root_scaffold_dir/scripts/compact-context-log.sh" "$canonical_repo_path/scripts/compact-context-log.sh" "$COMPACT_CONTEXT_LOG_HELPER_MARKER"
+sync_root_helper_script_if_managed "$root_scaffold_dir/scripts/check-lessons-archive.sh" "$canonical_repo_path/scripts/check-lessons-archive.sh" "$CHECK_LESSONS_ARCHIVE_HELPER_MARKER"
 sync_project_owned_file_if_requested "$vault_scaffold_dir/coding-standards.md" "$project_dir/coding-standards.md" "--sync-coding-standards" "$sync_coding_standards"
 seed_if_missing "$vault_scaffold_dir/project-context.md" "$project_dir/project-context.md"
 seed_if_missing "$vault_scaffold_dir/project-commands.md" "$project_dir/project-commands.md"
