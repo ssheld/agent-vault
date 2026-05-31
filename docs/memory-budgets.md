@@ -219,17 +219,24 @@ scripts/compact-context-log.sh agent-vault/context-log.md --keep 20 \
 It is built so a half-finished rollover can never land:
 
 - **It does not invent the gate-required entry.** Add the rollover session entry
-  first (the metadata gate), then run the compactor; `--require-top-entry <str>`
-  asserts that entry is the newest one and aborts (exit 1, no writes) if not.
+  first (the metadata gate), then run the compactor. A write-producing rollover
+  **refuses by default** unless the newest entry is asserted with
+  `--require-top-entry <str>` (it aborts, exit 1, no writes, if that marker is
+  not the newest heading); `--allow-missing-top-entry` is the explicit escape
+  hatch. Refusing by default — not only when the flag happens to be passed — is
+  what keeps the cite-then-mutate workflow closed.
 - **Counts and boundary are finalized after that entry is in place**, from the
   live file as it stands, so they cannot describe a pre-entry state.
 - **The result is self-validated** with `check-context-log-rollover.sh
   --manifest` before anything is written; any precondition or validation failure
-  aborts non-zero having written nothing.
+  aborts non-zero having written nothing. The three output paths (log, archive,
+  manifest) must be distinct — a collision is rejected before any build, so the
+  sequential commit renames cannot clobber a validated output.
 - **Each file is replaced by an atomic same-directory rename** of a fully-formed
   temp file, live log last, so an interrupted run never loses entries.
 
-`--rollover-id`, `--boundary`, and `--anchors` default to a dated id and values
+`--rollover-id`, `--boundary`, and `--anchors` default to a dated id (the next
+same-day sequence is the max existing suffix + 1, never a re-used gap) and values
 derived from the moved entries; pass them to override. `--dry-run` builds and
 self-validates without writing. Exit status: `0` rolled over (or nothing to do),
 `1` precondition/validation failure (no writes), `2` usage/IO error.

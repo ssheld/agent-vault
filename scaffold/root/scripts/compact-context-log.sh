@@ -51,6 +51,9 @@ Options:
                              moved entries; each must appear in the archive).
   --require-top-entry <str>  Abort unless the newest entry heading contains <str>
                              (assert the gate-required rollover entry is present).
+                             Required for any write unless --allow-missing-top-entry.
+  --allow-missing-top-entry  Explicit escape hatch: roll over without asserting the
+                             gate-required session entry. Use only when verified.
   --dry-run                  Build and self-validate, print a summary, write nothing.
   --quiet                    Print only on failure / a one-line success.
   -h, --help                 Show this help.
@@ -75,6 +78,7 @@ rollover_id=""
 boundary=""
 anchors=""
 require_top_entry=""
+allow_missing_top_entry="false"
 dry_run="false"
 quiet="false"
 
@@ -114,6 +118,10 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || die "--require-top-entry requires a value"
       require_top_entry="$2"
       shift 2
+      ;;
+    --allow-missing-top-entry)
+      allow_missing_top_entry="true"
+      shift
       ;;
     --dry-run)
       dry_run="true"
@@ -231,7 +239,28 @@ select_boundaries() {
   ' "$1"
 }
 
+# Canonical "<real-parent-dir>/<basename>" for a path that need not exist yet, so
+# two spellings of the same destination compare equal.
+canonical_path() {
+  local p="$1" dir base
+  base="$(basename "$p")"
+  if dir="$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)"; then
+    printf '%s/%s\n' "$dir" "$base"
+  else
+    printf '%s\n' "$p"
+  fi
+}
+
 # --- preconditions (no writes) -------------------------------------------
+
+# The three outputs must be distinct files; otherwise self-validation passes on
+# the scratch copies but the sequential commit renames clobber one another.
+log_canon="$(canonical_path "$context_log")"
+archive_canon="$(canonical_path "$archive_file")"
+manifest_canon="$(canonical_path "$manifest_file")"
+[[ "$log_canon" != "$archive_canon" ]] || die "--archive must differ from the context log ($archive_file)"
+[[ "$log_canon" != "$manifest_canon" ]] || die "--manifest must differ from the context log ($manifest_file)"
+[[ "$archive_canon" != "$manifest_canon" ]] || die "--archive and --manifest must differ ($archive_file)"
 
 # Structure must be sound before we rearrange it.
 if ! "$checker" "$context_log" --quiet >/dev/null 2>&1; then
@@ -243,16 +272,23 @@ total_entries="${#heading_lines[@]}"
 
 [[ "$total_entries" -ge 1 ]] || abort "no dated entries found under \"## Entries\""
 
-# The newest entry is the first heading line; assert the gate entry when asked.
-top_line="${heading_lines[0]}"
-top_heading="$(sed -n "${top_line}p" "$context_log" | sed -E 's/\r$//; s/^#+[[:space:]]+//')"
-if [[ -n "$require_top_entry" && "$top_heading" != *"$require_top_entry"* ]]; then
-  abort "newest entry does not contain required marker \"$require_top_entry\" (gate-required rollover entry missing); newest is: $top_heading"
-fi
-
 if [[ "$total_entries" -le "$keep" ]]; then
   [[ "$quiet" == "true" ]] || echo "Nothing to roll over: $total_entries entr(y/ies) <= --keep $keep."
   exit 0
+fi
+
+# This rollover will write, so enforce the gate: the newest entry must be the
+# gate-required rollover session entry. Refusing by DEFAULT (not only when a flag
+# happens to be passed) is what keeps cite-then-mutate closed -- otherwise the
+# durable counts/boundary could be finalized before that entry exists.
+# --allow-missing-top-entry is the explicit, auditable escape hatch.
+top_line="${heading_lines[0]}"
+top_heading="$(sed -n "${top_line}p" "$context_log" | sed -E 's/\r$//; s/^#+[[:space:]]+//')"
+if [[ -n "$require_top_entry" ]]; then
+  [[ "$top_heading" == *"$require_top_entry"* ]] ||
+    abort "newest entry does not contain required marker \"$require_top_entry\" (gate-required rollover entry missing); newest is: $top_heading"
+elif [[ "$allow_missing_top_entry" != "true" ]]; then
+  abort "refusing to roll over without asserting the gate-required session entry; pass --require-top-entry <marker> (recommended) or --allow-missing-top-entry to override. Newest entry is: $top_heading"
 fi
 
 # --- build everything in a scratch dir (still no writes to real files) ---
@@ -320,12 +356,19 @@ if [[ -z "$anchors" ]]; then
 fi
 if [[ -z "$rollover_id" ]]; then
   day="$(date +%Y-%m-%d)"
-  seq=1
+  # Next sequence = max existing same-day suffix + 1, so a gap (e.g. -1, -3) never
+  # re-issues an in-use id (counting would). Default to 1 when none exist.
+  next_seq=1
   if [[ -f "$manifest_file" ]]; then
-    existing="$(grep -c "^## rollover: ${day}-" "$manifest_file" 2>/dev/null || true)"
-    seq=$((existing + 1))
+    next_seq="$(awk -v day="$day" '
+      $0 ~ ("^## rollover: " day "-[0-9]+[[:space:]]*$") {
+        s = $0; sub(/.*-/, "", s); sub(/[[:space:]]+$/, "", s)
+        if (s + 0 > max) max = s + 0
+      }
+      END { print max + 1 }
+    ' "$manifest_file")"
   fi
-  rollover_id="${day}-${seq}"
+  rollover_id="${day}-${next_seq}"
 fi
 
 pointer_line="- Context-log rollover: \`${rollover_id}\` — boundary: ${boundary}"

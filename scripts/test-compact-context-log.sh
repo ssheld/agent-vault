@@ -157,7 +157,7 @@ mkdir -p "$d/archive"
 make_log "$d/log.md"
 before="$(cksum "$d/log.md")"
 run_compact "$d/log.md" --keep 2 --archive "$d/archive/context-log-2026.md" \
-  --manifest "$d/archive/manifest.md" --rollover-id x --dry-run
+  --manifest "$d/archive/manifest.md" --rollover-id x --require-top-entry "rollover session" --dry-run
 assert_rc 0 "$COMPACT_RC" "dry-run rc"
 assert_contains "$COMPACT_OUT" "[dry-run]" "dry-run marker"
 assert_contains "$COMPACT_OUT" "passed check-context-log-rollover.sh" "dry-run self-validated"
@@ -205,7 +205,7 @@ cat >"$d/log.md" <<'EOF'
 EOF
 before="$(cksum "$d/log.md")"
 run_compact "$d/log.md" --keep 1 --archive "$d/archive/context-log-2026.md" \
-  --manifest "$d/archive/manifest.md" --rollover-id x
+  --manifest "$d/archive/manifest.md" --rollover-id x --require-top-entry "kept entry"
 assert_rc 1 "$COMPACT_RC" "self-validation failure aborts"
 assert_contains "$COMPACT_OUT" "failed check-context-log-rollover.sh" "self-validation message"
 [[ "$(cksum "$d/log.md")" == "$before" ]] || fail "selfval: live log must be unchanged on abort"
@@ -217,7 +217,7 @@ d="$tmp_root/second"
 mkdir -p "$d/archive"
 make_log "$d/log.md"
 run_compact "$d/log.md" --keep 2 --archive "$d/archive/context-log-2026.md" \
-  --manifest "$d/archive/manifest.md" --rollover-id 2026-05-31-1
+  --manifest "$d/archive/manifest.md" --rollover-id 2026-05-31-1 --require-top-entry "rollover session"
 assert_rc 0 "$COMPACT_RC" "second: first rollover"
 # Simulate fresh work: prepend two newer entries to the live log's Entries.
 awk '
@@ -258,7 +258,7 @@ d="$tmp_root/custom"
 mkdir -p "$d/archive"
 make_log "$d/log.md"
 run_compact "$d/log.md" --keep 2 --archive "$d/archive/context-log-2026.md" \
-  --manifest "$d/archive/manifest.md" --rollover-id rid-9 \
+  --manifest "$d/archive/manifest.md" --rollover-id rid-9 --require-top-entry "rollover session" \
   --boundary "through the codex work window" --anchors "older work; initial project setup"
 assert_rc 0 "$COMPACT_RC" "custom fields"
 "$checker" "$d/log.md" --archive "$d/archive/context-log-2026.md" \
@@ -267,16 +267,107 @@ pass=$((pass + 1))
 assert_file_contains "$d/archive/manifest.md" "- boundary: through the codex work window" "custom boundary"
 assert_file_contains "$d/log.md" "boundary: through the codex work window" "custom boundary in pointer"
 
-# --- 10. Default field derivation still passes the checker -----------------
+# --- 10. Default fields + --allow-missing-top-entry escape hatch ----------
 d="$tmp_root/defaults"
 mkdir -p "$d/archive"
 make_log "$d/log.md"
 run_compact "$d/log.md" --keep 2 --archive "$d/archive/context-log-2026.md" \
-  --manifest "$d/archive/manifest.md"
-assert_rc 0 "$COMPACT_RC" "default derivation"
+  --manifest "$d/archive/manifest.md" --allow-missing-top-entry
+assert_rc 0 "$COMPACT_RC" "default derivation + escape hatch"
 "$checker" "$d/log.md" --archive "$d/archive/context-log-2026.md" \
   --manifest "$d/archive/manifest.md" >/dev/null || fail "defaults: checker rejected result"
 pass=$((pass + 1))
+
+# --- 10b. The gate is mandatory: a real rollover without either gate flag
+# aborts with zero writes (Codex finding 1). ------------------------------
+d="$tmp_root/gate-default"
+mkdir -p "$d/archive"
+make_log "$d/log.md"
+before="$(cksum "$d/log.md")"
+run_compact "$d/log.md" --keep 2 --archive "$d/archive/context-log-2026.md" \
+  --manifest "$d/archive/manifest.md" --rollover-id x
+assert_rc 1 "$COMPACT_RC" "rollover without a gate flag aborts"
+assert_contains "$COMPACT_OUT" "refusing to roll over without asserting" "default-gate message"
+[[ "$(cksum "$d/log.md")" == "$before" ]] || fail "default-gate: live log must be unchanged"
+pass=$((pass + 1))
+assert_not_exists "$d/archive/context-log-2026.md" "default-gate: no archive written"
+assert_not_exists "$d/archive/manifest.md" "default-gate: no manifest written"
+
+# --- 10c. Output path collisions are rejected before any write (Codex finding 2).
+d="$tmp_root/collide"
+mkdir -p "$d/archive"
+make_log "$d/log.md"
+before="$(cksum "$d/log.md")"
+# archive == manifest
+run_compact "$d/log.md" --keep 2 --archive "$d/archive/same.md" \
+  --manifest "$d/archive/same.md" --require-top-entry "rollover session"
+assert_rc 2 "$COMPACT_RC" "archive==manifest rejected"
+assert_contains "$COMPACT_OUT" "--archive and --manifest must differ" "archive==manifest message"
+# manifest == live log
+run_compact "$d/log.md" --keep 2 --archive "$d/archive/a.md" \
+  --manifest "$d/log.md" --require-top-entry "rollover session"
+assert_rc 2 "$COMPACT_RC" "manifest==log rejected"
+# archive == live log (spelled via ./)
+run_compact "$d/log.md" --keep 2 --archive "$d/log.md" \
+  --manifest "$d/archive/m.md" --require-top-entry "rollover session"
+assert_rc 2 "$COMPACT_RC" "archive==log rejected"
+[[ "$(cksum "$d/log.md")" == "$before" ]] || fail "collide: live log must be unchanged"
+pass=$((pass + 1))
+assert_not_exists "$d/archive/same.md" "collide: no colliding file written"
+assert_not_exists "$d/archive/a.md" "collide: no archive written on collision"
+
+# --- 10d. Default rollover_id uses max same-day suffix + 1, never a gap re-use
+# (Codex/Composer): a manifest with -1 and -3 yields -4, not a duplicate -3.
+d="$tmp_root/seq"
+mkdir -p "$d/archive"
+make_log "$d/log.md"
+today="$(date +%Y-%m-%d)"
+cat >"$d/archive/manifest.md" <<EOF
+# Context Log Rollover Manifest
+
+## rollover: ${today}-3
+- archive_file: $d/archive/context-log-2026.md
+- boundary: through old
+- newest_archived: 2026-05-20 09:00 local - x - a
+- oldest_archived: 2026-05-19 09:00 local - x - b
+- kept: 1
+- archived: 1
+- anchors: a; b
+
+## rollover: ${today}-1
+- archive_file: $d/archive/context-log-2026.md
+- boundary: through older
+- newest_archived: 2026-05-18 09:00 local - x - c
+- oldest_archived: 2026-05-17 09:00 local - x - d
+- kept: 1
+- archived: 1
+- anchors: c; d
+EOF
+run_compact "$d/log.md" --keep 2 --archive "$d/archive/context-log-2026.md" \
+  --manifest "$d/archive/manifest.md" --require-top-entry "rollover session"
+assert_rc 0 "$COMPACT_RC" "seq: rollover with gapped same-day ids"
+assert_file_contains "$d/archive/manifest.md" "## rollover: ${today}-4" "seq: next id is max+1, not a re-used gap"
+# Exactly one record carries the new id (no duplicate).
+[[ "$(grep -c "^## rollover: ${today}-4\$" "$d/archive/manifest.md")" -eq 1 ]] ||
+  fail "seq: the new id must be unique"
+pass=$((pass + 1))
+
+# --- 10e. The live rollover pointer is replaced, not duplicated, on re-run.
+d="$tmp_root/idem"
+mkdir -p "$d/archive"
+make_log "$d/log.md"
+run_compact "$d/log.md" --keep 2 --archive "$d/archive/context-log-2026.md" \
+  --manifest "$d/archive/manifest.md" --rollover-id 2026-05-31-1 --require-top-entry "rollover session"
+# Add fresh newest work, then roll over again with a new id.
+awk '/^## Entries[[:space:]]*$/ && !d { print; print ""; print "### 2026-06-03 09:00 local - claude - second rollover session"; print "- Work."; d = 1; next } { print }' \
+  "$d/log.md" >"$d/log.next" && mv "$d/log.next" "$d/log.md"
+run_compact "$d/log.md" --keep 1 --archive "$d/archive/context-log-2026.md" \
+  --manifest "$d/archive/manifest.md" --rollover-id 2026-06-03-1 --require-top-entry "second rollover session"
+assert_rc 0 "$COMPACT_RC" "idem: second rollover"
+ptr_count="$(grep -c "Context-log rollover:" "$d/log.md")"
+[[ "$ptr_count" -eq 1 ]] || fail "idem: live log must have exactly one rollover pointer, found $ptr_count"
+pass=$((pass + 1))
+assert_file_contains "$d/log.md" "Context-log rollover: \`2026-06-03-1\`" "idem: pointer updated to newest id"
 
 # --- 11. Usage / IO errors ------------------------------------------------
 run_compact "$tmp_root/nope.md" --keep 2 --archive a --manifest m
