@@ -63,9 +63,14 @@ Design choices that matter:
   over its per-file budget when shrinking it further would mean deleting a live
   invariant. Record it in an exceptions file (one `path<TAB>reason` line per
   entry); the report prints the reason and the file is not a strict violation.
-  An excepted file still counts toward the `@`-chain total (it still loads into
-  context), so an intentional chain-total overage is documented separately with
-  the reserved path `@chain` (or `chain_exception` in the config).
+  The `@`-chain total is checked **net of** these per-file exceptions: an
+  excepted file still loads into context, but it is subtracted from the chain
+  total, so an approved oversized file does not consume the chain budget while
+  the chain budget keeps governing all non-excepted always-on content. (The
+  legacy reserved `@chain` path / `chain_exception=` config is still parsed but
+  **deprecated** — it was unbounded and no longer suppresses chain overage;
+  express an approved residual via per-file exceptions or a configured
+  `chain_budget`.)
 
 ## Budgets and per-repo configuration
 
@@ -97,10 +102,9 @@ chain_budget=120000
 # protocol_read=agent-vault/context-log.md agent-vault/plan.md
 # Pin the AGENTS.md set (the default discovers every AGENTS.md):
 # agents=discover
-# Point at a path<TAB>reason file of per-file documented overages (create it first):
+# Point at a path<TAB>reason file of per-file documented overages (create it first;
+# excepted files are subtracted from the @-chain total):
 # exceptions=agent-vault/memory-budget.exceptions.tsv
-# Document an intentional always-on @-chain total overage:
-# chain_exception=intentional total overage during migration
 ```
 
 ## `check-context-log-rollover.sh`

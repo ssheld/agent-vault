@@ -28,10 +28,12 @@ set -euo pipefail
 # tolerant of missing files (reported, never fatal). By default it REPORTS and
 # WARNS but exits 0 so it never blocks unrelated commits on a mature repo; pass
 # --strict to fail on a non-excepted over-budget file or bucket. An exceptions
-# file (path<TAB>reason) documents intentional per-file overages; the reserved
-# path "@chain" documents an intentional always-on @-chain total overage (an
-# excepted per-file overage still counts toward the chain total because the file
-# still loads).
+# file (path<TAB>reason) documents intentional per-file overages. The @-chain
+# budget is checked NET of those per-file exceptions, so an approved oversized
+# file does not consume the chain budget while the chain budget keeps governing
+# all non-excepted always-on content. (The legacy reserved "@chain" exception /
+# chain_exception= config is still parsed but DEPRECATED: it no longer
+# suppresses chain overage, because it was unbounded.)
 
 usage() {
   cat <<EOF
@@ -49,7 +51,8 @@ Options:
   --agents "<list>"        Space-separated AGENTS.md files, or "discover" to find
                            every AGENTS.md in the repo (default: discover).
   --exceptions <file>      File of "path<TAB>reason" lines documenting allowed
-                           overages. Use path "@chain" for an @-chain total.
+                           per-file overages (subtracted from the @-chain total).
+                           The reserved "@chain" path is deprecated and ignored.
   --strict                 Exit 1 when a non-excepted file or bucket is over budget.
   --format text|tsv        Output format (default: text).
   -h, --help               Show this help.
@@ -339,6 +342,11 @@ fi
 
 violations=0
 declare -A COUNTED_OVER=()
+# Per-bucket sum of bytes of files that are a documented per-file exception AND
+# over the per-file budget. The @-chain budget is checked NET of these, so an
+# approved oversized file does not consume the chain budget while the chain
+# budget keeps applying to all non-excepted always-on content.
+declare -A BUCKET_EXCEPTED=()
 
 byte_count() {
   wc -c <"$1" | tr -d '[:space:]'
@@ -379,6 +387,7 @@ measure_bucket() {
       if [[ -n "${EXCEPTION_REASON[$rel]:-}" ]]; then
         status="EXCEPT"
         note="over file budget; documented: ${EXCEPTION_REASON[$rel]}"
+        BUCKET_EXCEPTED["$bucket"]=$((${BUCKET_EXCEPTED[$bucket]:-0} + bytes))
       else
         status="OVER"
         note="over file budget ($file_budget bytes)"
@@ -436,26 +445,49 @@ if [[ "$format" == "text" ]]; then
 fi
 measure_bucket "protocol" protocol_total "${protocol_read_files[@]}"
 
-chain_over="false"
-[[ "$claude_total" -gt "$chain_budget" || "$gemini_total" -gt "$chain_budget" ]] && chain_over="true"
+# The @-chain budget is checked NET of documented per-file exceptions: an
+# approved oversized file (an EXCEPT above) is subtracted from its chain total,
+# so the chain budget keeps governing all non-excepted always-on content and a
+# new non-excepted import still fails strict mode.
+claude_excepted="${BUCKET_EXCEPTED[claude]:-0}"
+gemini_excepted="${BUCKET_EXCEPTED[gemini]:-0}"
+claude_net=$((claude_total - claude_excepted))
+gemini_net=$((gemini_total - gemini_excepted))
+
 claude_status="ok"
 gemini_status="ok"
-if [[ "$chain_over" == "true" ]]; then
-  if [[ -n "$chain_exception_reason" ]]; then
-    [[ "$claude_total" -gt "$chain_budget" ]] && claude_status="EXCEPT"
-    [[ "$gemini_total" -gt "$chain_budget" ]] && gemini_status="EXCEPT"
-  else
-    [[ "$claude_total" -gt "$chain_budget" ]] && claude_status="OVER"
-    [[ "$gemini_total" -gt "$chain_budget" ]] && gemini_status="OVER"
-    violations=$((violations + 1))
-  fi
-fi
+chain_over="false"
+[[ "$claude_net" -gt "$chain_budget" ]] && {
+  claude_status="OVER"
+  chain_over="true"
+}
+[[ "$gemini_net" -gt "$chain_budget" ]] && {
+  gemini_status="OVER"
+  chain_over="true"
+}
+[[ "$chain_over" == "true" ]] && violations=$((violations + 1))
+
+# Legacy @chain exception / chain_exception= config is still parsed for backward
+# compatibility (no error) but no longer suppresses chain overage -- the blanket
+# @chain exception was unbounded. Express an approved residual via per-file
+# exceptions (subtracted from the net above) or a configured chain_budget.
+chain_deprecation_note=""
+[[ -n "$chain_exception_reason" ]] && chain_deprecation_note="deprecated: @chain / chain_exception no longer suppresses chain overage; use per-file exceptions"
+
+build_chain_note() {
+  local exc_bytes="$1" net_bytes="$2" note_text=""
+  [[ "$exc_bytes" -gt 0 ]] && note_text="net ${net_bytes} B after ${exc_bytes} B excepted, vs ${chain_budget} budget"
+  [[ -n "$chain_deprecation_note" ]] && note_text="${note_text:+$note_text; }$chain_deprecation_note"
+  printf '%s' "$note_text"
+}
+claude_note="$(build_chain_note "$claude_excepted" "$claude_net")"
+gemini_note="$(build_chain_note "$gemini_excepted" "$gemini_net")"
 
 agents_status="info"
 
 if [[ "$format" == "tsv" ]]; then
-  printf 'TOTAL\tclaude_chain\t%s\t%s\t%s\n' "$claude_status" "$claude_total" "$chain_exception_reason"
-  printf 'TOTAL\tgemini_chain\t%s\t%s\t%s\n' "$gemini_status" "$gemini_total" "$chain_exception_reason"
+  printf 'TOTAL\tclaude_chain\t%s\t%s\t%s\n' "$claude_status" "$claude_total" "$claude_note"
+  printf 'TOTAL\tgemini_chain\t%s\t%s\t%s\n' "$gemini_status" "$gemini_total" "$gemini_note"
   printf 'TOTAL\tagents\t%s\t%s\t\n' "$agents_status" "$agents_total"
   printf 'TOTAL\tprotocol\tinfo\t%s\t\n' "$protocol_total"
 else
@@ -465,7 +497,8 @@ else
   printf '  %-7s %-30s %10s\n' "$gemini_status" "Gemini @-chain total" "$gemini_total"
   printf '  %-7s %-30s %10s\n' "$agents_status" "Codex AGENTS total" "$agents_total"
   printf '  %-7s %-30s %10s\n' "info" "protocol-read total" "$protocol_total"
-  [[ -n "$chain_exception_reason" && "$chain_over" == "true" ]] && echo "  @-chain overage documented: $chain_exception_reason"
+  [[ -n "$claude_note" ]] && echo "  Claude @-chain: $claude_note"
+  [[ -n "$gemini_note" ]] && echo "  Gemini @-chain: $gemini_note"
   echo
   if [[ "$violations" -eq 0 ]]; then
     echo "Within budget (no non-excepted overages)."
