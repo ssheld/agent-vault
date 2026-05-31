@@ -327,7 +327,8 @@ for required in \
   "$root_scaffold_dir/scripts/remove-worktree.sh" \
   "$root_scaffold_dir/scripts/check-memory-budget.sh" \
   "$root_scaffold_dir/scripts/check-context-log-rollover.sh" \
-  "$root_scaffold_dir/scripts/compact-context-log.sh"; do
+  "$root_scaffold_dir/scripts/compact-context-log.sh" \
+  "$root_scaffold_dir/scripts/check-lessons-archive.sh"; do
   if [[ ! -f "$required" ]]; then
     echo "Error: missing root scaffold file: $required"
     exit 1
@@ -480,6 +481,7 @@ seed_root_executable_file_if_missing "$root_scaffold_dir/scripts/remove-worktree
 seed_root_executable_file_if_missing "$root_scaffold_dir/scripts/check-memory-budget.sh" "$canonical_repo_path/scripts/check-memory-budget.sh"
 seed_root_executable_file_if_missing "$root_scaffold_dir/scripts/check-context-log-rollover.sh" "$canonical_repo_path/scripts/check-context-log-rollover.sh"
 seed_root_executable_file_if_missing "$root_scaffold_dir/scripts/compact-context-log.sh" "$canonical_repo_path/scripts/compact-context-log.sh"
+seed_root_executable_file_if_missing "$root_scaffold_dir/scripts/check-lessons-archive.sh" "$canonical_repo_path/scripts/check-lessons-archive.sh"
 
 ensure_managed_gitignore_entries "$canonical_repo_path"
 hook_rc=0
