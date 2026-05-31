@@ -39,16 +39,18 @@ Section headings are matched exactly (a distinct heading such as
 are tolerated. Entry heading styles inside "## Entries" are not constrained.
 
 The rollover manifest (parsed source of truth) holds one record per rollover,
-newest first:
+newest first. All fields are required; the *_archived headings are the entry
+heading text with the leading "#"s removed, and the archive is newest-at-top so
+a same-minute tie resolves to the top-most (newest) / bottom-most (oldest) entry:
 
   ## rollover: <id>
   - archive_file: agent-vault/context/archive/context-log-YYYY.md
   - boundary: <topic / recent-window boundary text>
-  - newest_archived: <full entry heading of the newest archived entry>
-  - oldest_archived: <full entry heading of the oldest archived entry>
+  - newest_archived: <newest archived entry heading, no leading "#">
+  - oldest_archived: <oldest archived entry heading, no leading "#">
   - kept: <N>
   - archived: <M>
-  - anchors: <anchor>; <anchor>
+  - anchors: <anchor>; <anchor>   (each must appear in the archive)
 
 The live pointer carries the stable link back to that record:
 
@@ -304,17 +306,21 @@ verify_archive_boundaries() {
       if (line !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/) next
       ts = entry_ts(line)
       n++
+      # The newest entry is the top-most at the max timestamp and the oldest is
+      # the bottom-most at the min timestamp (archives are newest-at-top). Ties
+      # on a shared minute are broken by position, so max_h/min_h name one
+      # specific heading and a same-minute mismatch is still caught.
       if (n == 1 || ts > max_ts) { max_ts = ts; max_h = line }
-      if (n == 1 || ts < min_ts) { min_ts = ts; min_h = line }
-      if (line == newest) { newest_found = 1; newest_ts = ts }
-      if (line == oldest) { oldest_found = 1; oldest_ts = ts }
+      if (n == 1 || ts <= min_ts) { min_ts = ts; min_h = line }
+      if (line == newest) newest_found = 1
+      if (line == oldest) oldest_found = 1
     }
     END {
       printf "count\t%d\n", n + 0
       printf "max\t%s\t%s\n", max_ts, max_h
       printf "min\t%s\t%s\n", min_ts, min_h
-      printf "newest_found\t%d\t%s\n", newest_found + 0, newest_ts
-      printf "oldest_found\t%d\t%s\n", oldest_found + 0, oldest_ts
+      printf "newest_found\t%d\n", newest_found + 0
+      printf "oldest_found\t%d\n", oldest_found + 0
     }
   ' "$3"
 }
@@ -391,8 +397,13 @@ if [[ -n "$manifest_file" ]]; then
       findings+=("live log declares a rollover pointer but the manifest has no records: $manifest_file")
     fi
   else
-    for required in id archive_file boundary newest_archived oldest_archived; do
+    for required in id archive_file boundary newest_archived oldest_archived kept archived anchors; do
       [[ -n "${manifest[$required]:-}" ]] || findings+=("manifest record is missing required field: $required")
+    done
+    for numeric in kept archived; do
+      value="${manifest[$numeric]:-}"
+      [[ -z "$value" || "$value" =~ ^[0-9]+$ ]] ||
+        findings+=("manifest field $numeric must be a non-negative integer, got: \"$value\"")
     done
 
     # Pointer <-> manifest consistency.
@@ -433,37 +444,28 @@ if [[ -n "$manifest_file" ]]; then
       declare -A boundary=()
       while IFS=$'\t' read -r tag col_a col_b; do
         case "$tag" in
-          newest_found)
-            boundary[nf]="$col_a"
-            boundary[nts]="$col_b"
-            ;;
-          oldest_found)
-            boundary[of]="$col_a"
-            boundary[ots]="$col_b"
-            ;;
-          max)
-            boundary[max]="$col_a"
-            boundary[maxh]="$col_b"
-            ;;
-          min)
-            boundary[min]="$col_a"
-            boundary[minh]="$col_b"
-            ;;
+          newest_found) boundary[nf]="$col_a" ;;
+          oldest_found) boundary[of]="$col_a" ;;
+          max) boundary[maxh]="$col_b" ;;
+          min) boundary[minh]="$col_b" ;;
         esac
       done < <(verify_archive_boundaries "${manifest[newest_archived]:-}" "${manifest[oldest_archived]:-}" "$resolved_archive")
 
+      # Require an exact heading match against the entry the checker independently
+      # selects as newest/oldest (max/min timestamp, ties broken by position), so
+      # naming a wrong same-minute heading is caught, not just an older timestamp.
       if [[ -n "${manifest[newest_archived]:-}" ]]; then
         if [[ "${boundary[nf]:-0}" != "1" ]]; then
           findings+=("manifest newest_archived heading not found in the archive: \"${manifest[newest_archived]}\"")
-        elif [[ -n "${boundary[max]:-}" && "${boundary[nts]:-}" < "${boundary[max]}" ]]; then
-          findings+=("manifest newest_archived is not the newest entry in the archive -- a newer entry is present: \"${boundary[maxh]}\"")
+        elif [[ "${manifest[newest_archived]}" != "${boundary[maxh]:-}" ]]; then
+          findings+=("manifest newest_archived is not the archive's newest entry -- the newest archived entry is: \"${boundary[maxh]}\"")
         fi
       fi
       if [[ -n "${manifest[oldest_archived]:-}" ]]; then
         if [[ "${boundary[of]:-0}" != "1" ]]; then
           findings+=("manifest oldest_archived heading not found in the archive: \"${manifest[oldest_archived]}\"")
-        elif [[ -n "${boundary[min]:-}" && "${boundary[ots]:-}" > "${boundary[min]}" ]]; then
-          findings+=("manifest oldest_archived is not the oldest entry in the archive -- an older entry is present: \"${boundary[minh]}\"")
+        elif [[ "${manifest[oldest_archived]}" != "${boundary[minh]:-}" ]]; then
+          findings+=("manifest oldest_archived is not the archive's oldest entry -- the oldest archived entry is: \"${boundary[minh]}\"")
         fi
       fi
 

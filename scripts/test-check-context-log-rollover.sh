@@ -547,10 +547,63 @@ cat >"$tmp_root/manifest-stale-newest.md" <<'EOF'
 - boundary: through PR-A net-of-excepted (recent-window top before rollover)
 - newest_archived: 2026-03-15 09:00 local - codex - mid-window work
 - oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
-- anchors: net-of-excepted
+- kept: 5
+- archived: 3
+- anchors: net-of-excepted; initial project setup
 EOF
-expect_result 1 "is not the newest entry in the archive" \
+expect_result 1 "is not the archive's newest entry" \
   "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-stale-newest.md"
+
+# Two archived entries share a minute; newest_archived names the lower/stale one.
+# Same timestamp as the actual newest, so a timestamp-only check would miss it --
+# the full-heading comparison must still catch it (the same-minute ambiguity this
+# slice exists to close).
+cat >"$tmp_root/context-log-tie.md" <<'EOF'
+# Context Log Archive (2026)
+
+## Current Snapshot — SUPERSEDED (archived 2026-05-30)
+- Active branch: `old-branch`
+
+### 2026-05-29 17:00 local - claude - newer same-minute entry
+- Body.
+
+### 2026-05-29 17:00 local - claude - older same-minute entry
+- Body.
+
+### 2026-01-04 09:00 local - bootstrap - initial project setup
+- Body.
+EOF
+cat >"$tmp_root/manifest-tie-stale.md" <<'EOF'
+# Context Log Rollover Manifest
+
+## rollover: 2026-05-29-1
+- archive_file: agent-vault/context/archive/context-log-tie.md
+- boundary: through PR-A net-of-excepted (recent-window top before rollover)
+- newest_archived: 2026-05-29 17:00 local - claude - older same-minute entry
+- oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+- kept: 5
+- archived: 3
+- anchors: same-minute entry; initial project setup
+EOF
+expect_result 1 "is not the archive's newest entry" \
+  "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-tie.md" --manifest "$tmp_root/manifest-tie-stale.md"
+
+# Same tie archive, but newest_archived names the top-most (newest) same-minute
+# heading -- this is the correct boundary and passes.
+cat >"$tmp_root/manifest-tie-good.md" <<'EOF'
+# Context Log Rollover Manifest
+
+## rollover: 2026-05-29-1
+- archive_file: agent-vault/context/archive/context-log-tie.md
+- boundary: through PR-A net-of-excepted (recent-window top before rollover)
+- newest_archived: 2026-05-29 17:00 local - claude - newer same-minute entry
+- oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+- kept: 5
+- archived: 3
+- anchors: same-minute entry; initial project setup
+EOF
+expect_result 0 "passed" \
+  "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-tie.md" --manifest "$tmp_root/manifest-tie-good.md"
 
 # newest_archived names a heading absent from the archive.
 cat >"$tmp_root/manifest-missing-newest.md" <<'EOF'
@@ -561,6 +614,9 @@ cat >"$tmp_root/manifest-missing-newest.md" <<'EOF'
 - boundary: through PR-A net-of-excepted (recent-window top before rollover)
 - newest_archived: 2026-05-29 17:00 local - claude - a heading that was never archived
 - oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+- kept: 5
+- archived: 3
+- anchors: net-of-excepted; initial project setup
 EOF
 expect_result 1 "newest_archived heading not found in the archive" \
   "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-missing-newest.md"
@@ -574,6 +630,9 @@ cat >"$tmp_root/manifest-missing-oldest.md" <<'EOF'
 - boundary: through PR-A net-of-excepted (recent-window top before rollover)
 - newest_archived: 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
 - oldest_archived: 2025-01-01 00:00 local - nobody - never archived
+- kept: 5
+- archived: 3
+- anchors: net-of-excepted; initial project setup
 EOF
 expect_result 1 "oldest_archived heading not found in the archive" \
   "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-missing-oldest.md"
@@ -587,12 +646,14 @@ cat >"$tmp_root/manifest-bad-anchor.md" <<'EOF'
 - boundary: through PR-A net-of-excepted (recent-window top before rollover)
 - newest_archived: 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
 - oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+- kept: 5
+- archived: 3
 - anchors: net-of-excepted; this-anchor-string-is-nowhere-in-the-archive
 EOF
 expect_result 1 "anchor not found in the archive" \
   "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-bad-anchor.md"
 
-# A required manifest field is missing.
+# A required schema field is missing (boundary), with the rest of the record valid.
 cat >"$tmp_root/manifest-missing-field.md" <<'EOF'
 # Context Log Rollover Manifest
 
@@ -600,9 +661,56 @@ cat >"$tmp_root/manifest-missing-field.md" <<'EOF'
 - archive_file: agent-vault/context/archive/context-log-2026.md
 - newest_archived: 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
 - oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+- kept: 5
+- archived: 3
+- anchors: net-of-excepted; initial project setup
 EOF
 expect_result 1 "missing required field: boundary" \
   "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-missing-field.md"
+
+# The pinned schema is enforced: omitting kept / archived / anchors fails, and a
+# non-numeric count fails.
+cat >"$tmp_root/manifest-no-counts.md" <<'EOF'
+# Context Log Rollover Manifest
+
+## rollover: 2026-05-29-1
+- archive_file: agent-vault/context/archive/context-log-2026.md
+- boundary: through PR-A net-of-excepted (recent-window top before rollover)
+- newest_archived: 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
+- oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+- anchors: net-of-excepted; initial project setup
+EOF
+expect_result 1 "missing required field: kept" \
+  "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-no-counts.md"
+
+cat >"$tmp_root/manifest-no-anchors.md" <<'EOF'
+# Context Log Rollover Manifest
+
+## rollover: 2026-05-29-1
+- archive_file: agent-vault/context/archive/context-log-2026.md
+- boundary: through PR-A net-of-excepted (recent-window top before rollover)
+- newest_archived: 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
+- oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+- kept: 5
+- archived: 3
+EOF
+expect_result 1 "missing required field: anchors" \
+  "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-no-anchors.md"
+
+cat >"$tmp_root/manifest-bad-count.md" <<'EOF'
+# Context Log Rollover Manifest
+
+## rollover: 2026-05-29-1
+- archive_file: agent-vault/context/archive/context-log-2026.md
+- boundary: through PR-A net-of-excepted (recent-window top before rollover)
+- newest_archived: 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
+- oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+- kept: five
+- archived: 3
+- anchors: net-of-excepted; initial project setup
+EOF
+expect_result 1 "kept must be a non-negative integer" \
+  "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-bad-count.md"
 
 # An orphaned top-level "Next Prompt" survives in the archive.
 cat >"$tmp_root/context-log-orphan.md" <<'EOF'
@@ -628,6 +736,9 @@ cat >"$tmp_root/manifest-orphan.md" <<'EOF'
 - boundary: through PR-A net-of-excepted (recent-window top before rollover)
 - newest_archived: 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
 - oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+- kept: 5
+- archived: 3
+- anchors: net-of-excepted; initial project setup
 EOF
 expect_result 1 'orphaned top-level "Next Prompt"' \
   "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-orphan.md" --manifest "$tmp_root/manifest-orphan.md"
@@ -641,6 +752,9 @@ cat >"$tmp_root/manifest-altarchive.md" <<'EOF'
 - boundary: through PR-A net-of-excepted (recent-window top before rollover)
 - newest_archived: 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
 - oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+- kept: 5
+- archived: 3
+- anchors: net-of-excepted; initial project setup
 EOF
 expect_result 1 "does not match --archive" \
   "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-altarchive.md"
@@ -654,6 +768,9 @@ cat >"$tmp_root/manifest-lonely.md" <<'EOF'
 - boundary: through PR-A net-of-excepted (recent-window top before rollover)
 - newest_archived: 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
 - oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+- kept: 5
+- archived: 3
+- anchors: net-of-excepted; initial project setup
 EOF
 expect_result 1 "was not found next to the manifest" \
   "$tmp_root/good-rollover-live.md" --manifest "$tmp_root/manifest-lonely.md"
