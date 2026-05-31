@@ -131,12 +131,16 @@ assert_executable "$target/scripts/check-memory-budget.sh" "new-project makes me
 assert_executable "$target/scripts/check-context-log-rollover.sh" "new-project makes rollover checker executable"
 assert_file_contains "$target/scripts/check-memory-budget.sh" "# agent-vault-managed: helper-script; file=check-memory-budget.sh" "new-project seeds memory-budget checker marker"
 assert_file_contains "$target/scripts/check-context-log-rollover.sh" "# agent-vault-managed: helper-script; file=check-context-log-rollover.sh" "new-project seeds rollover checker marker"
+assert_path_exists "$target/scripts/compact-context-log.sh" "new-project creates rollover compactor"
+assert_executable "$target/scripts/compact-context-log.sh" "new-project makes rollover compactor executable"
+assert_file_contains "$target/scripts/compact-context-log.sh" "# agent-vault-managed: helper-script; file=compact-context-log.sh" "new-project seeds rollover compactor marker"
 
 # --- Test 2: update-project creates missing helpers in existing vaults ---
 target="$(setup_empty_repo update-missing-target)"
 run_new_project "$target" >/dev/null
 rm "$target/scripts/new-worktree.sh" "$target/scripts/remove-worktree.sh" \
-  "$target/scripts/check-memory-budget.sh" "$target/scripts/check-context-log-rollover.sh"
+  "$target/scripts/check-memory-budget.sh" "$target/scripts/check-context-log-rollover.sh" \
+  "$target/scripts/compact-context-log.sh"
 rc=0
 output="$(run_update_project "$target" 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "update-project missing-helper exits 0"
@@ -148,8 +152,10 @@ assert_file_contains "$target/scripts/new-worktree.sh" 'DEFAULT_ROOT="${PROJECT_
 assert_file_contains "$target/scripts/remove-worktree.sh" "Use only after verifying the PR is merged" "update-project creates remove helper with guarded guidance"
 assert_output_contains "$output" "Created: scripts/check-memory-budget.sh" "update-project reports memory-budget checker creation"
 assert_output_contains "$output" "Created: scripts/check-context-log-rollover.sh" "update-project reports rollover checker creation"
+assert_output_contains "$output" "Created: scripts/compact-context-log.sh" "update-project reports rollover compactor creation"
 assert_executable "$target/scripts/check-memory-budget.sh" "update-project restores memory-budget checker executable"
 assert_executable "$target/scripts/check-context-log-rollover.sh" "update-project restores rollover checker executable"
+assert_executable "$target/scripts/compact-context-log.sh" "update-project restores rollover compactor executable"
 
 # --- Test 3: update-project skips unmanaged helper scripts by default ---
 target="$(setup_empty_repo unmanaged-skip-target)"
@@ -205,10 +211,16 @@ run_new_project "$target" >/dev/null
   printf '%s\n' '# agent-vault-managed: helper-script; file=check-context-log-rollover.sh'
   printf '%s\n' 'echo stale managed rollover checker'
 } >"$target/scripts/check-context-log-rollover.sh"
+{
+  printf '%s\n' '#!/usr/bin/env bash'
+  printf '%s\n' '# agent-vault-managed: helper-script; file=compact-context-log.sh'
+  printf '%s\n' 'echo stale managed rollover compactor'
+} >"$target/scripts/compact-context-log.sh"
 chmod -x "$target/scripts/new-worktree.sh"
 chmod -x "$target/scripts/remove-worktree.sh"
 chmod -x "$target/scripts/check-memory-budget.sh"
 chmod -x "$target/scripts/check-context-log-rollover.sh"
+chmod -x "$target/scripts/compact-context-log.sh"
 rc=0
 output="$(run_update_project "$target" 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "update-project managed-refresh exits 0"
@@ -216,15 +228,18 @@ assert_output_contains "$output" "Updated: scripts/new-worktree.sh" "update-proj
 assert_output_contains "$output" "Updated: scripts/remove-worktree.sh" "update-project reports managed remove helper update"
 assert_output_contains "$output" "Updated: scripts/check-memory-budget.sh" "update-project reports memory-budget checker update"
 assert_output_contains "$output" "Updated: scripts/check-context-log-rollover.sh" "update-project reports rollover checker update"
+assert_output_contains "$output" "Updated: scripts/compact-context-log.sh" "update-project reports rollover compactor update"
 assert_file_contains "$target/scripts/new-worktree.sh" "Create or reuse one issue-scoped worktree" "update-project refreshes managed helper content"
 assert_file_contains "$target/scripts/new-worktree.sh" 'DEFAULT_ROOT="${PROJECT_DIR}/.worktrees"' "update-project refreshes new helper default"
 assert_file_contains "$target/scripts/remove-worktree.sh" "Use only after verifying the PR is merged" "update-project refreshes remove helper guidance"
 assert_file_contains "$target/scripts/check-memory-budget.sh" "Keys: file_budget, chain_budget" "update-project refreshes stale memory-budget checker content"
 assert_file_contains "$target/scripts/check-context-log-rollover.sh" "stale duplicate \"## Current Snapshot\"" "update-project refreshes stale rollover checker content"
+assert_file_contains "$target/scripts/compact-context-log.sh" "Keeps the Current Snapshot plus the newest" "update-project refreshes stale rollover compactor content"
 assert_executable "$target/scripts/new-worktree.sh" "update-project fixes managed helper executable bit"
 assert_executable "$target/scripts/remove-worktree.sh" "update-project fixes managed remove helper executable bit"
 assert_executable "$target/scripts/check-memory-budget.sh" "update-project fixes memory-budget checker executable bit"
 assert_executable "$target/scripts/check-context-log-rollover.sh" "update-project fixes rollover checker executable bit"
+assert_executable "$target/scripts/compact-context-log.sh" "update-project fixes rollover compactor executable bit"
 
 # --- Test 6: runbook is seed-only after creation ---
 target="$(setup_empty_repo runbook-seed-target)"
