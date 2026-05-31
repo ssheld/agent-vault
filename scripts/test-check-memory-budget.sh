@@ -150,21 +150,43 @@ expect_result 1 "1 non-excepted overage" --repo "$project" --strict
 printf 'agent-vault/project-context.md\tdocumented per-file overage\n' >"$tmp_root/exc-file.tsv"
 expect_result 0 "Within budget" --repo "$project" --strict --exceptions "$tmp_root/exc-file.tsv"
 
-# A chain-only overage (no per-file overage) is a strict violation; an @chain
-# exception clears it, but a per-file exception does not.
+# A chain overage is a strict violation. The @-chain budget is checked NET of
+# per-file exceptions (Option 2), and the legacy @chain exception is DEPRECATED:
+# parsed for backward compatibility but no longer suppressing.
 printf '@chain\tintentional total during a migration\n' >"$tmp_root/exc-chain.tsv"
 expect_result 1 "@-chain total" --repo "$project" --chain-budget 1000 --file-budget 200000 --strict
-expect_result 0 "Within budget" --repo "$project" --chain-budget 1000 --file-budget 200000 --strict --exceptions "$tmp_root/exc-chain.tsv"
+# A legacy @chain exception no longer clears a chain overage (it was unbounded);
+# it reports a deprecation note and still fails strict mode.
+expect_result 1 "deprecated" --repo "$project" --chain-budget 1000 --file-budget 200000 --strict --exceptions "$tmp_root/exc-chain.tsv"
+# A per-file exception for a file that is NOT over the per-file budget is not
+# subtracted, so it does not clear a chain overage either.
 expect_result 1 "@-chain total" --repo "$project" --chain-budget 1000 --file-budget 200000 --strict --exceptions "$tmp_root/exc-file.tsv"
 
-# CRLF exceptions file is tolerated (no-reason @chain line still parses).
+# Net-of-excepted: the inflated project-context.md (~46 KB, over the default
+# per-file budget) is subtracted from each chain when it is a per-file
+# exception, so a chain budget above the ~50 KB remainder passes and one below
+# it fails -- the budget still bites on the non-excepted content.
+printf 'agent-vault/project-context.md\tdocumented oversized file\n' >"$tmp_root/exc-pc.tsv"
+expect_result 0 "Within budget" --repo "$project" --chain-budget 60000 --strict --exceptions "$tmp_root/exc-pc.tsv"
+expect_result 1 "@-chain total" --repo "$project" --chain-budget 40000 --strict --exceptions "$tmp_root/exc-pc.tsv"
+# A legacy @chain row alongside the per-file exception cannot hide that growth
+# (the regression this change exists to prevent).
+printf 'agent-vault/project-context.md\tdoc\n@chain\tlegacy migration suppression\n' >"$tmp_root/exc-pc-legacy.tsv"
+expect_result 1 "deprecated" --repo "$project" --chain-budget 40000 --strict --exceptions "$tmp_root/exc-pc-legacy.tsv"
+
+# CRLF exceptions file is tolerated (parses without a config error). The
+# per-file exception still applies net-of-excepted; the no-reason @chain line
+# parses but is deprecated/non-suppressing.
 printf 'agent-vault/project-context.md\tr\r\n@chain\r\n' >"$tmp_root/exc-crlf.tsv"
-expect_result 0 "Within budget" --repo "$project" --chain-budget 1000 --strict --exceptions "$tmp_root/exc-crlf.tsv"
+expect_result 0 "Within budget" --repo "$project" --chain-budget 60000 --strict --exceptions "$tmp_root/exc-crlf.tsv"
+expect_result 1 "deprecated" --repo "$project" --chain-budget 1000 --strict --exceptions "$tmp_root/exc-crlf.tsv"
 
 # Committed config: budgets, chain_exception, and the override lists all parse.
+# chain_exception= still parses (no error) but is DEPRECATED/non-suppressing, so
+# a chain overage is not cleared by it.
 printf 'file_budget=200000\nchain_budget=1000\nchain_exception=intentional during a migration\n' \
   >"$project/agent-vault/memory-budget.config"
-expect_result 0 "Within budget" --repo "$project" --strict
+expect_result 1 "deprecated" --repo "$project" --strict
 expect_result 0 "Config:" --repo "$project"
 expect_result 1 "over file budget" --repo "$project" --file-budget 500 --strict
 printf 'agent-vault/project-context.md\tdoc\n' >"$project/agent-vault/budget.exceptions.tsv"
