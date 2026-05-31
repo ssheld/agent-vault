@@ -118,6 +118,7 @@ never edits, moves, or rewrites the log.
 ```bash
 scripts/check-context-log-rollover.sh <context-log-file>
 scripts/check-context-log-rollover.sh <context-log-file> --archive <archive-file>
+scripts/check-context-log-rollover.sh <context-log-file> --archive <archive-file> --manifest <manifest-file>
 ```
 
 Live-file checks:
@@ -137,6 +138,67 @@ labeled superseded, so it cannot read as active.
 The checker keys on the named section headings, so it tolerates mixed entry
 heading styles (`### YYYY-MM-DD ...`, compact `## YYYY-MM-DD ...`, em-dash
 variants) that a real matured log accumulates.
+
+### Layer-2 rollover assertions (`--manifest`)
+
+The structural checks above catch a botched *shape*; they cannot catch a
+rollover whose **durable description is stale**. The failure mode (seen on the
+first real downstream rollover) is *cite-then-mutate*: the archive boundary and
+kept/archived counts are finalized, then the gate-required session entry is
+added — so the live pointer cites a boundary that is no longer the newest entry
+actually moved into the archive. `--manifest` makes that mismatch mechanical by
+comparing the pointer's *claim* to the manifest, and the manifest to archive
+*reality*.
+
+A rollover **manifest** is the parsed source of truth — one record per rollover,
+newest first, at `agent-vault/context/archive/context-log-manifest.md`:
+
+```md
+## rollover: 2026-05-29-1
+- archive_file: agent-vault/context/archive/context-log-2026.md
+- boundary: through PR-A net-of-excepted (recent-window top before rollover)
+- newest_archived: 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
+- oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+- kept: 5
+- archived: 142
+- anchors: net-of-excepted; rollover policy guard
+```
+
+The live `## Current Snapshot` keeps a human-readable pointer that carries a
+stable link (`rollover_id` + the boundary text) back to that record:
+
+```md
+- Context-log rollover: `2026-05-29-1` — boundary: through PR-A net-of-excepted (recent-window top before rollover)
+```
+
+All fields are **required** (`kept` / `archived` must be non-negative integers);
+the `*_archived` values are the entry heading text with the leading `#`s
+removed. With `--manifest`, the checker parses the newest manifest record and
+asserts:
+
+- the record carries every field, so it matches the contract PR-B1 will emit
+  (a manifest missing `kept`/`archived`/`anchors` is rejected, not silently
+  accepted);
+- the live pointer references that record's id and repeats its `boundary`
+  verbatim (a stale or absent pointer is flagged);
+- `newest_archived` / `oldest_archived` **exactly match** the entry the checker
+  independently selects as newest / oldest. Entry timestamps normalize to
+  `YYYY-MM-DD HH:MM`; among entries sharing a minute the archive's newest-at-top
+  order breaks the tie (top-most is newest, bottom-most is oldest), so naming a
+  wrong same-minute heading is caught — not just an older timestamp (the
+  cite-then-mutate catch);
+- every `anchor` appears in the archive (the moved content really landed —
+  prefer distinctive anchor phrases, since the match is a literal substring);
+- no orphaned top-level `Next Prompt` heading survives in the archive (it must
+  stay nested under its archived entry, never read as an active instruction).
+
+`--manifest` is opt-in and back-compatible: without it, only the structural and
+`--archive` checks run. The archive is located from `--archive` when given, else
+resolved next to the manifest by the record's `archive_file` basename. The
+counts are validated as integers but **not** reconciled against live/archive
+entry totals — a single archive accumulates many rollovers, so `archived` is a
+per-rollover figure, not the archive's row count; count self-consistency is
+left to the PR-B1 compactor that emits them.
 
 ## Compaction conventions
 
