@@ -38,21 +38,25 @@ Validates per-lesson classifications in a lessons-archive manifest. Checks:
   - no duplicate lesson keys
   - a covered-by-a-named-always-on-rule record names a non-empty "covered_by"
     rule that still appears in a live always-on file (when one is resolved)
-  - "covered_by" is not set on a record that is not covered-by-a-named-...
+  - an optional "quick_rule" on a retained-as-quick-rule record likewise still
+    appears live (so a retained lesson whose rule was dropped is caught)
+  - "covered_by" / "quick_rule" are not set on records of the wrong class
 With --strict and --archive (completeness):
   - every archived lesson (a "###" heading in the archive) has a manifest record
   - every manifest record points at a lesson present in the archive
 
-The archive defaults to "<manifest-dir>/lessons-archive.md" and the live rules
-source to "<manifest-dir>/../../lessons.md" when present; pass --archive / --rules
-to override or add more rule sources.
+Rule liveness is a substring match, so name the rule with distinctive text. The
+archive defaults to "<manifest-dir>/lessons-archive.md"; the canonical live
+"<manifest-dir>/../../lessons.md" is always a rules source when present, and
+--rules ADDS further sources (e.g. shared-rules.md) rather than replacing it.
 
 Options:
   --archive <file>  Lessons archive to check completeness against (--strict).
-  --rules <file>    A live always-on file to resolve "covered_by" rules in
-                    (repeatable). Defaults to the project lessons.md when found.
+  --rules <file>    Additional live always-on file to resolve covered_by /
+                    quick_rule references in (repeatable; added to the default
+                    project lessons.md).
   --strict          Exit 1 on any finding and enforce archive completeness.
-  --quiet           Print only on failure.
+  --quiet           Print only on failure (suppresses warn-mode warnings).
   -h, --help        Show this help.
 EOF
 }
@@ -122,7 +126,9 @@ manifest_dir="$(cd "$(dirname "$manifest")" && pwd -P)"
 if [[ -z "$archive_file" && -f "$manifest_dir/lessons-archive.md" ]]; then
   archive_file="$manifest_dir/lessons-archive.md"
 fi
-if [[ "${#rules_files[@]}" -eq 0 && -f "$manifest_dir/../../lessons.md" ]]; then
+# The canonical live lessons.md is always a rules source when present; --rules
+# ADDS further sources (e.g. shared-rules.md) rather than replacing the default.
+if [[ -f "$manifest_dir/../../lessons.md" ]]; then
   rules_files+=("$manifest_dir/../../lessons.md")
 fi
 
@@ -185,6 +191,8 @@ declare -A KEY=()
 declare -A CLASS=()
 declare -A COVERED=()
 declare -A HAS_COVERED=()
+declare -A QUICK=()
+declare -A HAS_QUICK=()
 count=0
 while IFS=$'\t' read -r rec field value; do
   case "$rec" in
@@ -200,11 +208,16 @@ while IFS=$'\t' read -r rec field value; do
       COVERED[$rec]="$value"
       HAS_COVERED[$rec]="true"
       ;;
+    quick_rule)
+      QUICK[$rec]="$value"
+      HAS_QUICK[$rec]="true"
+      ;;
   esac
 done < <(parse_manifest "$manifest")
 
-# A covered_by value is "live" if it appears in any resolved rules file.
-covered_by_is_live() {
+# A rule reference (covered_by / quick_rule) is "live" if it appears in any
+# resolved rules file.
+rule_is_live() {
   local needle="$1" src
   for src in "${rules_files[@]:-}"; do
     [[ -n "$src" && -f "$src" ]] || continue
@@ -242,11 +255,24 @@ for ((i = 1; i <= count; i++)); do
     if [[ -z "$covered" ]]; then
       findings+=("lesson \"$key\" is covered-by-a-named-always-on-rule but names no \"covered_by\" rule")
     elif [[ "${#rules_files[@]}" -gt 0 ]]; then
-      covered_by_is_live "$covered" ||
+      rule_is_live "$covered" ||
         findings+=("lesson \"$key\" covered_by rule \"$covered\" was not found in any live rules source")
     fi
   elif [[ "${HAS_COVERED[$i]:-false}" == "true" && -n "${COVERED[$i]:-}" ]]; then
     findings+=("lesson \"$key\" sets covered_by but is not covered-by-a-named-always-on-rule")
+  fi
+
+  # retained-as-quick-rule keeps a one-line rule live in lessons.md. quick_rule is
+  # optional, but when given it is liveness-checked the same way as covered_by, so
+  # a misclassified retained lesson whose rule is gone is caught.
+  if [[ "$classification" == "retained-as-quick-rule" ]]; then
+    quick="${QUICK[$i]:-}"
+    if [[ -n "$quick" && "${#rules_files[@]}" -gt 0 ]]; then
+      rule_is_live "$quick" ||
+        findings+=("lesson \"$key\" quick_rule \"$quick\" was not found in any live rules source (its retained one-line rule should still be in lessons.md)")
+    fi
+  elif [[ "${HAS_QUICK[$i]:-false}" == "true" && -n "${QUICK[$i]:-}" ]]; then
+    findings+=("lesson \"$key\" sets quick_rule but is not retained-as-quick-rule")
   fi
 done
 
@@ -279,15 +305,22 @@ if [[ "${#findings[@]}" -eq 0 ]]; then
   exit 0
 fi
 
-label="warning"
-[[ "$strict" == "true" ]] && label="FAILED"
-echo "lessons-archive check $label: $manifest" >&2
-for finding in "${findings[@]}"; do
-  echo "- $finding" >&2
-done
-
+# Under --strict the findings are failures (exit 1) and are always reported, even
+# with --quiet ("print only on failure"). In warn mode they are non-fatal
+# warnings (exit 0), so --quiet suppresses them.
 if [[ "$strict" == "true" ]]; then
+  echo "lessons-archive check FAILED: $manifest" >&2
+  for finding in "${findings[@]}"; do
+    echo "- $finding" >&2
+  done
   exit 1
 fi
-[[ "$quiet" == "true" ]] || echo "lessons-archive check: ${#findings[@]} warning(s); pass --strict to enforce." >&2
+
+if [[ "$quiet" != "true" ]]; then
+  echo "lessons-archive check warning: $manifest" >&2
+  for finding in "${findings[@]}"; do
+    echo "- $finding" >&2
+  done
+  echo "lessons-archive check: ${#findings[@]} warning(s); pass --strict to enforce." >&2
+fi
 exit 0

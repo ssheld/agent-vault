@@ -218,18 +218,102 @@ EOF
 # record is otherwise valid, so default mode passes.
 expect_result 0 "check passed" "$d/isolated/lessons-manifest.md"
 
+# --- 11b. --rules is ADDITIVE: passing an extra source must not drop the default
+# lessons.md, so a rule that lives in lessons.md still resolves.
+d="$tmp_root/additive"
+mk_layout "$d"
+cat >"$d/agent-vault/shared-rules.md" <<'EOF'
+## Memory Size Budgets & Compaction
+- Treat budget overflow as a defect rather than cosmetic.
+EOF
+cat >"$(manifest_path "$d")" <<'EOF'
+# Lessons Archive Manifest
+
+## lesson: Avoid SC2178 local-var name collisions across functions
+- classification: covered-by-a-named-always-on-rule
+- covered_by: Always use real date timestamps in durable memory
+
+## lesson: Old workaround for the pre-2025 hook bug
+- classification: covered-by-a-named-always-on-rule
+- covered_by: Treat budget overflow as a defect
+EOF
+# Only the shared-rules source is passed; the first rule (in the default
+# lessons.md) must still resolve.
+expect_result 0 "check passed" "$(manifest_path "$d")" --strict \
+  --rules "$d/agent-vault/shared-rules.md"
+
+# --- 11c. Optional quick_rule on a retained-as-quick-rule lesson is liveness-
+# checked the same way as covered_by.
+d="$tmp_root/quick"
+mk_layout "$d"
+cat >"$(manifest_path "$d")" <<'EOF'
+# Lessons Archive Manifest
+
+## lesson: Avoid SC2178 local-var name collisions across functions
+- classification: retained-as-quick-rule
+- quick_rule: Always use real date timestamps in durable memory
+
+## lesson: Old workaround for the pre-2025 hook bug
+- classification: archival-only
+EOF
+expect_result 0 "check passed" "$(manifest_path "$d")" --strict
+cat >"$(manifest_path "$d")" <<'EOF'
+# Lessons Archive Manifest
+
+## lesson: Avoid SC2178 local-var name collisions across functions
+- classification: retained-as-quick-rule
+- quick_rule: a one-liner that is no longer in the live lessons file
+
+## lesson: Old workaround for the pre-2025 hook bug
+- classification: archival-only
+EOF
+expect_result 1 "quick_rule" "$(manifest_path "$d")" --strict
+cat >"$(manifest_path "$d")" <<'EOF'
+# Lessons Archive Manifest
+
+## lesson: Avoid SC2178 local-var name collisions across functions
+- classification: archival-only
+- quick_rule: Always use real date timestamps in durable memory
+
+## lesson: Old workaround for the pre-2025 hook bug
+- classification: archival-only
+EOF
+expect_result 1 "sets quick_rule but is not retained-as-quick-rule" "$(manifest_path "$d")" --strict
+
 # --- 12. Usage / IO errors ------------------------------------------------
 expect_result 2 "manifest not found" "$tmp_root/does-not-exist.md"
 expect_result 2 "" # no manifest arg
 expect_result 2 "archive file not found" "$(manifest_path "$tmp_root/ok")" --archive "$tmp_root/nope.md"
 expect_result 2 "rules file not found" "$(manifest_path "$tmp_root/ok")" --rules "$tmp_root/nope.md"
 
-# --- 13. --quiet suppresses success output but not failures ---------------
+# --- 13. --quiet means "print only on failure": silent on success and on
+# warn-mode findings (exit 0), but a --strict failure is still reported.
 quiet_out="$("$checker" "$(manifest_path "$tmp_root/ok")" --quiet 2>&1)"
 [[ -z "$quiet_out" ]] || {
   echo "FAIL: --quiet should print nothing on success; got: $quiet_out" >&2
   exit 1
 }
+d="$tmp_root/quietwarn"
+mk_layout "$d"
+cat >"$(manifest_path "$d")" <<'EOF'
+# Lessons Archive Manifest
+
+## lesson: Avoid SC2178 local-var name collisions across functions
+- classification: not-a-real-class
+
+## lesson: Old workaround for the pre-2025 hook bug
+- classification: archival-only
+EOF
+set +e
+qw_out="$("$checker" "$(manifest_path "$d")" --quiet 2>&1)"
+qw_rc=$?
+set -e
+[[ "$qw_rc" -eq 0 && -z "$qw_out" ]] || {
+  echo "FAIL: --quiet warn mode should be silent with rc 0; rc=$qw_rc out=$qw_out" >&2
+  exit 1
+}
+# The same finding under --strict --quiet IS reported (it is a failure).
+expect_result 1 "invalid classification" "$(manifest_path "$d")" --strict --quiet
 
 # --- 14. CRLF manifest is tolerated --------------------------------------
 d="$tmp_root/crlf"

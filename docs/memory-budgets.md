@@ -255,6 +255,7 @@ One manifest record per archived lesson, keyed by the lesson's archived heading:
 ```md
 ## lesson: Avoid SC2178 local-var name collisions across functions
 - classification: retained-as-quick-rule
+- quick_rule: Watch SC2178/SC2128 from local-var name collisions
 
 ## lesson: Old workaround for the pre-2025 hook bug
 - classification: covered-by-a-named-always-on-rule
@@ -264,19 +265,24 @@ One manifest record per archived lesson, keyed by the lesson's archived heading:
 ```bash
 scripts/check-lessons-archive.sh <manifest>
 scripts/check-lessons-archive.sh <manifest> --strict        # exit 1 + completeness
-scripts/check-lessons-archive.sh <manifest> --rules <file>  # extra live-rule source
+scripts/check-lessons-archive.sh <manifest> --rules <file>  # add a live-rule source
 ```
 
 The checker validates that every record declares one of the three classes
 (`retained-as-quick-rule`, `covered-by-a-named-always-on-rule`, `archival-only`),
 that keys are unique, and that a `covered-by-a-named-always-on-rule` record names
-a non-empty `covered_by` rule which still appears in a live always-on file (it
-resolves the project `lessons.md` by default; pass `--rules` to add sources). It
-**warns by default** (exit 0, so it never blocks an unrelated commit); `--strict`
-exits 1 on any finding and additionally enforces **completeness** against the
-archive — every archived lesson (a `###` heading) has a manifest record, and no
-record points at a lesson absent from the archive. The archive defaults to
-`lessons-archive.md` next to the manifest.
+a non-empty `covered_by` rule that still appears in a live always-on file. An
+optional `quick_rule` on a `retained-as-quick-rule` record is liveness-checked
+the same way, so a retained lesson whose one-liner was dropped is caught. Rule
+liveness is a substring match, so use distinctive rule text; the project
+`lessons.md` is always a source when present and `--rules` **adds** more (e.g.
+`shared-rules.md`) rather than replacing it. The checker **warns by default**
+(exit 0, so it never blocks an unrelated commit and `--quiet` stays silent);
+`--strict` exits 1 on any finding (always reported, even with `--quiet`) and
+additionally enforces **completeness** against the archive — every archived
+lesson (a `###` heading) has a manifest record, and no record points at a lesson
+absent from the archive. The archive defaults to `lessons-archive.md` next to the
+manifest.
 
 ## Compaction conventions
 
