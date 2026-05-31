@@ -392,4 +392,280 @@ set -e
   exit 1
 }
 
+# --- Layer-2: rollover manifest assertions (--manifest) ------------------
+
+# A good archive: superseded snapshot + dated entries, newest first. The newest
+# entry carries a *nested* "#### Next Prompt" (legal -- must NOT be flagged).
+cat >"$tmp_root/context-log-2026.md" <<'EOF'
+# Context Log Archive (2026)
+
+## Current Snapshot — SUPERSEDED (archived 2026-05-30; see live log for current state)
+- Active branch: `old-branch`
+
+### 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
+#### State
+- Implemented net-of-excepted chain budget.
+#### Next Prompt
+- Continue with PR-B2 (rollover Layer-2).
+
+### 2026-03-15 09:00 local - codex - mid-window work
+- Body.
+
+### 2026-01-04 09:00 local - bootstrap - initial project setup
+- Body.
+EOF
+
+# A live log whose Current Snapshot carries a rollover pointer back to the manifest.
+cat >"$tmp_root/good-rollover-live.md" <<'EOF'
+# Context Log
+
+## Usage Rules
+- Newest entry at top.
+
+## Current Snapshot
+- Active branch: `main`
+- Context-log rollover: `2026-05-29-1` — boundary: through PR-A net-of-excepted (recent-window top before rollover)
+- Last updated: 2026-05-30
+
+## Entries
+
+### 2026-05-30 09:00 local - claude - recent work
+- Body.
+EOF
+
+# The matching manifest: newest record first, claims consistent with the archive.
+cat >"$tmp_root/manifest-good.md" <<'EOF'
+# Context Log Rollover Manifest
+
+<!-- One record per rollover, newest first. Validated by check-context-log-rollover.sh --manifest. -->
+
+## rollover: 2026-05-29-1
+- archive_file: agent-vault/context/archive/context-log-2026.md
+- boundary: through PR-A net-of-excepted (recent-window top before rollover)
+- newest_archived: 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
+- oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+- kept: 5
+- archived: 3
+- anchors: net-of-excepted; initial project setup
+EOF
+
+# Healthy rollover: pointer, manifest, and archive all agree.
+expect_result 0 "passed" "$tmp_root/good-rollover-live.md" \
+  --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-good.md"
+
+# The nested "#### Next Prompt" in the archive is legal and not flagged as orphan.
+out_healthy="$("$checker" "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-good.md" 2>&1)"
+[[ "$out_healthy" != *"orphaned"* ]] || {
+  echo "FAIL: nested Next Prompt should not be flagged as orphan; got: $out_healthy" >&2
+  exit 1
+}
+
+# Manifest resolves its own archive (no --archive) when co-located by basename.
+mkdir -p "$tmp_root/co"
+cp "$tmp_root/context-log-2026.md" "$tmp_root/co/context-log-2026.md"
+cp "$tmp_root/manifest-good.md" "$tmp_root/co/manifest.md"
+expect_result 0 "passed" "$tmp_root/good-rollover-live.md" --manifest "$tmp_root/co/manifest.md"
+
+# Scaffolded manifest with no records + a live log with no pointer = "no rollover
+# yet" and passes; structural checks still run.
+cat >"$tmp_root/manifest-empty.md" <<'EOF'
+# Context Log Rollover Manifest
+
+(No rollovers yet.)
+EOF
+expect_result 0 "passed" "$tmp_root/no-handoff-live.md" --manifest "$tmp_root/manifest-empty.md"
+
+# A live pointer with no backing manifest record is a defect.
+expect_result 1 "manifest has no records" "$tmp_root/good-rollover-live.md" --manifest "$tmp_root/manifest-empty.md"
+
+# Manifest present but the live Current Snapshot has no rollover pointer.
+expect_result 1 'declares no "Context-log rollover" pointer' \
+  "$tmp_root/no-handoff-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-good.md"
+
+# Pointer id does not match the newest manifest record.
+cat >"$tmp_root/bad-id-live.md" <<'EOF'
+# Context Log
+
+## Usage Rules
+- x
+
+## Current Snapshot
+- Context-log rollover: `2099-12-31-9` — boundary: through PR-A net-of-excepted (recent-window top before rollover)
+
+## Entries
+
+### 2026-05-30 09:00 local - a - b
+- c
+EOF
+expect_result 1 "does not match newest manifest record" \
+  "$tmp_root/bad-id-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-good.md"
+
+# Pointer boundary text does not match the manifest boundary (the cite-then-mutate
+# drift, caught at the pointer layer).
+cat >"$tmp_root/bad-boundary-live.md" <<'EOF'
+# Context Log
+
+## Usage Rules
+- x
+
+## Current Snapshot
+- Context-log rollover: `2026-05-29-1` — boundary: an entirely different boundary description
+
+## Entries
+
+### 2026-05-30 09:00 local - a - b
+- c
+EOF
+expect_result 1 "boundary does not match the manifest boundary" \
+  "$tmp_root/bad-boundary-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-good.md"
+
+# A rollover pointer with no "boundary:" value is flagged.
+cat >"$tmp_root/no-boundary-live.md" <<'EOF'
+# Context Log
+
+## Usage Rules
+- x
+
+## Current Snapshot
+- Context-log rollover: `2026-05-29-1`
+
+## Entries
+
+### 2026-05-30 09:00 local - a - b
+- c
+EOF
+expect_result 1 'declares no "boundary:" value' \
+  "$tmp_root/no-boundary-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-good.md"
+
+# newest_archived is NOT the actual newest entry -- the core cite-then-mutate
+# mechanical catch. Same id/boundary as the good pointer to isolate this finding.
+cat >"$tmp_root/manifest-stale-newest.md" <<'EOF'
+# Context Log Rollover Manifest
+
+## rollover: 2026-05-29-1
+- archive_file: agent-vault/context/archive/context-log-2026.md
+- boundary: through PR-A net-of-excepted (recent-window top before rollover)
+- newest_archived: 2026-03-15 09:00 local - codex - mid-window work
+- oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+- anchors: net-of-excepted
+EOF
+expect_result 1 "is not the newest entry in the archive" \
+  "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-stale-newest.md"
+
+# newest_archived names a heading absent from the archive.
+cat >"$tmp_root/manifest-missing-newest.md" <<'EOF'
+# Context Log Rollover Manifest
+
+## rollover: 2026-05-29-1
+- archive_file: agent-vault/context/archive/context-log-2026.md
+- boundary: through PR-A net-of-excepted (recent-window top before rollover)
+- newest_archived: 2026-05-29 17:00 local - claude - a heading that was never archived
+- oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+EOF
+expect_result 1 "newest_archived heading not found in the archive" \
+  "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-missing-newest.md"
+
+# oldest_archived names a heading absent from the archive.
+cat >"$tmp_root/manifest-missing-oldest.md" <<'EOF'
+# Context Log Rollover Manifest
+
+## rollover: 2026-05-29-1
+- archive_file: agent-vault/context/archive/context-log-2026.md
+- boundary: through PR-A net-of-excepted (recent-window top before rollover)
+- newest_archived: 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
+- oldest_archived: 2025-01-01 00:00 local - nobody - never archived
+EOF
+expect_result 1 "oldest_archived heading not found in the archive" \
+  "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-missing-oldest.md"
+
+# A representative anchor is absent from the archive.
+cat >"$tmp_root/manifest-bad-anchor.md" <<'EOF'
+# Context Log Rollover Manifest
+
+## rollover: 2026-05-29-1
+- archive_file: agent-vault/context/archive/context-log-2026.md
+- boundary: through PR-A net-of-excepted (recent-window top before rollover)
+- newest_archived: 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
+- oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+- anchors: net-of-excepted; this-anchor-string-is-nowhere-in-the-archive
+EOF
+expect_result 1 "anchor not found in the archive" \
+  "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-bad-anchor.md"
+
+# A required manifest field is missing.
+cat >"$tmp_root/manifest-missing-field.md" <<'EOF'
+# Context Log Rollover Manifest
+
+## rollover: 2026-05-29-1
+- archive_file: agent-vault/context/archive/context-log-2026.md
+- newest_archived: 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
+- oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+EOF
+expect_result 1 "missing required field: boundary" \
+  "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-missing-field.md"
+
+# An orphaned top-level "Next Prompt" survives in the archive.
+cat >"$tmp_root/context-log-orphan.md" <<'EOF'
+# Context Log Archive (2026)
+
+## Current Snapshot — SUPERSEDED (archived 2026-05-30)
+- Active branch: `old-branch`
+
+### 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
+- Body.
+
+### 2026-01-04 09:00 local - bootstrap - initial project setup
+- Body.
+
+## Suggested Next Prompt
+- Continue the work.
+EOF
+cat >"$tmp_root/manifest-orphan.md" <<'EOF'
+# Context Log Rollover Manifest
+
+## rollover: 2026-05-29-1
+- archive_file: agent-vault/context/archive/context-log-orphan.md
+- boundary: through PR-A net-of-excepted (recent-window top before rollover)
+- newest_archived: 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
+- oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+EOF
+expect_result 1 'orphaned top-level "Next Prompt"' \
+  "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-orphan.md" --manifest "$tmp_root/manifest-orphan.md"
+
+# Manifest archive_file basename disagrees with an explicit --archive.
+cat >"$tmp_root/manifest-altarchive.md" <<'EOF'
+# Context Log Rollover Manifest
+
+## rollover: 2026-05-29-1
+- archive_file: agent-vault/context/archive/context-log-2025.md
+- boundary: through PR-A net-of-excepted (recent-window top before rollover)
+- newest_archived: 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
+- oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+EOF
+expect_result 1 "does not match --archive" \
+  "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-altarchive.md"
+
+# Manifest names an archive that cannot be located next to it (no --archive).
+cat >"$tmp_root/manifest-lonely.md" <<'EOF'
+# Context Log Rollover Manifest
+
+## rollover: 2026-05-29-1
+- archive_file: agent-vault/context/archive/context-log-missing.md
+- boundary: through PR-A net-of-excepted (recent-window top before rollover)
+- newest_archived: 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
+- oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
+EOF
+expect_result 1 "was not found next to the manifest" \
+  "$tmp_root/good-rollover-live.md" --manifest "$tmp_root/manifest-lonely.md"
+
+# A missing manifest file is an IO error.
+expect_result 2 "manifest file not found" \
+  "$tmp_root/good-rollover-live.md" --manifest "$tmp_root/does-not-exist-manifest.md"
+
+# CRLF manifest + live log still validate (CR tolerated on both sides).
+sed 's/$/\r/' "$tmp_root/good-rollover-live.md" >"$tmp_root/good-rollover-crlf-live.md"
+sed 's/$/\r/' "$tmp_root/manifest-good.md" >"$tmp_root/manifest-good-crlf.md"
+expect_result 0 "passed" "$tmp_root/good-rollover-crlf-live.md" \
+  --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-good-crlf.md"
+
 echo "context-log rollover checker regression checks passed."
