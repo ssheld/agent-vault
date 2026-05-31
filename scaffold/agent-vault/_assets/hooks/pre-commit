@@ -99,7 +99,10 @@ warn_context_log_rollover() {
 
   echo "agent-vault context-log rollover warning (non-blocking; staged agent-vault/context-log.md; set AGENT_VAULT_SKIP_ROLLOVER_CHECK=1 to silence):" >&2
   printf '%s\n' "$rollover_output" | grep '^- ' >&2 || true
-  echo "Run scripts/check-context-log-rollover.sh agent-vault/context-log.md for the full report." >&2
+  # This reflects the STAGED blob, which can differ from the working tree on a
+  # partial-stage; point at the staged content, not the working-tree file.
+  echo "The full report is on the STAGED content; inspect exactly what is staged with:" >&2
+  echo "  git show :agent-vault/context-log.md >\"\${TMPDIR:-/tmp}\"/staged-context-log.md && scripts/check-context-log-rollover.sh \"\${TMPDIR:-/tmp}\"/staged-context-log.md" >&2
   return 0
 }
 
