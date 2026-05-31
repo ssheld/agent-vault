@@ -90,4 +90,64 @@ oversize >>"$p/agent-vault/project-context.md"
 AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm c4b
 [[ "$HOOK_STDERR" != *"memory-budget warning"* ]] || fail "warned on unstaged working-tree content" "$HOOK_STDERR"
 
-echo "memory budget pre-commit hook regression checks passed."
+# --- context-log rollover warning (D2) -----------------------------------
+
+# Stage agent-vault/context-log.md with a stale duplicate "## Current Snapshot".
+stage_dup_snapshot() {
+  printf '\n## Current Snapshot\n- Active branch: `old-stale-branch`\n' >>"$1/agent-vault/context-log.md"
+  git -C "$1" add agent-vault/context-log.md
+}
+
+# Case 5: a staged context-log with a duplicate snapshot prints a non-blocking
+# rollover warning naming the finding; the commit still succeeds.
+p="$(fresh_project case5)"
+stage_dup_snapshot "$p"
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm c5
+[[ "$HOOK_RC" -eq 0 ]] || fail "rollover-warning commit was blocked (rc=$HOOK_RC)" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" == *"context-log rollover warning"* ]] || fail "no rollover warning on duplicate snapshot" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" == *'duplicate "## Current Snapshot"'* ]] || fail "rollover warning omitted the finding" "$HOOK_STDERR"
+
+# Case 6: AGENT_VAULT_SKIP_ROLLOVER_CHECK=1 silences the rollover warning.
+p="$(fresh_project case6)"
+stage_dup_snapshot "$p"
+AGENT_VAULT_SKIP_METADATA_GATE=1 AGENT_VAULT_SKIP_ROLLOVER_CHECK=1 commit_capture "$p" git commit -qm c6
+[[ "$HOOK_RC" -eq 0 ]] || fail "silenced rollover commit was blocked (rc=$HOOK_RC)" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" != *"context-log rollover warning"* ]] || fail "AGENT_VAULT_SKIP_ROLLOVER_CHECK did not silence" "$HOOK_STDERR"
+
+# Case 7: a clean staged context-log change prints no rollover warning.
+p="$(fresh_project case7)"
+printf -- '- extra clean note\n' >>"$p/agent-vault/context-log.md"
+git -C "$p" add agent-vault/context-log.md
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm c7
+[[ "$HOOK_RC" -eq 0 ]] || fail "clean context-log commit was blocked (rc=$HOOK_RC)" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" != *"context-log rollover warning"* ]] || fail "rollover warning on a clean context-log" "$HOOK_STDERR"
+
+# Case 8a: STAGED duplicate snapshot but working tree reverted clean -> warns on
+# STAGED, and the follow-up guidance points at the staged content (not the clean
+# working-tree file, which would falsely report no issue here).
+p="$(fresh_project case8a)"
+stage_dup_snapshot "$p"
+git -C "$p" show HEAD:agent-vault/context-log.md >"$p/agent-vault/context-log.md"
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm c8a
+[[ "$HOOK_STDERR" == *"context-log rollover warning"* ]] || fail "did not warn on staged duplicate (working tree clean)" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" == *"STAGED content"* ]] || fail "8a: guidance does not clarify the warning is about staged content" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" == *"git show :agent-vault/context-log.md"* ]] || fail "8a: guidance offers no staged-content inspection path" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" != *"check-context-log-rollover.sh agent-vault/context-log.md for the full report"* ]] || fail "8a: guidance points at the working-tree file for the full report" "$HOOK_STDERR"
+
+# Case 8b: STAGED clean but working tree has a duplicate (unstaged) -> no warning.
+p="$(fresh_project case8b)"
+printf -- '- extra clean note\n' >>"$p/agent-vault/context-log.md"
+git -C "$p" add agent-vault/context-log.md
+printf '\n## Current Snapshot\n- Active branch: `old-stale-branch`\n' >>"$p/agent-vault/context-log.md"
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm c8b
+[[ "$HOOK_STDERR" != *"context-log rollover warning"* ]] || fail "warned on unstaged working-tree duplicate snapshot" "$HOOK_STDERR"
+
+# Case 9: context-log.md staged for deletion -> no staged blob -> silent no-op
+# (the warning never fires and never blocks the commit).
+p="$(fresh_project case9)"
+git -C "$p" rm -q agent-vault/context-log.md
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm c9
+[[ "$HOOK_RC" -eq 0 ]] || fail "staged deletion was blocked by the rollover warning (rc=$HOOK_RC)" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" != *"context-log rollover warning"* ]] || fail "warned on a staged deletion (no staged blob)" "$HOOK_STDERR"
+
+echo "memory budget + context-log rollover pre-commit hook regression checks passed."
