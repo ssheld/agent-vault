@@ -63,7 +63,48 @@ warn_memory_budget() {
   return 0
 }
 
+# Non-blocking context-log rollover warning: when agent-vault/context-log.md is
+# staged and the rollover checker is installed, surface structural rollover
+# problems in the STAGED content -- a stale duplicate "## Current Snapshot",
+# leftover Git conflict markers, an empty handoff pointer -- but never block the
+# commit. Runs even when the metadata gate is skipped; silence with
+# AGENT_VAULT_SKIP_ROLLOVER_CHECK=1.
+warn_context_log_rollover() {
+  if [[ "${AGENT_VAULT_SKIP_ROLLOVER_CHECK:-}" == "1" ]]; then
+    return 0
+  fi
+  [[ -x scripts/check-context-log-rollover.sh ]] || return 0
+
+  local staged="false" file_path
+  for file_path in "${all_staged_files[@]}"; do
+    if [[ "$file_path" == "agent-vault/context-log.md" ]]; then
+      staged="true"
+      break
+    fi
+  done
+  [[ "$staged" == "true" ]] || return 0
+
+  # Validate the staged blob (the index, not the working tree).
+  local tmp_file rollover_output
+  tmp_file="$(mktemp "${TMPDIR:-/tmp}/agent-vault-rollover-staged.XXXXXX")" || return 0
+  if ! git show ":agent-vault/context-log.md" >"$tmp_file" 2>/dev/null; then
+    rm -f "$tmp_file"
+    return 0
+  fi
+  if rollover_output="$(scripts/check-context-log-rollover.sh "$tmp_file" --quiet 2>&1)"; then
+    rm -f "$tmp_file"
+    return 0
+  fi
+  rm -f "$tmp_file"
+
+  echo "agent-vault context-log rollover warning (non-blocking; staged agent-vault/context-log.md; set AGENT_VAULT_SKIP_ROLLOVER_CHECK=1 to silence):" >&2
+  printf '%s\n' "$rollover_output" | grep '^- ' >&2 || true
+  echo "Run scripts/check-context-log-rollover.sh agent-vault/context-log.md for the full report." >&2
+  return 0
+}
+
 warn_memory_budget
+warn_context_log_rollover
 
 if [[ "${AGENT_VAULT_SKIP_METADATA_GATE:-}" == "1" ]]; then
   exit 0

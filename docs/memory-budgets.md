@@ -312,10 +312,20 @@ When a file is over budget:
 `check-context-log-rollover.sh`, `check-lessons-archive.sh`) and the
 `compact-context-log.sh` compactor into a generated project's `scripts/`, and
 `update-project.sh` keeps them in sync (they carry an `agent-vault-managed`
-marker, like the worktree helpers). The scaffolded pre-commit hook runs
-`scripts/check-memory-budget.sh` as a **non-blocking** warning when memory files
-are staged -- it surfaces any over-budget bucket/file but never blocks a commit
-(silence it with `AGENT_VAULT_SKIP_MEMORY_BUDGET=1`).
+marker, like the worktree helpers). The scaffolded pre-commit hook runs two
+**non-blocking** warnings against the **staged** content (never blocking a
+commit):
+
+- `scripts/check-memory-budget.sh` when memory files are staged -- surfaces any
+  over-budget bucket/file (silence with `AGENT_VAULT_SKIP_MEMORY_BUDGET=1`);
+- `scripts/check-context-log-rollover.sh` when `agent-vault/context-log.md` is
+  staged -- surfaces a stale duplicate `## Current Snapshot`, leftover conflict
+  markers, or an empty handoff pointer (silence with
+  `AGENT_VAULT_SKIP_ROLLOVER_CHECK=1`).
+
+The budget warning materializes the staged index to measure the full `@`-chain;
+the rollover warning reads only the single staged `context-log.md` blob via
+`git show`.
 
 In the agent-vault template repo itself the checkers live at
 `scaffold/root/scripts/`; the commands above assume a generated project where
