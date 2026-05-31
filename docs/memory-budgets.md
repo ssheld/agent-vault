@@ -198,7 +198,48 @@ resolved next to the manifest by the record's `archive_file` basename. The
 counts are validated as integers but **not** reconciled against live/archive
 entry totals — a single archive accumulates many rollovers, so `archived` is a
 per-rollover figure, not the archive's row count; count self-consistency is
-left to the PR-B1 compactor that emits them.
+left to the `compact-context-log.sh` compactor that emits them.
+
+## `compact-context-log.sh`
+
+Automates the context-log rollover the checker validates. It keeps the single
+`## Current Snapshot` plus the newest `--keep` entries, moves older entries into
+the dated archive (newest-at-top), writes the live `Context-log rollover`
+pointer, and prepends a record to the manifest. Prose memory files
+(`project-context.md`, `lessons.md`, …) deliberately stay agent-driven and are
+out of scope.
+
+```bash
+scripts/compact-context-log.sh agent-vault/context-log.md --keep 20 \
+  --archive agent-vault/context/archive/context-log-2026.md \
+  --manifest agent-vault/context/archive/context-log-manifest.md \
+  --require-top-entry "rollover" --dry-run
+```
+
+It is built so a half-finished rollover can never land:
+
+- **It does not invent the gate-required entry.** Add the rollover session entry
+  first (the metadata gate), then run the compactor. A write-producing rollover
+  **refuses by default** unless the newest entry is asserted with
+  `--require-top-entry <str>` (it aborts, exit 1, no writes, if that marker is
+  not the newest heading); `--allow-missing-top-entry` is the explicit escape
+  hatch. Refusing by default — not only when the flag happens to be passed — is
+  what keeps the cite-then-mutate workflow closed.
+- **Counts and boundary are finalized after that entry is in place**, from the
+  live file as it stands, so they cannot describe a pre-entry state.
+- **The result is self-validated** with `check-context-log-rollover.sh
+  --manifest` before anything is written; any precondition or validation failure
+  aborts non-zero having written nothing. The three output paths (log, archive,
+  manifest) must be distinct — a collision is rejected before any build, so the
+  sequential commit renames cannot clobber a validated output.
+- **Each file is replaced by an atomic same-directory rename** of a fully-formed
+  temp file, live log last, so an interrupted run never loses entries.
+
+`--rollover-id`, `--boundary`, and `--anchors` default to a dated id (the next
+same-day sequence is the max existing suffix + 1, never a re-used gap) and values
+derived from the moved entries; pass them to override. `--dry-run` builds and
+self-validates without writing. Exit status: `0` rolled over (or nothing to do),
+`1` precondition/validation failure (no writes), `2` usage/IO error.
 
 ## Compaction conventions
 
@@ -222,9 +263,9 @@ When a file is over budget:
 
 ## Installation
 
-`new-project.sh` seeds both checkers into a generated project's `scripts/`, and
-`update-project.sh` keeps them in sync (they carry an `agent-vault-managed`
-marker, like the worktree helpers). The scaffolded pre-commit hook runs
+`new-project.sh` seeds both checkers and the `compact-context-log.sh` compactor
+into a generated project's `scripts/`, and `update-project.sh` keeps them in sync
+(they carry an `agent-vault-managed` marker, like the worktree helpers). The scaffolded pre-commit hook runs
 `scripts/check-memory-budget.sh` as a **non-blocking** warning when memory files
 are staged -- it surfaces any over-budget bucket/file but never blocks a commit
 (silence it with `AGENT_VAULT_SKIP_MEMORY_BUDGET=1`).
