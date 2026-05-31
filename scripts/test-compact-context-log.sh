@@ -318,6 +318,21 @@ run_compact "$d/log.md" --keep 2 --archive "$d/fresh/a.md" \
 assert_rc 2 "$COMPACT_RC" "missing-parent equivalent paths rejected"
 assert_contains "$COMPACT_OUT" "must differ" "missing-parent collision message"
 assert_not_exists "$d/fresh" "collide: missing parent not created on rejected collision"
+# An existing-directory destination would make commit-time "mv" drop the temp
+# inside it, committing the live pointer against a non-file path. Reject it.
+mkdir -p "$d/arch.dir" "$d/man.dir"
+run_compact "$d/log.md" --keep 2 --archive "$d/arch.dir" \
+  --manifest "$d/archive/m.md" --require-top-entry "rollover session"
+assert_rc 2 "$COMPACT_RC" "--archive existing-directory rejected"
+assert_contains "$COMPACT_OUT" "not an existing directory" "archive-dir message"
+[[ -z "$(ls -A "$d/arch.dir")" ]] || fail "collide: nothing written inside --archive directory"
+pass=$((pass + 1))
+run_compact "$d/log.md" --keep 2 --archive "$d/archive/a2.md" \
+  --manifest "$d/man.dir" --require-top-entry "rollover session"
+assert_rc 2 "$COMPACT_RC" "--manifest existing-directory rejected"
+[[ -z "$(ls -A "$d/man.dir")" ]] || fail "collide: nothing written inside --manifest directory"
+assert_not_exists "$d/archive/a2.md" "collide: no archive written when manifest is a dir"
+pass=$((pass + 1))
 [[ "$(cksum "$d/log.md")" == "$before" ]] || fail "collide: live log must be unchanged"
 pass=$((pass + 1))
 assert_not_exists "$d/archive/same.md" "collide: no colliding file written"

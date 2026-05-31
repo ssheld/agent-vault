@@ -156,6 +156,11 @@ done
 [[ "$keep" -ge 1 ]] || die "--keep must be >= 1 (the newest entry is always kept)"
 [[ -n "$archive_file" ]] || die "--archive is required"
 [[ -n "$manifest_file" ]] || die "--manifest is required"
+# A directory destination would make the commit-time "mv" drop the temp file
+# inside it instead of replacing the path, leaving the live pointer committed to
+# a non-file archive/manifest after self-validation already passed.
+[[ ! -d "$archive_file" ]] || die "--archive must be a file path, not an existing directory: $archive_file"
+[[ ! -d "$manifest_file" ]] || die "--manifest must be a file path, not an existing directory: $manifest_file"
 [[ -x "$checker" || -f "$checker" ]] || die "checker not found next to this script: $checker"
 
 # --- small helpers -------------------------------------------------------
