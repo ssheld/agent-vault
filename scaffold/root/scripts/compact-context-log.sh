@@ -54,6 +54,11 @@ Options:
                              Required for any write unless --allow-missing-top-entry.
   --allow-missing-top-entry  Explicit escape hatch: roll over without asserting the
                              gate-required session entry. Use only when verified.
+  --allow-stale-archive-metadata
+                             Override the refusal to grow an archive whose own
+                             header carries a frontmatter "covers:" field or a
+                             relocation manifest this tool cannot keep in sync.
+                             You must then update that header by hand.
   --dry-run                  Build and self-validate, print a summary, write nothing.
   --quiet                    Print only on failure / a one-line success.
   -h, --help                 Show this help.
@@ -79,6 +84,7 @@ boundary=""
 anchors=""
 require_top_entry=""
 allow_missing_top_entry="false"
+allow_stale_archive_metadata="false"
 dry_run="false"
 quiet="false"
 
@@ -121,6 +127,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-missing-top-entry)
       allow_missing_top_entry="true"
+      shift
+      ;;
+    --allow-stale-archive-metadata)
+      allow_stale_archive_metadata="true"
       shift
       ;;
     --dry-run)
@@ -244,6 +254,24 @@ select_boundaries() {
   ' "$1"
 }
 
+# Print "1" if an existing archive's header (everything above its first dated
+# entry) carries metadata this tool cannot keep in sync when it prepends a newer
+# batch: a top-of-file YAML frontmatter "covers:" field (a coverage claim that
+# would go stale) or a "relocation manifest" heading. The compactor only
+# maintains the live pointer and the separate --manifest file, so growing such an
+# archive in place would silently stale its own header while self-validation
+# still passes.
+archive_header_has_unmanaged_metadata() {
+  awk '
+    NR == 1 && $0 ~ /^---[[:space:]]*$/ { in_fm = 1; next }
+    in_fm && $0 ~ /^---[[:space:]]*$/ { in_fm = 0; next }
+    in_fm && tolower($0) ~ /^[[:space:]]*covers[[:space:]]*:/ { found = 1; next }
+    /^(```|~~~)/ { in_fence = !in_fence; next }
+    !in_fence && tolower($0) ~ /^#+[[:space:]]+.*relocation manifest/ { found = 1 }
+    END { if (found) print "1" }
+  ' "$1"
+}
+
 # Lexically collapse "/", ".", "//", and ".." in an absolute path (no FS access),
 # so equivalent spellings of a not-yet-created path compare equal.
 normalize_lexical() {
@@ -354,6 +382,14 @@ if [[ -f "$archive_file" ]]; then
   else
     strip_trailing_blanks "$archive_file" >"$scratch/arch_header"
     : >"$scratch/arch_existing"
+  fi
+  # Refuse to grow an archive whose own header carries metadata we cannot keep in
+  # sync (a frontmatter "covers:" claim or a relocation manifest). Prepending a
+  # newer batch below such a header silently stales it while self-validation still
+  # passes, so fail closed unless the maintainer explicitly overrides.
+  unmanaged_metadata="$(archive_header_has_unmanaged_metadata "$scratch/arch_header")"
+  if [[ "$allow_stale_archive_metadata" != "true" && -n "$unmanaged_metadata" ]]; then
+    abort "existing archive \"$archive_file\" carries header metadata this tool cannot keep in sync (a frontmatter \"covers:\" field or a relocation manifest). Prepending a newer batch would leave that header claiming an older newest entry than the archive now holds, while check-context-log-rollover.sh still passes. Update the archive frontmatter/manifest by hand (or roll over manually), or pass --allow-stale-archive-metadata to override."
   fi
 else
   printf '# Context Log Archive\n' >"$scratch/arch_header"

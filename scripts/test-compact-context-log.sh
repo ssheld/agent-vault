@@ -402,4 +402,156 @@ assert_rc 2 "$COMPACT_RC" "--keep 0 -> exit 2"
 run_compact "$tmp_root/u.md" --keep notanumber --archive a --manifest m
 assert_rc 2 "$COMPACT_RC" "--keep non-numeric -> exit 2"
 
+# --- 12. Guard: refuse to grow an archive whose own header carries metadata
+# this tool cannot keep in sync (a frontmatter "covers:" field or a relocation
+# manifest). Prepending a newer batch below such a header silently stales it
+# while check-context-log-rollover.sh still passes, so it must fail closed.
+make_meta_archive() {
+  # $1 = path; an existing archive with frontmatter "covers:", a relocation
+  # manifest, and one old entry older than the batch make_log will move.
+  cat >"$1" <<'EOF'
+---
+type: context-log-archive
+project: test
+archived_on: 2026-05-20
+covers: 2026 entries from 2026-05-15 08:00 and earlier
+---
+
+# Context Log Archive — 2026
+
+## Relocation manifest
+
+| Source | What | Read when |
+| --- | --- | --- |
+| `## Entries` older rows | older sessions | researching older work |
+
+---
+
+### 2026-05-15 08:00 local - claude - old archived entry
+- Body.
+EOF
+}
+
+# 12a. Frontmatter "covers:" archive -> abort with zero writes.
+d="$tmp_root/guard-frontmatter"
+mkdir -p "$d/archive"
+make_log "$d/log.md"
+make_meta_archive "$d/archive/context-log-2026.md"
+log_before="$(cksum "$d/log.md")"
+arch_before="$(cksum "$d/archive/context-log-2026.md")"
+run_compact "$d/log.md" --keep 1 --archive "$d/archive/context-log-2026.md" \
+  --manifest "$d/archive/manifest.md" --require-top-entry "rollover session"
+assert_rc 1 "$COMPACT_RC" "guard: frontmatter covers archive aborts"
+assert_contains "$COMPACT_OUT" "cannot keep in sync" "guard: refusal message"
+[[ "$(cksum "$d/log.md")" == "$log_before" ]] || fail "guard: live log must be unchanged on refusal"
+pass=$((pass + 1))
+[[ "$(cksum "$d/archive/context-log-2026.md")" == "$arch_before" ]] ||
+  fail "guard: existing archive must be unchanged on refusal"
+pass=$((pass + 1))
+assert_not_exists "$d/archive/manifest.md" "guard: no manifest written on refusal"
+
+# 12b. The explicit override lets it through, and the result still validates.
+d="$tmp_root/guard-override"
+mkdir -p "$d/archive"
+make_log "$d/log.md"
+make_meta_archive "$d/archive/context-log-2026.md"
+run_compact "$d/log.md" --keep 1 --archive "$d/archive/context-log-2026.md" \
+  --manifest "$d/archive/manifest.md" --require-top-entry "rollover session" \
+  --allow-stale-archive-metadata
+assert_rc 0 "$COMPACT_RC" "guard: override compacts"
+"$checker" "$d/log.md" --archive "$d/archive/context-log-2026.md" \
+  --manifest "$d/archive/manifest.md" >/dev/null ||
+  fail "guard override: checker rejected the overridden result"
+pass=$((pass + 1))
+assert_file_contains "$d/archive/context-log-2026.md" "old archived entry" "guard override: old entry retained"
+assert_file_contains "$d/archive/context-log-2026.md" "feature work" "guard override: newer batch prepended"
+
+# 12c. A relocation-manifest heading alone (no frontmatter) also trips the guard.
+d="$tmp_root/guard-manifest-heading"
+mkdir -p "$d/archive"
+make_log "$d/log.md"
+cat >"$d/archive/context-log-2026.md" <<'EOF'
+# Context Log Archive — 2026
+
+## Relocation manifest
+
+| Source | What | Read when |
+| --- | --- | --- |
+| older rows | older sessions | researching older work |
+
+---
+
+### 2026-05-15 08:00 local - claude - old archived entry
+- Body.
+EOF
+arch_before="$(cksum "$d/archive/context-log-2026.md")"
+run_compact "$d/log.md" --keep 1 --archive "$d/archive/context-log-2026.md" \
+  --manifest "$d/archive/manifest.md" --require-top-entry "rollover session"
+assert_rc 1 "$COMPACT_RC" "guard: relocation-manifest heading aborts"
+assert_contains "$COMPACT_OUT" "cannot keep in sync" "guard: manifest-heading refusal message"
+[[ "$(cksum "$d/archive/context-log-2026.md")" == "$arch_before" ]] ||
+  fail "guard: archive unchanged on manifest-heading refusal"
+pass=$((pass + 1))
+
+# 12d. A plain archive with no such header still compacts (no false positive).
+# (Also covered by cases 1 and 8; this asserts the guard does not over-fire.)
+d="$tmp_root/guard-plain"
+mkdir -p "$d/archive"
+make_log "$d/log.md"
+cat >"$d/archive/context-log-2026.md" <<'EOF'
+# Context Log Archive
+
+### 2026-05-15 08:00 local - claude - old archived entry
+- Body.
+EOF
+run_compact "$d/log.md" --keep 1 --archive "$d/archive/context-log-2026.md" \
+  --manifest "$d/archive/manifest.md" --require-top-entry "rollover session"
+assert_rc 0 "$COMPACT_RC" "guard: plain archive compacts (no false positive)"
+pass=$((pass + 1))
+
+# 12e. Frontmatter "covers:" ALONE (no relocation-manifest heading) trips the
+# guard, pinning the frontmatter branch independently of case 12a's combined
+# fixture.
+d="$tmp_root/guard-covers-only"
+mkdir -p "$d/archive"
+make_log "$d/log.md"
+cat >"$d/archive/context-log-2026.md" <<'EOF'
+---
+type: context-log-archive
+covers: 2026 entries from 2026-05-15 08:00 and earlier
+---
+
+# Context Log Archive — 2026
+
+### 2026-05-15 08:00 local - claude - old archived entry
+- Body.
+EOF
+arch_before="$(cksum "$d/archive/context-log-2026.md")"
+run_compact "$d/log.md" --keep 1 --archive "$d/archive/context-log-2026.md" \
+  --manifest "$d/archive/manifest.md" --require-top-entry "rollover session"
+assert_rc 1 "$COMPACT_RC" "guard: frontmatter covers-only aborts"
+assert_contains "$COMPACT_OUT" "cannot keep in sync" "guard: covers-only refusal message"
+[[ "$(cksum "$d/archive/context-log-2026.md")" == "$arch_before" ]] ||
+  fail "guard: archive unchanged on covers-only refusal"
+pass=$((pass + 1))
+
+# 12f. The guard also fires under --dry-run: it runs during archive build, before
+# the dry-run write-skip, so a dry-run preview reports the refusal with no writes.
+d="$tmp_root/guard-dry-run"
+mkdir -p "$d/archive"
+make_log "$d/log.md"
+make_meta_archive "$d/archive/context-log-2026.md"
+log_before="$(cksum "$d/log.md")"
+arch_before="$(cksum "$d/archive/context-log-2026.md")"
+run_compact "$d/log.md" --keep 1 --archive "$d/archive/context-log-2026.md" \
+  --manifest "$d/archive/manifest.md" --require-top-entry "rollover session" --dry-run
+assert_rc 1 "$COMPACT_RC" "guard: --dry-run also aborts on the guard path"
+assert_contains "$COMPACT_OUT" "cannot keep in sync" "guard: dry-run refusal message"
+[[ "$(cksum "$d/log.md")" == "$log_before" ]] || fail "guard dry-run: live log unchanged"
+pass=$((pass + 1))
+[[ "$(cksum "$d/archive/context-log-2026.md")" == "$arch_before" ]] ||
+  fail "guard dry-run: archive unchanged"
+pass=$((pass + 1))
+assert_not_exists "$d/archive/manifest.md" "guard dry-run: no manifest written"
+
 echo "compact-context-log compactor regression checks passed ($pass assertions)."
