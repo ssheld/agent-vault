@@ -597,4 +597,36 @@ pass=$((pass + 1))
   fail "header-only: existing header prose must not be duplicated"
 pass=$((pass + 1))
 
+# 15. Headerless manifest (first record on line 1): parity with the archive fix —
+# the same sed "1,0p" class must not duplicate/mangle the existing manifest record.
+d="$tmp_root/headerless-manifest"
+mkdir -p "$d/archive"
+make_log "$d/log.md"
+cat >"$d/archive/manifest.md" <<'EOF'
+## rollover: 2026-05-01-1
+- archive_file: x/context-log-2026.md
+- boundary: through old
+- newest_archived: 2026-05-01 09:00 local - x - older
+- oldest_archived: 2026-05-01 09:00 local - x - older
+- kept: 1
+- archived: 1
+- anchors: older; older
+EOF
+run_compact "$d/log.md" --keep 1 --archive "$d/archive/context-log-2026.md" \
+  --manifest "$d/archive/manifest.md" --rollover-id 2026-06-02-1 --require-top-entry "rollover session"
+assert_rc 0 "$COMPACT_RC" "headerless manifest compacts"
+"$checker" "$d/log.md" --archive "$d/archive/context-log-2026.md" \
+  --manifest "$d/archive/manifest.md" >/dev/null || fail "headerless manifest: checker rejected result"
+pass=$((pass + 1))
+# The pre-existing record must appear exactly once (the bug duplicated/mangled it).
+[[ "$(grep -c '^## rollover: 2026-05-01-1' "$d/archive/manifest.md")" -eq 1 ]] ||
+  fail "headerless manifest: existing record must not be duplicated"
+pass=$((pass + 1))
+# The newest record is the freshly written one, above the pre-existing record.
+new_ln="$(grep -n '^## rollover: 2026-06-02-1' "$d/archive/manifest.md" | head -n1 | cut -d: -f1)"
+old_ln="$(grep -n '^## rollover: 2026-05-01-1' "$d/archive/manifest.md" | head -n1 | cut -d: -f1)"
+[[ -n "$new_ln" && -n "$old_ln" && "$new_ln" -lt "$old_ln" ]] ||
+  fail "headerless manifest: new record must be newest-first above the pre-existing record"
+pass=$((pass + 1))
+
 echo "compact-context-log compactor regression checks passed ($pass assertions)."

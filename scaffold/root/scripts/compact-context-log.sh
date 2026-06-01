@@ -464,7 +464,14 @@ new_record="$scratch/record"
 if [[ -f "$manifest_file" ]]; then
   first_record="$(grep -n '^## rollover:' "$manifest_file" | head -n1 | cut -d: -f1 || true)"
   if [[ -n "$first_record" ]]; then
-    sed -n "1,$((first_record - 1))p" "$manifest_file" | strip_trailing_blanks - >"$scratch/man_header"
+    if [[ "$first_record" -gt 1 ]]; then
+      sed -n "1,$((first_record - 1))p" "$manifest_file" | strip_trailing_blanks - >"$scratch/man_header"
+    else
+      # Headerless manifest: the first record is on line 1, so there is no header to
+      # slice. sed "1,0p" would wrongly emit line 1 on GNU sed and re-append it from
+      # man_existing, duplicating the first record. Seed the standard manifest header.
+      printf '# Context Log Rollover Manifest\n\n<!-- One record per rollover, newest first. Maintained by compact-context-log.sh; validated by check-context-log-rollover.sh --manifest. -->\n' >"$scratch/man_header"
+    fi
     sed -n "${first_record},\$p" "$manifest_file" >"$scratch/man_existing"
   else
     strip_trailing_blanks "$manifest_file" >"$scratch/man_header"
