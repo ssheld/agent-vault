@@ -377,7 +377,14 @@ archived_count=$((total_entries - keep))
 if [[ -f "$archive_file" ]]; then
   first_existing="$(first_entry_line "$archive_file")"
   if [[ -n "$first_existing" ]]; then
-    sed -n "1,$((first_existing - 1))p" "$archive_file" | strip_trailing_blanks - >"$scratch/arch_header"
+    if [[ "$first_existing" -gt 1 ]]; then
+      sed -n "1,$((first_existing - 1))p" "$archive_file" | strip_trailing_blanks - >"$scratch/arch_header"
+    else
+      # Headerless archive: the first entry is on line 1, so there is no header to
+      # slice. sed "1,0p" would wrongly emit line 1 on GNU sed and then re-append it
+      # from arch_existing, duplicating and reordering the first archived entry.
+      printf '# Context Log Archive\n' >"$scratch/arch_header"
+    fi
     sed -n "${first_existing},\$p" "$archive_file" >"$scratch/arch_existing"
   else
     strip_trailing_blanks "$archive_file" >"$scratch/arch_header"
