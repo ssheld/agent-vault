@@ -28,6 +28,8 @@ on:
       - "scripts/parse-claude-memory-trace.py"
       - "scripts/test-check-memory-budget.sh"
       - "scripts/test-check-context-log-rollover.sh"
+      - "scripts/test-check-lessons-archive.sh"
+      - "scripts/test-compact-context-log.sh"
       - ".github/workflows/scaffold-regression-checks.yml"
   push:
     branches:
@@ -58,6 +60,8 @@ on:
       - "scripts/parse-claude-memory-trace.py"
       - "scripts/test-check-memory-budget.sh"
       - "scripts/test-check-context-log-rollover.sh"
+      - "scripts/test-check-lessons-archive.sh"
+      - "scripts/test-compact-context-log.sh"
       - ".github/workflows/scaffold-regression-checks.yml"
   workflow_dispatch:
 
@@ -97,3 +101,7 @@ jobs:
         run: bash scripts/test-check-memory-budget.sh
       - name: Verify context-log rollover checker
         run: bash scripts/test-check-context-log-rollover.sh
+      - name: Verify lessons-archive checker
+        run: bash scripts/test-check-lessons-archive.sh
+      - name: Verify context-log compactor
+        run: bash scripts/test-compact-context-log.sh
