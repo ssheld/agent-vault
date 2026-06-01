@@ -387,8 +387,8 @@ if [[ -f "$archive_file" ]]; then
   # sync (a frontmatter "covers:" claim or a relocation manifest). Prepending a
   # newer batch below such a header silently stales it while self-validation still
   # passes, so fail closed unless the maintainer explicitly overrides.
-  if [[ "$allow_stale_archive_metadata" != "true" &&
-        -n "$(archive_header_has_unmanaged_metadata "$scratch/arch_header")" ]]; then
+  unmanaged_metadata="$(archive_header_has_unmanaged_metadata "$scratch/arch_header")"
+  if [[ "$allow_stale_archive_metadata" != "true" && -n "$unmanaged_metadata" ]]; then
     abort "existing archive \"$archive_file\" carries header metadata this tool cannot keep in sync (a frontmatter \"covers:\" field or a relocation manifest). Prepending a newer batch would leave that header claiming an older newest entry than the archive now holds, while check-context-log-rollover.sh still passes. Update the archive frontmatter/manifest by hand (or roll over manually), or pass --allow-stale-archive-metadata to override."
   fi
 else
