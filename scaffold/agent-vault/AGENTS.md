@@ -185,6 +185,7 @@ Use the canonical ordering for each artifact type below instead of guessing base
 - In committed memory artifacts, prefer repo-relative paths and portable command examples such as `agent-vault/...`, `docs/...`, `./scripts/...`, or `<repo-root>/...`. Machine-specific absolute paths such as `/Users/...`, `/home/...`, or `C:\...` are acceptable only when the local path itself is relevant debugging or environment context.
 - Create or update `agent-vault/daily/YYYY-MM-DD.md` on the first substantive work session of each local day. Reuse the same file for later sessions that day. Skip daily notes for trivial one-off requests.
 - Add a design-log note for every substantive work session.
+- Review-only external-feedback sessions that produced no converged project state follow the `Session End - Required` exception: skip the daily and design-log notes and say so in your final summary.
 - When a durable decision is made about architecture, workflow, API shape, data model, deployment, or tool policy, create a decision record in `agent-vault/decisions/` and add it to `agent-vault/decision-log.md`.
 - When handing off or pausing with meaningful unfinished work, create a handoff note in `agent-vault/context/handoffs/`, include a `Suggested Next Prompt`, and reference that note from `agent-vault/context-log.md`.
 - Use the standalone handoff prompt template only when a human explicitly asks for a copy-paste prompt. Otherwise keep the prompt inside the handoff note and the latest `context-log.md` entry.
@@ -256,6 +257,14 @@ When performing research or writing research-oriented documentation (design-log 
 - If handing off, add a note in `agent-vault/context/handoffs/`.
 - If the user corrected a mistake during this session, add an entry to `agent-vault/lessons.md` describing the mistake pattern and a preventive rule.
 - Before creating a commit for substantive work, make sure today's daily note, context log, and any new design-log entry do not leave same-session publication mechanics (`git commit`, `git push`, PR creation) in `Carry Forward`, `Next`, or equivalent future-tense text unless those actions will truly remain unfinished after the session.
+- Review-only / external-feedback exception: when the session's only durable output was feedback posted to an external thread (a GitHub issue, PR review, or doc comment thread) and nothing converged into project state, skip the project-memory writes above and say so in your final summary instead of writing empty artifacts. The external thread is the durable record of non-converged feedback; do not duplicate it into always-on memory. If the feedback surfaced a material trade-off awaiting an owner decision, the skip still applies unless active local work depends on the outcome — then add a one-line `agent-vault/open-questions.md` entry linking the thread. Example: plan-review feedback posted on a GitHub issue with no owner decision yet needs no context-log entry; the issue thread is the record until something converges.
+- For external feedback, write to project memory only when it converges into a durable state, then summarize the final outcome and link the external thread rather than copying comment text. Durable states:
+  - an accepted decision or owner-approved plan,
+  - an implemented or merged change,
+  - an unresolved blocker,
+  - a handoff with concrete remaining work,
+  - a reusable lesson or process rule, or
+  - an external-thread pointer that future agents need to resume active work or understand current project state.
 - Treat these updates as a commit gate for substantive work, not as optional cleanup after the code is already done.
 
 ## Direct Push to Main
@@ -267,7 +276,7 @@ When performing research or writing research-oriented documentation (design-log 
 ## Completion Verification - MUST follow before marking any task done
 Before reporting a task as finished:
 1. Run the Verification Loop appropriate to the repo and change scope.
-2. List the `agent-vault` artifacts created or updated this session, or explicitly state why no metadata update was required (for example, a trivial one-off request).
+2. List the `agent-vault` artifacts created or updated this session, or explicitly state why no metadata update was required (for example, a trivial one-off request, or a review-only session whose feedback lives in an external thread and did not converge into project state).
 3. Ask yourself: "Would a senior engineer approve this?" If not, fix it first.
 4. If any Verification Loop step was unavailable or could not run, explicitly state what was checked and what remains unverified.
 
@@ -312,7 +321,7 @@ Before considering any change complete and before running git commit:
   - `agent-vault/context/handoffs/` when handing off unfinished work
   - `agent-vault/lessons.md` when a corrected mistake should become a durable prevention rule
 - If the repo enables the tracked hooks under `agent-vault/_assets/hooks/`, keep them enabled via `git config core.hooksPath agent-vault/_assets/hooks`.
-- If a change is truly trivial and should not update project memory, make that an explicit decision and say so in your final summary instead of silently skipping the metadata step.
+- If a change is truly trivial and should not update project memory — including when the only staged change is trivial and the session's remaining output was non-converged external review feedback — make that an explicit decision and say so in your final summary instead of silently skipping the metadata step.
 
 ## Additional Guardrails
 - Prefer explicit diffs over whole-file rewrites when updating docs.

@@ -6,6 +6,7 @@ Daily notes are supplemental. Durable decisions, open questions, and handoffs mu
 
 Read today's note first if it exists.
 Create or update `YYYY-MM-DD.md` on the first substantive work session of the day.
+Skip the daily note when the session only posted external review feedback that did not converge into project state (see the `Session End - Required` exception in `agent-vault/shared-rules.md`).
 Keep same-day content chronological: append new work log entries or added session sections at the bottom rather than inserting newer work at the top.
 
 Suggested filename:

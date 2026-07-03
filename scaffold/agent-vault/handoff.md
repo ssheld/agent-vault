@@ -8,6 +8,7 @@ Use this when switching between agents or pausing with meaningful unfinished wor
 - Add a design-log entry in `agent-vault/design-log/`.
 - If the session was substantive, update today's note in `agent-vault/daily/`.
 - If a durable decision was made, update `agent-vault/decision-log.md` and `agent-vault/decisions/`.
+- Review-only / external-feedback exception: if the session only posted external review feedback that did not converge into project state, the `Session End - Required` exception in `agent-vault/shared-rules.md` applies — record a one-line thread pointer only if future agents need it; otherwise skip these artifacts.
 
 ## Suggested Next Prompt
 ```
@@ -37,4 +38,5 @@ Before finishing:
 - Add a design-log entry in agent-vault/design-log/.
 - If you made a durable decision, update decision-log and `agent-vault/decisions/`.
 - If handing off again, add a note in agent-vault/context/handoffs/ with a Suggested Next Prompt.
+- If this session only posted external review feedback that did not converge into project state, apply the `Session End - Required` exception in agent-vault/shared-rules.md instead of writing these artifacts, and say so in your final summary.
 ```
