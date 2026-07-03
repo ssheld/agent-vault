@@ -14,6 +14,7 @@ on:
       - "scripts/test-gitignore-management.sh"
       - "scripts/test-coding-standards-sync.sh"
       - "scripts/test-decision-template-sync.sh"
+      - "scripts/test-context-log-policy-sync.sh"
       - "scripts/test-session-metadata-hook.sh"
       - "scripts/test-memory-budget-hook.sh"
       - "scripts/test-main-push-gate.sh"
@@ -46,6 +47,7 @@ on:
       - "scripts/test-gitignore-management.sh"
       - "scripts/test-coding-standards-sync.sh"
       - "scripts/test-decision-template-sync.sh"
+      - "scripts/test-context-log-policy-sync.sh"
       - "scripts/test-session-metadata-hook.sh"
       - "scripts/test-memory-budget-hook.sh"
       - "scripts/test-main-push-gate.sh"
@@ -77,6 +79,8 @@ jobs:
         run: bash scripts/test-coding-standards-sync.sh
       - name: Verify policy template sync behavior
         run: bash scripts/test-decision-template-sync.sh
+      - name: Verify context-log policy sync and migration
+        run: bash scripts/test-context-log-policy-sync.sh
       - name: Verify session metadata hook behavior
         run: bash scripts/test-session-metadata-hook.sh
       - name: Verify memory budget pre-commit hook behavior

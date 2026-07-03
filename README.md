@@ -133,6 +133,7 @@ Run the scaffold regression scripts locally when changing bootstrap, sync, or tr
 - `bash scripts/test-gitignore-management.sh`
 - `bash scripts/test-coding-standards-sync.sh`
 - `bash scripts/test-decision-template-sync.sh`
+- `bash scripts/test-context-log-policy-sync.sh`
 - `bash scripts/test-session-metadata-hook.sh`
 - `bash scripts/test-main-push-gate.sh`
 - `bash scripts/test-session-start-load-contract.sh`
@@ -162,6 +163,7 @@ CI also runs these checks via `.github/workflows/scaffold-regression-checks.yml`
   - `<repo>/agent-vault/context/handoffs/README.md`
   - `<repo>/agent-vault/decisions/README.md`
   - `<repo>/agent-vault/daily/README.md`
+  - `<repo>/agent-vault/Templates/Context Log.md`
   - `<repo>/agent-vault/Templates/Decision Record.md`
 - Root wrappers (managed only when the root file has the `agent-vault-managed` marker):
   - `<repo>/AGENTS.md`
@@ -191,7 +193,7 @@ If an existing root worktree helper script does not have the managed marker,
 
 Template refresh is opt-in:
 - `./scripts/update-project.sh <repo-path> --sync-templates` updates `agent-vault/Templates/` from the scaffold and backs up replaced files under `agent-vault/context/updates/<timestamp>/`.
-- Without `--sync-templates`, project-local template customizations are left alone except for policy-critical templates that are always managed (`agent-vault/Templates/Decision Record.md`).
+- Without `--sync-templates`, project-local template customizations are left alone except for policy-critical templates that are always managed (`agent-vault/Templates/Context Log.md`, `agent-vault/Templates/Decision Record.md`).
 
 Coding standards refresh is also opt-in:
 - `./scripts/update-project.sh <repo-path> --sync-coding-standards` replaces `agent-vault/coding-standards.md` with the scaffold version and backs up the previous file under `agent-vault/context/updates/<timestamp>/`.
@@ -239,6 +241,7 @@ The tracked `pre-commit` hook enforces the baseline session artifacts and valida
 
 That shortcut allows recording history after PR merges while keeping source code, config, scripts, root docs, policy files, templates, hook assets, and durable project docs such as `agent-vault/README.md`, `plan.md`, `coding-standards.md`, `project-context.md`, `project-commands.md`, and `handoff.md` on the PR path.
 When syncing older generated repos, `update-project.sh` now auto-migrates recognized legacy `agent-vault/context-log.md` layouts into the validator-compatible top-level `## Current Snapshot` / `## Entries` shape before syncing the stricter hook. If the layout is not recognized, the script leaves the file unchanged and prints a manual-remediation warning instead of guessing.
+It also inserts the review-only / external-feedback usage rule (issue #129) into an existing runtime `agent-vault/context-log.md` when its active `## Usage Rules` section predates the rule: the rule line is copied verbatim from the scaffold context log, the previous file is backed up under `agent-vault/context/updates/<timestamp>/`, and the insert is idempotent. When no active `## Usage Rules` section sits above `## Current Snapshot`, the script prints a skip notice instead of editing archived or unrecognized content.
 
 Both scripts also ensure root `.gitignore` includes managed local-only ignore entries (added only when missing):
 - `.obsidian/workspace.json`
