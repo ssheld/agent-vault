@@ -58,6 +58,7 @@ CHECK_CONTEXT_LOG_ROLLOVER_HELPER_MARKER="# agent-vault-managed: helper-script; 
 COMPACT_CONTEXT_LOG_HELPER_MARKER="# agent-vault-managed: helper-script; file=compact-context-log.sh"
 CHECK_LESSONS_ARCHIVE_HELPER_MARKER="# agent-vault-managed: helper-script; file=check-lessons-archive.sh"
 POLICY_TEMPLATE_REL_PATHS=(
+  "Context Log.md"
   "Decision Record.md"
 )
 
@@ -160,6 +161,7 @@ for required in \
   "$vault_scaffold_dir/context/handoffs/README.md" \
   "$vault_scaffold_dir/decisions/README.md" \
   "$vault_scaffold_dir/daily/README.md" \
+  "$vault_scaffold_dir/Templates/Context Log.md" \
   "$vault_scaffold_dir/Templates/Decision Record.md"; do
   if [[ ! -f "$required" ]]; then
     echo "Error: missing scaffold file: $required"
@@ -238,6 +240,7 @@ preflight_symlink_checks() {
   assert_not_symlink "$project_dir/context/handoffs/README.md" "agent-vault/context/handoffs/README.md"
   assert_not_symlink "$project_dir/decisions/README.md" "agent-vault/decisions/README.md"
   assert_not_symlink "$project_dir/daily/README.md" "agent-vault/daily/README.md"
+  assert_not_symlink "$project_dir/Templates/Context Log.md" "agent-vault/Templates/Context Log.md"
   assert_not_symlink "$project_dir/Templates/Decision Record.md" "agent-vault/Templates/Decision Record.md"
   assert_not_symlink "$canonical_repo_path/.gitignore" ".gitignore"
 }
@@ -542,6 +545,77 @@ migrate_legacy_context_log_if_needed() {
       printf '%s\n' "$historical_entries_body"
     } >>"$tmp_file"
   fi
+
+  replace_file_from_tmp "$tmp_file" "$file_path"
+
+  trap - RETURN
+  rm -f "$tmp_file"
+}
+
+# Insert the review-only / external-feedback usage rule (issue #129) into an
+# existing runtime context log that predates it. The rule line is read from the
+# scaffold context log so the migrated text cannot drift from the scaffold.
+migrate_context_log_usage_rules_if_needed() {
+  local file_path="$project_dir/context-log.md"
+  local rel="agent-vault/context-log.md"
+  local rule_marker="- Review-only / external-feedback exception:"
+  local rule_line=""
+  local usage_rules_line=""
+  local snapshot_line=""
+  local next_heading_offset=""
+  local section_end_line=""
+  local last_bullet_offset=""
+  local insert_after_line=""
+  local tmp_file=""
+
+  [[ -f "$file_path" ]] || return 0
+
+  if grep -Fq -- "$rule_marker" "$file_path"; then
+    return 0
+  fi
+
+  rule_line="$(grep -m1 -F -- "$rule_marker" "$vault_scaffold_dir/context-log.md" || true)"
+  if [[ -z "$rule_line" ]]; then
+    echo "Skip: $rel review-only usage rule (scaffold context log does not carry the rule line)"
+    skipped=$((skipped + 1))
+    return
+  fi
+
+  # Only edit an ACTIVE usage-rules section: it must sit above the current
+  # snapshot. A `## Usage Rules` heading below the snapshot belongs to archived
+  # historical content (for example after the legacy layout migration) and must
+  # be left untouched.
+  usage_rules_line="$(first_matching_line_number "$file_path" '^## Usage Rules$')"
+  snapshot_line="$(first_matching_line_number "$file_path" '^## Current Snapshot$')"
+  if [[ -z "$usage_rules_line" || -z "$snapshot_line" || "$usage_rules_line" -gt "$snapshot_line" ]]; then
+    echo "Skip: $rel review-only usage rule (no active \`## Usage Rules\` section above \`## Current Snapshot\`; copy the rule manually from the scaffold context log)"
+    skipped=$((skipped + 1))
+    return
+  fi
+
+  next_heading_offset="$(tail -n +$((usage_rules_line + 1)) "$file_path" | grep -nE '^#' | head -n1 | cut -d: -f1 || true)"
+  if [[ -n "$next_heading_offset" ]]; then
+    section_end_line=$((usage_rules_line + next_heading_offset - 1))
+  else
+    section_end_line="$(wc -l <"$file_path")"
+  fi
+
+  last_bullet_offset="$(sed -n "$((usage_rules_line + 1)),${section_end_line}p" "$file_path" | grep -nE '^- ' | tail -n1 | cut -d: -f1 || true)"
+  if [[ -z "$last_bullet_offset" ]]; then
+    echo "Skip: $rel review-only usage rule (no usage-rule bullets found; copy the rule manually from the scaffold context log)"
+    skipped=$((skipped + 1))
+    return
+  fi
+  insert_after_line=$((usage_rules_line + last_bullet_offset))
+
+  tmp_file="$(mktemp "${TMPDIR:-/tmp}/agent-vault-usage-rules-migration.XXXXXX")"
+  trap 'rm -f "$tmp_file"; trap - RETURN' RETURN
+
+  {
+    sed -n "1,${insert_after_line}p" "$file_path"
+    printf '%s\n' "$rule_line"
+    sed -n "$((insert_after_line + 1)),\$p" "$file_path"
+  } >"$tmp_file"
 
   replace_file_from_tmp "$tmp_file" "$file_path"
 
@@ -971,6 +1045,7 @@ sync_managed_file "$vault_scaffold_dir/CLAUDE.md" "$project_dir/CLAUDE.md"
 sync_managed_file "$vault_scaffold_dir/GEMINI.md" "$project_dir/GEMINI.md"
 sync_managed_file "$vault_scaffold_dir/handoff.md" "$project_dir/handoff.md"
 migrate_legacy_context_log_if_needed
+migrate_context_log_usage_rules_if_needed
 sync_managed_file "$vault_scaffold_dir/_assets/hooks/README.md" "$project_dir/_assets/hooks/README.md"
 sync_managed_file "$vault_scaffold_dir/_assets/hooks/lib/runtime-note.sh" "$project_dir/_assets/hooks/lib/runtime-note.sh"
 sync_managed_executable_file "$vault_scaffold_dir/_assets/hooks/pre-commit" "$project_dir/_assets/hooks/pre-commit"
@@ -979,6 +1054,7 @@ sync_managed_file "$vault_scaffold_dir/design-log/README.md" "$project_dir/desig
 sync_managed_file "$vault_scaffold_dir/context/handoffs/README.md" "$project_dir/context/handoffs/README.md"
 sync_managed_file "$vault_scaffold_dir/decisions/README.md" "$project_dir/decisions/README.md"
 sync_managed_file "$vault_scaffold_dir/daily/README.md" "$project_dir/daily/README.md"
+sync_managed_file "$vault_scaffold_dir/Templates/Context Log.md" "$project_dir/Templates/Context Log.md"
 sync_managed_file "$vault_scaffold_dir/Templates/Decision Record.md" "$project_dir/Templates/Decision Record.md"
 
 seed_if_missing "$vault_scaffold_dir/lessons.md" "$project_dir/lessons.md"

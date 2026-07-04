@@ -76,6 +76,11 @@ AGENT_VAULT_SKIP_METADATA_GATE=1 git commit ...
 
 Use that escape hatch sparingly and explain the skip in the task summary or commit context.
 
+The same explicit-bypass expectation applies when a review-only session (external
+feedback only, nothing converged into project state) needs to commit a genuinely
+trivial change: use the bypass and state the review-only skip in the task summary,
+per the `Session End - Required` exception in `agent-vault/shared-rules.md`.
+
 The non-blocking memory-budget warning is independent of the metadata gate.
 Silence it on its own (it never blocks a commit either way):
 

@@ -307,6 +307,14 @@ If the platform or API blocks the intended formal review state (e.g., permission
 ## Responding to Review Feedback
 When asked to address review feedback in a PR comment, use a complete, itemized response.
 
+Transient external review feedback is not project memory: the issue/PR/doc thread
+is the durable record until feedback converges. Follow the review-only exception
+under `Session End - Required` in the shared agent rules for when a converged
+outcome should be recorded (summarize the outcome and link the thread; do not copy
+comment text into always-on memory). Example: feedback posted on a GitHub issue
+asking for plan review with no owner decision yet needs no context-log entry; the
+thread is the record until something converges.
+
 ### Feedback Retrieval Checklist
 Before claiming that all PR feedback was reviewed or addressed, inspect every
 available feedback surface:

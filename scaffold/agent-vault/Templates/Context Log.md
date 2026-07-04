@@ -15,6 +15,7 @@ last_updated:
 - Pair each major update with a design-log entry.
 - Add a handoff note when transferring work between agents/sessions.
 - Reference the active handoff note or decision record when one changes current work.
+- Review-only / external-feedback exception: if the session only posted external review feedback that did not converge into project state, the `Session End - Required` exception in `agent-vault/shared-rules.md` applies — record a one-line thread pointer only if future agents need it; otherwise skip the entry.
 
 ## Current Snapshot
 - Project:
