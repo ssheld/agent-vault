@@ -161,6 +161,7 @@ for required in \
   "$vault_scaffold_dir/context/handoffs/README.md" \
   "$vault_scaffold_dir/decisions/README.md" \
   "$vault_scaffold_dir/daily/README.md" \
+  "$vault_scaffold_dir/Templates/Context Log.md" \
   "$vault_scaffold_dir/Templates/Decision Record.md"; do
   if [[ ! -f "$required" ]]; then
     echo "Error: missing scaffold file: $required"
@@ -239,6 +240,7 @@ preflight_symlink_checks() {
   assert_not_symlink "$project_dir/context/handoffs/README.md" "agent-vault/context/handoffs/README.md"
   assert_not_symlink "$project_dir/decisions/README.md" "agent-vault/decisions/README.md"
   assert_not_symlink "$project_dir/daily/README.md" "agent-vault/daily/README.md"
+  assert_not_symlink "$project_dir/Templates/Context Log.md" "agent-vault/Templates/Context Log.md"
   assert_not_symlink "$project_dir/Templates/Decision Record.md" "agent-vault/Templates/Decision Record.md"
   assert_not_symlink "$canonical_repo_path/.gitignore" ".gitignore"
 }

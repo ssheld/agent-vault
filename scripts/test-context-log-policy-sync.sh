@@ -260,4 +260,28 @@ fi
 assert_output_contains "$sync_templates_output" "Updated: agent-vault/Templates/Context Log.md"
 assert_files_equal "$scaffold_context_log_template" "$repo_path/agent-vault/Templates/Context Log.md"
 
+# Case 8: a symlinked policy-managed template must fail the upfront preflight
+# before any managed file or runtime migration is touched.
+symlink_repo="$tmp_root/symlinked-template-project"
+init_repo "$symlink_repo"
+"$repo_root/scripts/new-project.sh" "context-log-symlink-test" "$symlink_repo" >/dev/null
+strip_rule_line "$symlink_repo/agent-vault/context-log.md" "$symlink_repo/agent-vault/context-log.md.stripped"
+mv "$symlink_repo/agent-vault/context-log.md.stripped" "$symlink_repo/agent-vault/context-log.md"
+mv "$symlink_repo/agent-vault/Templates/Context Log.md" "$symlink_repo/agent-vault/context-log-template-target.md"
+ln -s "../context-log-template-target.md" "$symlink_repo/agent-vault/Templates/Context Log.md"
+symlink_rc=0
+symlink_output="$("$repo_root/scripts/update-project.sh" "$symlink_repo" 2>&1)" || symlink_rc=$?
+if [[ "$symlink_rc" -eq 0 ]]; then
+  echo "Expected update-project.sh to fail on a symlinked Templates/Context Log.md" >&2
+  printf '%s\n' "$symlink_output" >&2
+  exit 1
+fi
+assert_output_contains "$symlink_output" "managed file is a symlink, refusing to update: agent-vault/Templates/Context Log.md"
+assert_output_not_contains "$symlink_output" "Updated:"
+assert_rule_count "$symlink_repo/agent-vault/context-log.md" 0
+if [[ -d "$symlink_repo/agent-vault/context/updates" ]]; then
+  echo "Expected no backup directory after a failed preflight" >&2
+  exit 1
+fi
+
 echo "context-log policy sync regression checks passed."
