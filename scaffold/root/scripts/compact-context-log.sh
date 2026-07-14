@@ -316,8 +316,16 @@ manifest_canon="$(canonical_path "$manifest_file")"
 [[ "$log_canon" != "$manifest_canon" ]] || die "--manifest must differ from the context log ($manifest_file)"
 [[ "$archive_canon" != "$manifest_canon" ]] || die "--archive and --manifest must differ ($archive_file)"
 
-# Structure must be sound before we rearrange it.
-if ! "$checker" "$context_log" --quiet >/dev/null 2>&1; then
+# Structure must be sound before we rearrange it. An existing archive must
+# validate too: dated headings the strict boundary scan cannot see (torn
+# fragments, noncanonical legacy entries) would otherwise be treated as header
+# prose and silently reordered above the newer batch.
+checker_args=("$context_log")
+[[ -f "$archive_file" ]] && checker_args+=(--archive "$archive_file")
+if ! "$checker" "${checker_args[@]}" --quiet >/dev/null 2>&1; then
+  if [[ -f "$archive_file" ]]; then
+    abort "context log or existing archive fails the structural rollover check; run check-context-log-rollover.sh $context_log --archive $archive_file and normalize before rolling over"
+  fi
   abort "context log fails the structural rollover check; run check-context-log-rollover.sh $context_log"
 fi
 

@@ -26,6 +26,11 @@ Checks (live context log; headings matched outside fenced code blocks):
   - if the snapshot declares a latest-handoff pointer, it has an inline value
 Checks (when --archive is given):
   - every archived "## Current Snapshot" is labeled superseded
+  - no dated heading sits above the archive's first canonical entry heading
+    (a torn entry fragment), and every dated heading of depth 1-3 is a
+    canonical entry heading (noncanonical legacy entries would be invisible
+    to boundary validation); dated sub-headings of depth 4+ inside an entry
+    remain legal body text
 Checks (when --manifest is given -- Layer-2 rollover assertions):
   - the live Current Snapshot's "Context-log rollover" pointer references the
     newest manifest record's id and repeats its boundary text verbatim
@@ -205,6 +210,45 @@ inspect_archive_superseded() {
   ' "$1"
 }
 
+# Prints "<line>\t<kind>\t<heading>" for archive dated headings (outside fences)
+# that the strict boundary scan cannot treat as entries:
+#   fragment     -- any dated heading before the first canonical entry heading;
+#                   only header prose belongs there, so this is the signature of
+#                   an entry torn apart by a bad split (or a misplaced paste)
+#   noncanonical -- a depth-1..3 heading whose text starts with a YYYY-MM-DD
+#                   date but is not canonical (legacy or hand-written entry the
+#                   boundary scan would silently skip)
+# Dated sub-headings of depth 4+ inside an entry are legal body text.
+inspect_archive_dated_headings() {
+  awk '
+    function strip(s) {
+      sub(/\r$/, "", s)
+      sub(/^[[:space:]]+/, "", s)
+      sub(/[[:space:]]+$/, "", s)
+      return s
+    }
+    /^(```|~~~)/ { in_fence = !in_fence; next }
+    {
+      if (in_fence) next
+      line = strip($0)
+      if (line !~ /^#+[[:space:]]/) next
+      text = line
+      sub(/^#+[[:space:]]+/, "", text)
+      if (text !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/) next
+      if (line ~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] local - /) {
+        seen_entry = 1
+        next
+      }
+      if (!seen_entry) {
+        printf "%d\tfragment\t%s\n", NR, line
+        next
+      }
+      match(line, /^#+/)
+      if (RLENGTH <= 3) printf "%d\tnoncanonical\t%s\n", NR, line
+    }
+  ' "$1"
+}
+
 # --- Layer-2 (rollover manifest) helpers ---------------------------------
 # These run only when --manifest is given. They verify the live pointer's claim
 # against the manifest, and the manifest's claims against archive reality, so a
@@ -362,6 +406,18 @@ if [[ -n "$archive_file" ]]; then
     [[ -n "$row" ]] || continue
     findings+=("archived snapshot is not labeled superseded (archive line ${row%%$'\t'*}) -- archived snapshots must be marked superseded so they cannot read as active")
   done < <(inspect_archive_superseded "$archive_file")
+
+  while IFS=$'\t' read -r row_line row_kind row_heading; do
+    [[ -n "$row_line" ]] || continue
+    case "$row_kind" in
+      fragment)
+        findings+=("archive has a dated heading above its first entry (archive line $row_line): \"$row_heading\" -- looks like a torn entry fragment; only header prose belongs above the first canonical \"### YYYY-MM-DD HH:MM local - ...\" heading")
+        ;;
+      noncanonical)
+        findings+=("archive has a noncanonical dated entry heading (archive line $row_line): \"$row_heading\" -- normalize it to \"### YYYY-MM-DD HH:MM local - <agent> - <topic>\" so boundary validation can see it")
+        ;;
+    esac
+  done < <(inspect_archive_dated_headings "$archive_file")
 fi
 
 if [[ -n "$manifest_file" ]]; then

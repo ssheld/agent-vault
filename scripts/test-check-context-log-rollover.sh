@@ -796,6 +796,23 @@ expect_result 1 "newest_archived heading not found in the archive" \
   "$tmp_root/good-rollover-live.md" \
   --archive "$tmp_root/fragment-top/context-log-2026.md" --manifest "$tmp_root/manifest-fragment.md"
 
+# A depth-1..3 dated heading that is not a canonical entry heading (legacy or
+# hand-written style) must fail: the boundary scan cannot see such entries.
+{
+  cat "$tmp_root/context-log-2026.md"
+  printf '\n## 2026-01-02 - legacy tail entry\n- Old-style body.\n'
+} >"$tmp_root/archive-noncanonical.md"
+expect_result 1 "noncanonical dated entry heading" \
+  "$tmp_root/good-live.md" --archive "$tmp_root/archive-noncanonical.md"
+
+# ANY dated heading above the archive's first canonical entry is a torn-entry
+# fragment (only header prose belongs there), even at sub-heading depth and
+# even when no manifest cites it.
+awk '/^### 2026-05-29 17:00/ && !done { print "#### 2026-05-30 orphaned fragment"; print "- Torn body."; print ""; done = 1 } { print }' \
+  "$tmp_root/context-log-2026.md" >"$tmp_root/archive-header-fragment.md"
+expect_result 1 "above its first entry" \
+  "$tmp_root/good-live.md" --archive "$tmp_root/archive-header-fragment.md"
+
 # A missing manifest file is an IO error.
 expect_result 2 "manifest file not found" \
   "$tmp_root/good-rollover-live.md" --manifest "$tmp_root/does-not-exist-manifest.md"
