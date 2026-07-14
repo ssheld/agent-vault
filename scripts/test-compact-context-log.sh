@@ -655,6 +655,10 @@ make_nested_log() {
 #### 2026-05-29 follow-up
 - Fixed the import edge case later the same day; belongs to the entry above.
 
+```md
+### 2026-05-29 12:00 local - example - fenced entry heading, not a boundary
+```
+
 ### 2026-05-28 10:00 local - codex - older work
 - Body.
 
