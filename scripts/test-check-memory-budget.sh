@@ -259,6 +259,17 @@ printf 'root\n' >"$nongit/AGENTS.md"
 printf 'nested\n' >"$nongit/sub/AGENTS.md"
 mapfile -t nongit_agents < <(tsv_bucket "$nongit" agents)
 assert_in_set "sub/AGENTS.md" "${nongit_agents[@]}"
+# The root file must appear WITHOUT a "./" prefix: exception matching and the
+# git-branch output are keyed by clean repo-relative paths (regression: the
+# GNU-only "find -printf '%P\n'" fallback returned nothing on BSD userland).
+assert_in_set "AGENTS.md" "${nongit_agents[@]}"
+assert_not_in_set "./AGENTS.md" "${nongit_agents[@]}"
+
+# The pre-commit hook's staged-checkout path is a non-git directory: an
+# over-budget AGENTS.md there must still trip --strict.
+head -c 45000 /dev/zero | tr '\0' 'a' >"$nongit/sub/AGENTS.md"
+expect_result 1 "over file budget" --repo "$nongit" --strict
+printf 'nested\n' >"$nongit/sub/AGENTS.md"
 
 # A .gitignore'd AGENTS.md is excluded in a git repo.
 printf 'ignored/\n' >"$project/.gitignore"

@@ -306,7 +306,9 @@ discover_agents_files() {
     git -C "$repo" -c core.quotePath=false ls-files -z --cached --others --exclude-standard \
       -- 'AGENTS.md' '**/AGENTS.md' 2>/dev/null | sort -zu | tr '\0' '\n'
   else
-    (cd "$repo" && find . -name AGENTS.md -not -path '*/.git/*' -printf '%P\n' 2>/dev/null | sort -u)
+    # BSD find has no -printf; strip the leading "./" so paths stay
+    # repo-relative for exception matching and display parity with git ls-files.
+    (cd "$repo" && find . -name AGENTS.md -not -path '*/.git/*' 2>/dev/null | sed 's|^\./||' | sort -u)
   fi
 }
 
