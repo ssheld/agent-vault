@@ -775,6 +775,27 @@ EOF
 expect_result 1 "was not found next to the manifest" \
   "$tmp_root/good-rollover-live.md" --manifest "$tmp_root/manifest-lonely.md"
 
+# A nested date-prefixed sub-heading inside an archived entry is body text: it
+# must not disturb boundary verification (regression: the loose matcher counted
+# it as an entry, so a compactor split on it self-validated).
+mkdir -p "$tmp_root/nested-dated"
+awk '/^#### State$/ { print; print "#### 2026-05-29 follow-up (same-day fix)"; next } { print }' \
+  "$tmp_root/context-log-2026.md" >"$tmp_root/nested-dated/context-log-2026.md"
+expect_result 0 "passed" "$tmp_root/good-rollover-live.md" \
+  --archive "$tmp_root/nested-dated/context-log-2026.md" --manifest "$tmp_root/manifest-good.md"
+
+# An archive that STARTS with an orphaned "#### <date>" fragment (what a
+# corrupted mid-entry split produces), with a manifest citing the fragment as
+# newest_archived, must FAIL: the fragment is not a canonical entry heading.
+mkdir -p "$tmp_root/fragment-top"
+awk '/^### 2026-05-29 17:00/ { print "#### 2026-05-30 follow-up fragment"; print "- Torn from its parent entry."; print ""; print $0; next } { print }' \
+  "$tmp_root/context-log-2026.md" >"$tmp_root/fragment-top/context-log-2026.md"
+sed 's/^- newest_archived: .*/- newest_archived: 2026-05-30 follow-up fragment/' \
+  "$tmp_root/manifest-good.md" >"$tmp_root/manifest-fragment.md"
+expect_result 1 "newest_archived heading not found in the archive" \
+  "$tmp_root/good-rollover-live.md" \
+  --archive "$tmp_root/fragment-top/context-log-2026.md" --manifest "$tmp_root/manifest-fragment.md"
+
 # A missing manifest file is an IO error.
 expect_result 2 "manifest file not found" \
   "$tmp_root/good-rollover-live.md" --manifest "$tmp_root/does-not-exist-manifest.md"

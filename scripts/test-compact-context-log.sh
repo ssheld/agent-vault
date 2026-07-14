@@ -48,14 +48,13 @@ assert_not_exists() {
   pass=$((pass + 1))
 }
 
-# Count dated entry headings in a file (### or compact ## with a leading date).
+# Count canonical entry headings in a file (the same strict shape the compactor
+# and checker split on; nested date-prefixed sub-headings must not count).
 count_entries() {
   awk '
     /^(```|~~~)/ { f = !f; next }
     { if (f) next; l = $0; sub(/\r$/, "", l)
-      if (l !~ /^#+[[:space:]]/) next
-      sub(/^#+[[:space:]]+/, "", l)
-      if (l ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/) c++ }
+      if (l ~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] local - /) c++ }
     END { print c + 0 }
   ' "$1"
 }
@@ -628,5 +627,80 @@ old_ln="$(grep -n '^## rollover: 2026-05-01-1' "$d/archive/manifest.md" | head -
 [[ -n "$new_ln" && -n "$old_ln" && "$new_ln" -lt "$old_ln" ]] ||
   fail "headerless manifest: new record must be newest-first above the pre-existing record"
 pass=$((pass + 1))
+
+# --- Nested date-prefixed sub-heading is body text, not an entry boundary --
+# (regression: the loose matcher counted any heading starting with a date, so a
+# "#### <date> ..." sub-heading landing at the keep boundary split its parent
+# entry mid-body, and the checker's identical matcher passed the corrupted result)
+make_nested_log() {
+  cat >"$1" <<'EOF'
+# Context Log
+
+## Usage Rules
+- Newest entry at top.
+
+## Current Snapshot
+- Active branch: `main`
+- Last updated: 2026-05-30
+
+## Entries
+
+### 2026-05-30 09:00 local - claude - rollover session entry
+#### State
+- Bookkeeping for the rollover.
+
+### 2026-05-29 11:00 local - claude - feature work
+- Implemented X.
+
+#### 2026-05-29 follow-up
+- Fixed the import edge case later the same day; belongs to the entry above.
+
+### 2026-05-28 10:00 local - codex - older work
+- Body.
+
+### 2026-05-27 10:00 local - gemini - older still
+- Body.
+EOF
+}
+d="$tmp_root/nested"
+mkdir -p "$d/archive"
+make_nested_log "$d/log.md"
+# --keep 2: with the loose matcher the nested heading was the 3rd "entry" and
+# became the split line, tearing "feature work" apart.
+run_compact "$d/log.md" --keep 2 --archive "$d/archive/context-log-2026.md" \
+  --manifest "$d/archive/manifest.md" --rollover-id 2026-05-31-1 \
+  --require-top-entry "rollover session"
+assert_rc 0 "$COMPACT_RC" "nested heading rollover"
+assert_contains "$COMPACT_OUT" "kept 2, archived 2" "nested: only real entries counted"
+# The kept "feature work" entry keeps its nested sub-heading; the archive gets
+# whole entries and must not start with an orphaned "####" fragment.
+assert_file_contains "$d/log.md" "#### 2026-05-29 follow-up" "nested: sub-heading stays with kept entry"
+[[ "$(head -c 4 "$d/archive/context-log-2026.md")" != "####" ]] ||
+  fail "nested: archive must not start with an orphaned fragment"
+pass=$((pass + 1))
+[[ "$(count_entries "$d/log.md")" -eq 2 ]] || fail "nested: live log should keep 2 entries"
+pass=$((pass + 1))
+[[ "$(count_entries "$d/archive/context-log-2026.md")" -eq 2 ]] || fail "nested: archive should hold 2 entries"
+pass=$((pass + 1))
+assert_file_contains "$d/archive/manifest.md" \
+  "- newest_archived: 2026-05-28 10:00 local - codex - older work" "nested: boundary is a real entry"
+"$checker" "$d/log.md" --archive "$d/archive/context-log-2026.md" \
+  --manifest "$d/archive/manifest.md" >/dev/null || fail "nested: checker rejected the result"
+pass=$((pass + 1))
+
+# --- Nested dated heading must not inflate the rollover trigger ------------
+# (regression: 4 real entries + 1 nested dated heading counted as 5, so
+# --keep 4 rolled over a should-be no-op log and archived only the fragment)
+d="$tmp_root/nested-noop"
+mkdir -p "$d/archive"
+make_nested_log "$d/log.md"
+before="$(cksum "$d/log.md")"
+run_compact "$d/log.md" --keep 4 --archive "$d/archive/context-log-2026.md" \
+  --manifest "$d/archive/manifest.md" --rollover-id x --require-top-entry "rollover session"
+assert_rc 0 "$COMPACT_RC" "nested no-op keep==real total"
+assert_contains "$COMPACT_OUT" "Nothing to roll over" "nested no-op message"
+[[ "$(cksum "$d/log.md")" == "$before" ]] || fail "nested no-op: live log must be unchanged"
+pass=$((pass + 1))
+assert_not_exists "$d/archive/manifest.md" "nested no-op: no manifest written"
 
 echo "compact-context-log compactor regression checks passed ($pass assertions)."

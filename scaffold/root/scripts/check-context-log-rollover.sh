@@ -36,7 +36,9 @@ Checks (when --manifest is given -- Layer-2 rollover assertions):
 
 Section headings are matched exactly (a distinct heading such as
 "## Current Snapshot Format Notes" is not a duplicate), and CRLF line endings
-are tolerated. Entry heading styles inside "## Entries" are not constrained.
+are tolerated. Live entry-heading style is enforced by the pre-commit hook, not
+here; archive boundary verification counts only canonical
+"### YYYY-MM-DD HH:MM local - <agent> - <topic>" entry headings.
 
 The rollover manifest (parsed source of truth) holds one record per rollover,
 newest first. All fields are required; the *_archived headings are the entry
@@ -278,8 +280,10 @@ parse_live_pointer() {
 }
 
 # Archive entry-heading extremes + presence of the named newest/oldest headings.
-# An "entry heading" is any heading (outside a fence) whose text starts with a
-# YYYY-MM-DD date; timestamps normalize to "YYYY-MM-DD HH:MM" (00:00 if no time)
+# An "entry heading" is a canonical "### YYYY-MM-DD HH:MM local - <agent> -
+# <topic>" heading outside a fence (the shape the pre-commit hook enforces and
+# the compactor splits on); a nested sub-heading that merely starts with a date
+# is body text, not a boundary. The leading "YYYY-MM-DD HH:MM" is the timestamp,
 # so lexical compare gives chronological order and a shared minute is unambiguous.
 verify_archive_boundaries() {
   awk -v newest="$1" -v oldest="$2" '
@@ -289,22 +293,14 @@ verify_archive_boundaries() {
       sub(/[[:space:]]+$/, "", s)
       return s
     }
-    function entry_ts(text,   d, rest, t) {
-      d = substr(text, 1, 10)
-      rest = substr(text, 11)
-      if (match(rest, /[0-9][0-9]:[0-9][0-9]/)) t = substr(rest, RSTART, 5)
-      else t = "00:00"
-      return d " " t
-    }
     /^(```|~~~)/ { in_fence = !in_fence; next }
     {
       if (in_fence) next
       line = strip($0)
-      # mawk has no interval expressions ({1,6}); "#+" matches any heading depth.
-      if (line !~ /^#+[[:space:]]/) next
-      sub(/^#+[[:space:]]+/, "", line)
-      if (line !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/) next
-      ts = entry_ts(line)
+      # mawk has no interval expressions ({4}), so digits are spelled out.
+      if (line !~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] local - /) next
+      sub(/^### /, "", line)
+      ts = substr(line, 1, 16)
       n++
       # The newest entry is the top-most at the max timestamp and the oldest is
       # the bottom-most at the min timestamp (archives are newest-at-top). Ties

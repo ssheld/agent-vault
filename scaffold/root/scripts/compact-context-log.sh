@@ -183,6 +183,9 @@ strip_trailing_blanks() {
 }
 
 # Entry-heading line numbers inside the "## Entries" section (fence-aware).
+# Only canonical entry headings ("### YYYY-MM-DD HH:MM local - <agent> - <topic>",
+# the shape the pre-commit hook enforces) count: a nested sub-heading that merely
+# starts with a date must never become a split boundary or inflate the entry count.
 entry_heading_lines() {
   awk '
     /^(```|~~~)/ { in_fence = !in_fence; next }
@@ -191,9 +194,8 @@ entry_heading_lines() {
       line = $0; sub(/\r$/, "", line)
       if (line ~ /^## Entries[[:space:]]*$/) { in_entries = 1; next }
       if (!in_entries) next
-      if (line !~ /^#+[[:space:]]/) next
-      htext = line; sub(/^#+[[:space:]]+/, "", htext)
-      if (htext ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/) print NR
+      if (line !~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] local - /) next
+      print NR
     }
   ' "$1"
 }
@@ -212,17 +214,17 @@ inject_pointer() {
   ' "$2"
 }
 
-# Split a file at the first entry heading: prints "HEADER\n<n>" where line <n> is
-# the first dated heading (or 0 if none), so the caller can slice header/entries.
+# Split a file at the first entry heading: prints the line number of the first
+# canonical entry heading (nothing if none), so the caller can slice header/entries.
 first_entry_line() {
   awk '
     /^(```|~~~)/ { in_fence = !in_fence; next }
     {
       if (in_fence) next
       line = $0; sub(/\r$/, "", line)
-      if (line !~ /^#+[[:space:]]/) next
-      htext = line; sub(/^#+[[:space:]]+/, "", htext)
-      if (htext ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/) { print NR; exit }
+      if (line !~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] local - /) next
+      print NR
+      exit
     }
     END { }
   ' "$1"
@@ -233,20 +235,13 @@ first_entry_line() {
 # top-most at the max minute, oldest = bottom-most at the min minute).
 select_boundaries() {
   awk '
-    function entry_ts(text,   d, rest, t) {
-      d = substr(text, 1, 10); rest = substr(text, 11)
-      if (match(rest, /[0-9][0-9]:[0-9][0-9]/)) t = substr(rest, RSTART, 5)
-      else t = "00:00"
-      return d " " t
-    }
     /^(```|~~~)/ { in_fence = !in_fence; next }
     {
       if (in_fence) next
       line = $0; sub(/\r$/, "", line)
-      if (line !~ /^#+[[:space:]]/) next
-      sub(/^#+[[:space:]]+/, "", line)
-      if (line !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/) next
-      ts = entry_ts(line); n++
+      if (line !~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] local - /) next
+      sub(/^### /, "", line)
+      ts = substr(line, 1, 16); n++
       if (n == 1 || ts > max_ts) { max_ts = ts; max_h = line }
       if (n == 1 || ts <= min_ts) { min_ts = ts; min_h = line }
     }
