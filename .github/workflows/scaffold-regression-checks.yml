@@ -83,11 +83,26 @@ jobs:
         uses: actions/checkout@v4
       - name: Ensure bash 4+ on macOS (Apple ships bash 3.2; suites use mapfile/declare -A)
         if: runner.os == 'macOS'
+        # Assert against the exact Homebrew binary, not bare "bash": this
+        # step's shell hashes "bash" to /bin/bash on first use, so a bare
+        # post-install "bash --version" reports 3.2 even after a successful
+        # install and cannot prove the postcondition.
         run: |
-          if ! bash -c '[[ ${BASH_VERSINFO[0]} -ge 4 ]]'; then
+          brew_bin="$(brew --prefix)/bin"
+          if [ ! -x "$brew_bin/bash" ]; then
             brew install bash
           fi
-          bash --version | head -1
+          echo "$brew_bin" >> "$GITHUB_PATH"
+          "$brew_bin/bash" -c '[[ ${BASH_VERSINFO[0]} -ge 4 ]]'
+          "$brew_bin/bash" --version | head -1
+      - name: Verify the suite interpreter is bash 4+ (macOS)
+        if: runner.os == 'macOS'
+        # Fresh step, fresh shell: bare "bash" here resolves exactly as it
+        # will in every suite step below, so this asserts what the suites
+        # actually run with (not just that a modern bash exists somewhere).
+        run: |
+          command -v bash
+          bash -c 'echo "suite bash: $BASH_VERSION"; [[ ${BASH_VERSINFO[0]} -ge 4 ]]'
       - name: Verify managed .gitignore handling
         run: bash scripts/test-gitignore-management.sh
       - name: Verify coding standards sync behavior
