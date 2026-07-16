@@ -144,7 +144,11 @@ Run the scaffold regression scripts locally when changing bootstrap, sync, or tr
 - `bash scripts/test-remove-worktree.sh`
 - `bash scripts/test-worktree-helper-sync.sh`
 
-CI also runs these checks via `.github/workflows/scaffold-regression-checks.yml`.
+CI runs these checks via `.github/workflows/scaffold-regression-checks.yml` on
+both `ubuntu-latest` and `macos-latest`, so GNU-vs-BSD userland assumptions in
+the shell scripts fail in CI instead of surfacing on contributor machines.
+Locally the suites need bash 4+ (macOS ships bash 3.2 at `/bin/bash`; use
+Homebrew bash).
 
 ## Updating Existing Repos
 `update-project.sh` updates these managed scaffold files:
