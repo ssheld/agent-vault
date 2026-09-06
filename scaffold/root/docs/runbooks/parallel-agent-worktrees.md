@@ -14,6 +14,21 @@ The core rule is:
 Terminal multiplexers are optional and intentionally not part of this workflow.
 The helpers only create or remove Git worktrees.
 
+## Requirements
+
+The two worktree helpers require Git 2.36+ and Bash 3.2+. They reject unsupported
+Git before changing directories, branches, or worktrees. Upgrade Git and ensure
+the supported executable is first on `PATH`. Git 2.36 added the NUL-delimited
+worktree listing used to preserve paths containing newlines.
+[Git 2.36 release notes](https://github.com/git/git/blob/v2.36.0/Documentation/RelNotes/2.36.0.txt)
+
+The primary checkout must be available and non-bare. Bare-only layouts and
+inconsistent registry identities are unsupported. The helpers verify the
+primary checkout reported by Git instead of inferring it from a `.git` parent.
+If a separate-metadata layout reports its metadata directory as the primary
+checkout, the helpers refuse it; restore a conventional primary-checkout layout
+or repair the repository metadata before retrying.
+
 ## Why Worktrees
 Use Git worktrees when you want to:
 
@@ -95,9 +110,18 @@ AGENT_VAULT_WORKTREE_ROOT=../custom-worktrees \
   ./scripts/new-worktree.sh --agent codex --issue 126 --slug api-refactor
 ```
 
+The same rules apply when invoking a helper copy inside a linked worktree. The
+helper prints `Primary: ...` and creates a sibling under the primary checkout
+by default. A custom root inside a linked worktree is refused, including
+symlink aliases. Reuse also refuses existing unsafe layouts. Preserve their
+contents and arrange separate cleanup or relocation; the helper does not
+automatically move existing worktrees.
+
 ## Repo-Local Worktree Notes
-Git handles nested worktrees under `.worktrees/<name>/` cleanly; each nested
-worktree has a `.git` file that points back to Git's worktree metadata.
+Sibling linked worktrees under the primary checkout's `.worktrees/<name>/`
+directory are supported; each has a `.git` file pointing to Git's metadata.
+Do not put one linked worktree inside another: ignored inner contents can be
+deleted when the outer directory is removed.
 Generated `.gitignore` management keeps `/.worktrees/` ignored so the main
 checkout's status stays clean.
 
@@ -205,6 +229,68 @@ instead of forcing through.
 
 Do not run `--force` autonomously. It is a user-confirmed escape hatch for an
 intentionally disposable dirty worktree, not part of normal cleanup.
+
+### Registered Descendants
+
+Removal refuses a target containing any other registered worktree, including
+dirty, detached, locked, or missing descendants. This protection also applies
+with `--force`. Preserve the inner worktree's contents and handle its cleanup
+or relocation separately before removing the outer worktree.
+
+For a missing descendant, first confirm whether it was deleted, moved, or is
+temporarily unavailable (for example, an unmounted drive). Restore access or
+repair its registration as appropriate. For confirmed obsolete records, preview
+`git worktree prune --dry-run --verbose`, inspect all proposed removals, then
+prune and retry when appropriate. The helper does not automatically prune a
+descendant record to bypass this guard.
+
+Both helpers automatically prune a requested stale record only when no other
+registered worktree is missing or marked prunable by Git. Pruning is
+repository-wide: an unrelated cleanup must not silently discard another
+worktree's containment evidence. This also covers existing directories with
+missing worktree metadata, not just missing directories. Investigate and
+restore/repair those records, or deliberately preview and inspect the proposed
+prune before proceeding. Ordinary single-stale-record recovery remains supported.
+
+The registry is checked again immediately before removal. This is not an atomic
+guarantee against concurrent raw Git worktree commands or filesystem changes;
+complete manual worktree creation, moves, and repairs before cleanup.
+
+### Protected Branches
+
+All branch-deletion paths protect these exact local branch names:
+
+- `main` and `master`.
+- The branch attached to the actual primary checkout, if attached.
+- Defaults named by locally recorded `refs/remotes/<remote>/HEAD` references.
+- Additional names in repeatable local `agentVault.protectedBranch` settings.
+
+For example:
+
+```bash
+git config --local --add agentVault.protectedBranch develop
+git config --local --add agentVault.protectedBranch release/stable
+```
+
+Configuration values are literal branch names, not patterns. Remote-HEAD
+metadata may be absent or stale; a repository with no remotes relies on the
+other protection sources. Additional integration branches should be configured
+explicitly. Cleanup performs no network calls.
+
+Neither `--force` nor `--delete-branch` overrides protection. Ordinary approved
+disposable-branch deletion remains supported when no worktree is registered or
+after its obsolete worktree record is pruned.
+
+To deliberately retire a protected branch (for example, a vestigial `master`
+after a default-branch rename), obtain owner confirmation, inspect the branch
+tip and any commits unique to it, and verify that the commits to retain are
+reachable from a retained branch or tag. Then perform the specifically approved
+branch deletion directly with Git from the primary checkout. Do not use manual
+deletion to bypass an unexplained safety refusal.
+
+Existing projects keep their local runbooks during scaffold updates. The
+helper's refusal messages and `--help` therefore include the essential owner
+confirmation and commit-preservation requirements independently of this file.
 
 ## Existing Project Command Snippet
 For existing projects whose `agent-vault/project-commands.md` predates these

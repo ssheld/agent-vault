@@ -25,6 +25,7 @@ on:
       - "scripts/test-new-worktree.sh"
       - "scripts/test-remove-worktree.sh"
       - "scripts/test-worktree-helper-sync.sh"
+      - "scripts/lib/worktree-test.sh"
       - "scripts/measure-agent-memory-load.sh"
       - "scripts/parse-claude-memory-trace.py"
       - "scripts/test-check-memory-budget.sh"
@@ -58,6 +59,7 @@ on:
       - "scripts/test-new-worktree.sh"
       - "scripts/test-remove-worktree.sh"
       - "scripts/test-worktree-helper-sync.sh"
+      - "scripts/lib/worktree-test.sh"
       - "scripts/measure-agent-memory-load.sh"
       - "scripts/parse-claude-memory-trace.py"
       - "scripts/test-check-memory-budget.sh"
@@ -129,6 +131,14 @@ jobs:
         run: bash scripts/test-new-worktree.sh
       - name: Verify worktree removal helper
         run: bash scripts/test-remove-worktree.sh
+      - name: Verify worktree helpers on stock Bash 3.2 (macOS)
+        if: runner.os == 'macOS'
+        env:
+          WORKTREE_HELPER_BASH: /bin/bash
+        run: |
+          /bin/bash -c '[[ ${BASH_VERSINFO[0]} -eq 3 && ${BASH_VERSINFO[1]} -eq 2 ]]'
+          bash scripts/test-new-worktree.sh
+          bash scripts/test-remove-worktree.sh
       - name: Verify worktree helper scaffold sync
         run: bash scripts/test-worktree-helper-sync.sh
       - name: Verify memory budget checker
