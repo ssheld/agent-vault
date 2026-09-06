@@ -54,10 +54,11 @@ covered_by or quick_rule reference on its matching class. Archival-only records
 and retained records without a non-empty quick_rule need no rules source.
 Explicitly named missing files are usage/IO errors (exit 2) in either mode.
 
-Rule liveness is a substring match, so name the rule with distinctive text. The
-archive defaults to "<manifest-dir>/lessons-archive.md"; the canonical live
-"<manifest-dir>/../../lessons.md" is always a rules source when present, and
---rules ADDS further sources (e.g. shared-rules.md) rather than replacing it.
+Rule liveness is a substring match, so name the rule with distinctive text.
+The archive defaults to "<manifest-dir>/lessons-archive.md", including when
+--archive "" is supplied. The canonical live "<manifest-dir>/../../lessons.md"
+is always a rules source when present, and --rules ADDS further sources (e.g.
+shared-rules.md) rather than replacing it.
 Empty --rules arguments are ignored; an existing empty file is still a source.
 
 Options:
@@ -132,6 +133,8 @@ for rule_src in "${rules_files[@]:-}"; do
 done
 
 manifest_dir="$(cd "$(dirname "$manifest")" && pwd -P)"
+default_rules_dir="$(dirname "$(dirname "$manifest_dir")")"
+default_rules_file="${default_rules_dir%/}/lessons.md"
 
 # Default the archive and the live-rules source to the canonical layout when the
 # caller did not name them and the files exist.
@@ -140,8 +143,8 @@ if [[ -z "$archive_file" && -f "$manifest_dir/lessons-archive.md" ]]; then
 fi
 # The canonical live lessons.md is always a rules source when present; --rules
 # ADDS further sources (e.g. shared-rules.md) rather than replacing the default.
-if [[ -f "$manifest_dir/../../lessons.md" ]]; then
-  rules_files+=("$manifest_dir/../../lessons.md")
+if [[ -f "$default_rules_file" ]]; then
+  rules_files+=("$default_rules_file")
 fi
 
 # Empty explicit arguments are accepted for compatibility, but do not provide
@@ -283,7 +286,7 @@ for ((i = 1; i <= count; i++)); do
       rule_is_live "$covered" ||
         findings+=("lesson \"$key\" covered_by rule \"$covered\" was not found in any live rules source")
     else
-      findings+=("lesson \"$key\" covered_by liveness check skipped: no live rules source resolved (expected \"$manifest_dir/../../lessons.md\"; supply --rules <file>)")
+      findings+=("lesson \"$key\" covered_by liveness check skipped: no live rules source resolved (expected \"$default_rules_file\"; supply --rules <file>)")
     fi
   elif [[ "${HAS_COVERED[$i]:-false}" == "true" && -n "${COVERED[$i]:-}" ]]; then
     findings+=("lesson \"$key\" sets covered_by but is not covered-by-a-named-always-on-rule")
@@ -299,7 +302,7 @@ for ((i = 1; i <= count; i++)); do
         rule_is_live "$quick" ||
           findings+=("lesson \"$key\" quick_rule \"$quick\" was not found in any live rules source (its retained one-line rule should still be in lessons.md)")
       else
-        findings+=("lesson \"$key\" quick_rule liveness check skipped: no live rules source resolved (expected \"$manifest_dir/../../lessons.md\"; supply --rules <file>)")
+        findings+=("lesson \"$key\" quick_rule liveness check skipped: no live rules source resolved (expected \"$default_rules_file\"; supply --rules <file>)")
       fi
     fi
   elif [[ "${HAS_QUICK[$i]:-false}" == "true" && -n "${QUICK[$i]:-}" ]]; then

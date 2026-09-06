@@ -282,7 +282,8 @@ The canonical `<manifest-dir>/../../lessons.md` is always a source when present
 and repeatable `--rules` **adds** more (e.g. `shared-rules.md`) rather than
 replacing it. Empty `--rules` arguments are ignored; an existing empty file
 counts as a source but cannot satisfy a non-empty reference. The archive
-defaults to `lessons-archive.md` next to the manifest.
+defaults to `lessons-archive.md` next to the manifest. Passing `--archive ""`
+also uses this default, including the usual skipped-check finding if it is absent.
 
 The checker **warns by default** (exit 0), including when implicit sources are
 unavailable. It reports which archive or rule-liveness checks were skipped,

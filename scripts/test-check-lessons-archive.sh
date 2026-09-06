@@ -83,6 +83,9 @@ cat >"$(manifest_path "$d")" <<'EOF'
 EOF
 expect_result 0 "check passed" "$(manifest_path "$d")"
 expect_result 0 "check passed" "$(manifest_path "$d")" --strict
+# Empty --archive arguments retain canonical discovery in both modes.
+expect_result 0 "check passed" "$(manifest_path "$d")" --archive ""
+expect_result 0 "check passed" "$(manifest_path "$d")" --strict --archive ""
 
 # --- 2. Invalid classification: warn (exit 0) by default, fail under --strict
 d="$tmp_root/badclass"
@@ -228,14 +231,17 @@ missing_sources="archive checks skipped
 $d/agent-vault/context/archive/lessons-archive.md
 --archive <file>
 lesson \"some lesson\" covered_by liveness check skipped
-$d/agent-vault/context/archive/../../lessons.md
+$d/agent-vault/lessons.md
 --rules <file>"
 expect_result 0 "$missing_sources" "$(manifest_path "$d")"
 expect_result 1 "$missing_sources" "$(manifest_path "$d")" --strict
 expect_result 1 "$missing_sources" "$(manifest_path "$d")" --strict --quiet
+set +e
 quiet_out="$("$checker" "$(manifest_path "$d")" --quiet 2>&1)"
-[[ -z "$quiet_out" ]] || {
-  echo "FAIL: --quiet should suppress missing-source warnings; got: $quiet_out" >&2
+quiet_rc=$?
+set -e
+[[ "$quiet_rc" -eq 0 && -z "$quiet_out" ]] || {
+  echo "FAIL: --quiet should suppress missing-source warnings with rc 0; rc=$quiet_rc out=$quiet_out" >&2
   exit 1
 }
 
@@ -366,6 +372,8 @@ cat >"$(manifest_path "$d")" <<'EOF'
 EOF
 expect_result 0 "archive checks skipped" "$(manifest_path "$d")"
 expect_result 1 "archive checks skipped" "$(manifest_path "$d")" --strict
+expect_result 0 "archive checks skipped" "$(manifest_path "$d")" --archive ""
+expect_result 1 "archive checks skipped" "$(manifest_path "$d")" --strict --archive ""
 printf '%s\n' '# Empty manifest' >"$(manifest_path "$d")"
 expect_result 1 "archive checks skipped" "$(manifest_path "$d")" --strict
 # With an empty archive, completeness can be checked and the empty pair passes.
@@ -386,14 +394,17 @@ for field in covered_by quick_rule; do
 EOF
   missing_rules="lesson \"some lesson\" $field liveness check skipped
 no live rules source resolved
-$d/agent-vault/context/archive/../../lessons.md
+$d/agent-vault/lessons.md
 --rules <file>"
   expect_result 0 "$missing_rules" "$(manifest_path "$d")"
   expect_result 1 "$missing_rules" "$(manifest_path "$d")" --strict
   expect_result 1 "$missing_rules" "$(manifest_path "$d")" --strict --quiet
+  set +e
   quiet_out="$("$checker" "$(manifest_path "$d")" --quiet 2>&1)"
-  [[ -z "$quiet_out" ]] || {
-    echo "FAIL: --quiet should suppress missing-$field warnings; got: $quiet_out" >&2
+  quiet_rc=$?
+  set -e
+  [[ "$quiet_rc" -eq 0 && -z "$quiet_out" ]] || {
+    echo "FAIL: --quiet should suppress missing-$field warnings with rc 0; rc=$quiet_rc out=$quiet_out" >&2
     exit 1
   }
 
@@ -461,5 +472,30 @@ printf '%s\n' '### some lesson' >"$d/archive.md"
 printf '%s\n' 'a live rule' >"$d/rules.md"
 expect_result 0 "check passed" "$d/manifests/nested/manifest.md" --strict \
   --archive "$d/archive.md" --rules "$d/rules.md"
+
+# --- 18. Report one missing archive and one liveness finding per lesson ---
+d="$tmp_root/multiple-missing-sources"
+mkdir -p "$d/agent-vault/context/archive"
+cat >"$(manifest_path "$d")" <<'EOF'
+## lesson: covered lesson
+- classification: covered-by-a-named-always-on-rule
+- covered_by: a covered rule
+## lesson: retained lesson
+- classification: retained-as-quick-rule
+- quick_rule: a retained rule
+EOF
+multi_rc=0
+multi_out="$("$checker" "$(manifest_path "$d")" --strict 2>&1)" || multi_rc=$?
+finding_counts="$(awk '
+  /^- archive checks skipped:/ { archives++ }
+  /^- lesson "covered lesson" covered_by liveness check skipped:/ { covered++ }
+  /^- lesson "retained lesson" quick_rule liveness check skipped:/ { quick++ }
+  END { printf "%d %d %d", archives, covered, quick }
+' <<<"$multi_out")"
+if [[ "$multi_rc" -ne 1 || "$finding_counts" != "1 1 1" || "$multi_out" == *"check passed"* ]]; then
+  echo "FAIL: expected one archive finding and one per lesson; rc=$multi_rc counts=$finding_counts" >&2
+  printf '%s\n' "$multi_out" >&2
+  exit 1
+fi
 
 echo "lessons-archive checker regression checks passed."
