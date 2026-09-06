@@ -97,6 +97,9 @@ setup_repo() {
   git -C "$seed" push -u origin main >/dev/null
 
   git clone "$origin" "$working" >/dev/null
+  # Clone does not inherit the seed's local identity; descendant fixtures commit.
+  git -C "$working" config user.name "Test User"
+  git -C "$working" config user.email "test@example.com"
   printf '%s\n' "$working"
 }
 
