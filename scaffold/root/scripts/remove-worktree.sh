@@ -33,6 +33,9 @@ unavailable. Restore/repair it when appropriate. For confirmed obsolete records,
 preview git worktree prune --dry-run --verbose, inspect all proposed removals,
 then prune and retry. This helper never prunes a descendant to bypass the guard.
 
+Automatic stale-record pruning is refused if another registered worktree is
+missing or prunable. Inspect those records before any repository-wide prune.
+
 Protected branches: main, master, the primary checkout's attached branch,
 locally recorded remote defaults, and additional literal names configured with:
   git config --local --add agentVault.protectedBranch develop
@@ -119,13 +122,14 @@ read_git_path() {
 }
 
 load_worktrees() {
-  local field="" path="" branch="" locked=false bare=false
+  local field="" path="" branch="" locked=false bare=false prunable=false
   git -C "$PROJECT_DIR" worktree list --porcelain -z >"$WORKTREE_SCRATCH/registry" ||
     die "Could not read Git worktree registry; refusing to change worktrees."
   WORKTREE_PATHS=()
   WORKTREE_BRANCHES=()
   WORKTREE_LOCKED=()
   WORKTREE_BARE=()
+  WORKTREE_PRUNABLE=()
   while IFS= read -r -d '' field; do
     case "$field" in
       worktree\ *)
@@ -135,7 +139,8 @@ load_worktrees() {
       branch\ refs/heads/*) branch="${field#branch refs/heads/}" ;;
       locked | locked\ *) locked=true ;;
       bare) bare=true ;;
-      HEAD\ * | detached | prunable | prunable\ *) ;;
+      prunable | prunable\ *) prunable=true ;;
+      HEAD\ * | detached) ;;
       '')
         [[ -n "$path" ]] || die "Malformed Git worktree registry."
         canonical_path "$path"
@@ -143,10 +148,12 @@ load_worktrees() {
         WORKTREE_BRANCHES+=("$branch")
         WORKTREE_LOCKED+=("$locked")
         WORKTREE_BARE+=("$bare")
+        WORKTREE_PRUNABLE+=("$prunable")
         path=""
         branch=""
         locked=false
         bare=false
+        prunable=false
         ;;
       *) die "Unrecognized Git worktree registry field: $field" ;;
     esac
@@ -183,6 +190,19 @@ find_branch_index() {
     if [[ "${WORKTREE_BRANCHES[$i]}" == "$name" ]]; then
       WORKTREE_INDEX="$i"
       break
+    fi
+  done
+}
+
+# Git pruning is repository-wide, not scoped to the branch being recovered.
+# Preserve every other missing/prunable record until an operator inspects it.
+ensure_safe_prune() {
+  local requested="$1" i registered
+  load_worktrees
+  for ((i = 0; i < ${#WORKTREE_PATHS[@]}; i++)); do
+    registered="${WORKTREE_PATHS[$i]}"
+    if [[ "$registered" != "$requested" && (! -d "$registered" || "${WORKTREE_PRUNABLE[$i]}" == true) ]]; then
+      die "Refusing automatic prune because another registered worktree is missing or prunable: $registered. Verify whether it was deleted, moved, is temporarily unavailable, or needs metadata repair; restore/repair as appropriate. For confirmed obsolete records, preview git worktree prune --dry-run --verbose, inspect all proposed removals, then prune and retry."
     fi
   done
 }
@@ -351,6 +371,7 @@ if [[ -n "$TARGET_PATH" ]]; then
   [[ "$TARGET_PATH" == /* ]] || TARGET_PATH="$PROJECT_DIR/$TARGET_PATH"
   canonical_path "$TARGET_PATH"
   TARGET_PATH="$CANONICAL_PATH"
+  [[ -d "$TARGET_PATH" ]] || die "Worktree path does not exist: $TARGET_PATH"
 fi
 
 if [[ -n "$BRANCH_NAME" ]]; then
@@ -378,6 +399,7 @@ if [[ -n "$BRANCH_NAME" ]]; then
     [[ -z "$TARGET_PATH" ]] || die "Worktree path does not exist: $TARGET_PATH"
     [[ "${WORKTREE_LOCKED[$WORKTREE_INDEX]}" == false ]] ||
       die "Missing worktree is locked: $resolved_path. Restore or repair it before retrying."
+    ensure_safe_prune "$resolved_path"
     git -C "$PROJECT_DIR" worktree prune || die "Could not prune stale worktree metadata."
     load_worktrees
     find_branch_index "$BRANCH_NAME"

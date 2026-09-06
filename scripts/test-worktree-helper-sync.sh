@@ -112,7 +112,7 @@ run_update_project() {
 }
 
 assert_generated_safety() {
-  local target="$1" label="$2" outer inner output rc=0
+  local target="$1" label="$2" outer inner stale helper output rc=0
   # Commit only the synthetic helper fixture; runtime metadata hooks are tested
   # by their own suites and do not apply to this fixture bootstrap commit.
   git -C "$target" add .gitignore scripts/new-worktree.sh scripts/remove-worktree.sh
@@ -140,6 +140,27 @@ assert_generated_safety() {
   assert_output_contains "$output" "owner confirmation" "$label refusal contains owner requirement"
   assert_output_contains "$output" "commits are retained before deletion" "$label refusal contains preservation requirement"
   assert_worktree_state_unchanged "$target" "$tmp_root/$label-protected" "$label branch refusal"
+
+  # Synced helpers must not erase a missing descendant while recovering an
+  # unrelated stale record, even when the project's runbook is absent or old.
+  mv "$inner" "$tmp_root/$label-inner-saved"
+  stale="$target/.worktrees/stale"
+  git -C "$target" worktree add -b codex/138 "$stale" main >/dev/null
+  mv "$stale" "$tmp_root/$label-stale-saved"
+  snapshot_worktree_state "$target" "$tmp_root/$label-prune"
+  for helper in new remove; do
+    rc=0
+    if [[ "$helper" == new ]]; then
+      output="$("$helper_bash" "$target/scripts/new-worktree.sh" --agent codex --issue 138 2>&1)" || rc=$?
+    else
+      output="$("$helper_bash" "$target/scripts/remove-worktree.sh" --branch codex/138 --delete-branch 2>&1)" || rc=$?
+    fi
+    assert_exit_code 1 "$rc" "$label $helper refuses unrelated prune"
+    assert_output_contains "$output" "another registered worktree is missing or prunable" "$label $helper explains prune refusal"
+    assert_output_contains "$output" "git worktree prune --dry-run --verbose" "$label $helper gives self-contained prune guidance"
+    assert_worktree_state_unchanged "$target" "$tmp_root/$label-prune" "$label $helper prune refusal"
+    assert_equal 'fixture data' "$(cat "$tmp_root/$label-inner-saved/sentinel")" "$label $helper preserves moved data"
+  done
 }
 
 # --- Test 1: new-project seeds executable managed helpers and the runbook ---

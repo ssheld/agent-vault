@@ -256,6 +256,60 @@ assert_exit_code 1 "$rc" "remove-missing-path exits 1"
 assert_output_contains "$output" "Worktree path does not exist: $missing_path" "remove-missing-path shows error"
 assert_path_exists "$working" "remove-missing-path preserves checkout"
 
+# Missing explicit paths are diagnosed before branch/path disagreement.
+working="$(setup_repo missing-explicit-path)"
+target="$(create_worktree "$working" codex/path-target missing-path-target)"
+snapshot_worktree_state "$working" "$tmp_root/missing-explicit-path"
+rc=0
+output="$("$helper_bash" "$working/scripts/remove-worktree.sh" --branch codex/path-target --path "$working/missing" --delete-branch 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "missing explicit branch/path target rejected"
+assert_output_contains "$output" "Worktree path does not exist: $working/missing" "missing branch/path diagnostic"
+assert_path_exists "$target/.git" "missing explicit path preserves branch checkout"
+assert_worktree_state_unchanged "$working" "$tmp_root/missing-explicit-path" "missing explicit branch/path"
+
+# Unrelated stale cleanup cannot globally prune a descendant's safety record.
+for mode in missing detached locked prunable; do
+  working="$(setup_repo "prune-remove-$mode")"
+  outer="$working/.worktrees/outer"
+  inner="$outer/.worktrees/inner"
+  git -C "$working" worktree add -b codex/outer "$outer" main >/dev/null
+  if [[ "$mode" == detached ]]; then
+    git -C "$working" worktree add --detach "$inner" main >/dev/null
+  else
+    git -C "$working" worktree add -b codex/inner "$inner" main >/dev/null
+  fi
+  printf 'preserve unrelated bytes\n' >"$inner/sentinel"
+  if [[ "$mode" == locked ]]; then
+    git -C "$working" worktree lock "$inner"
+  fi
+  saved="$tmp_root/prune-remove-$mode-saved"
+  if [[ "$mode" == prunable ]]; then
+    mv "$inner/.git" "$saved.git"
+  else
+    mv "$inner" "$saved"
+  fi
+  stale="$(create_worktree "$working" codex/stale "prune-remove-$mode-requested")"
+  mv "$stale" "$stale-saved"
+  snapshot_worktree_state "$working" "$tmp_root/prune-remove-$mode"
+  rc=0
+  output="$("$helper_bash" "$working/scripts/remove-worktree.sh" --branch codex/stale --delete-branch --force 2>&1)" || rc=$?
+  assert_exit_code 1 "$rc" "$mode descendant blocks unrelated removal prune"
+  assert_output_contains "$output" "another registered worktree is missing or prunable: $inner" "$mode removal prune identifies blocker"
+  assert_output_contains "$output" "git worktree prune --dry-run --verbose" "$mode removal prune explains inspection"
+  assert_worktree_state_unchanged "$working" "$tmp_root/prune-remove-$mode" "$mode unrelated removal prune"
+  rc=0
+  output="$("$helper_bash" "$working/scripts/remove-worktree.sh" --branch codex/outer --force 2>&1)" || rc=$?
+  assert_exit_code 1 "$rc" "$mode outer remains protected after unrelated cleanup"
+  assert_output_contains "$output" "descendant worktree: $inner" "$mode removal containment evidence survives"
+  assert_path_exists "$outer/.git" "$mode unrelated cleanup preserves outer checkout"
+  assert_worktree_state_unchanged "$working" "$tmp_root/prune-remove-$mode" "$mode subsequent outer refusal"
+  if [[ "$mode" == prunable ]]; then
+    assert_equal 'preserve unrelated bytes' "$(cat "$inner/sentinel" 2>/dev/null || true)" "$mode unrelated cleanup preserves inner bytes"
+  else
+    assert_equal 'preserve unrelated bytes' "$(cat "$saved/sentinel")" "$mode unrelated cleanup preserves moved bytes"
+  fi
+done
+
 # --- An ignored dirty descendant must survive ordinary outer cleanup ---
 working="$(setup_repo nested-data)"
 outer="$working/.worktrees/outer"

@@ -433,6 +433,66 @@ assert_output_contains "$output" "repair repository/worktree metadata" "inconsis
 assert_path_missing "$tmp_root/creation-metadata/.worktrees" "inconsistent identity creates no root"
 assert_worktree_state_unchanged "$working" "$tmp_root/inconsistent-creation" "inconsistent identity"
 
+# Reusing the primary's branch needs branch guidance, not checkout relocation.
+working="$(setup_repo primary-branch-reuse)"
+caller="$working/.worktrees/caller"
+git -C "$working" worktree add -b codex/caller "$caller" main >/dev/null
+git -C "$working" switch -c codex/151 >/dev/null
+snapshot_worktree_state "$working" "$tmp_root/primary-reuse"
+for source_checkout in "$working" "$caller"; do
+  rc=0
+  output="$(run_new_worktree_default "$source_checkout" --agent codex --issue 151 2>&1)" || rc=$?
+  assert_exit_code 1 "$rc" "primary branch cannot be reused as a linked worktree"
+  assert_output_contains "$output" "Branch codex/151 is attached to the primary checkout" "primary reuse identifies the branch"
+  assert_output_contains "$output" "choose a different --agent/--issue/--slug" "primary reuse gives branch-specific remediation"
+  assert_path_missing "$working/.worktrees/codex-151" "primary reuse creates no linked checkout"
+  assert_worktree_state_unchanged "$working" "$tmp_root/primary-reuse" "primary branch reuse"
+done
+
+# Pruning one stale branch must not erase any other record's layout evidence.
+for mode in missing detached locked prunable; do
+  working="$(setup_repo "prune-create-$mode")"
+  future_root="$tmp_root/prune-create-$mode-future"
+  other="$future_root/codex-153/inner"
+  if [[ "$mode" == detached ]]; then
+    git -C "$working" worktree add --detach "$other" main >/dev/null
+  else
+    git -C "$working" worktree add -b codex/other "$other" main >/dev/null
+  fi
+  printf 'preserve unrelated bytes\n' >"$other/sentinel"
+  if [[ "$mode" == locked ]]; then
+    git -C "$working" worktree lock "$other"
+  fi
+  saved="$tmp_root/prune-create-$mode-saved"
+  if [[ "$mode" == prunable ]]; then
+    # Git may prune an existing directory whose .git file is missing.
+    mv "$other/.git" "$saved.git"
+    sentinel="$other/sentinel"
+  else
+    mv "$other" "$saved"
+    rmdir "$future_root/codex-153"
+    sentinel="$saved/sentinel"
+  fi
+  stale="$tmp_root/prune-create-$mode-requested"
+  git -C "$working" worktree add -b codex/152 "$stale" main >/dev/null
+  mv "$stale" "$stale-saved"
+  snapshot_worktree_state "$working" "$tmp_root/prune-create-$mode"
+  new_root="$tmp_root/prune-create-$mode-new-root"
+  rc=0
+  output="$(run_new_worktree "$working" --root "$new_root" --agent codex --issue 152 2>&1)" || rc=$?
+  assert_exit_code 1 "$rc" "$mode record blocks unrelated creation prune"
+  assert_output_contains "$output" "another registered worktree is missing or prunable: $other" "$mode creation prune identifies blocker"
+  assert_output_contains "$output" "git worktree prune --dry-run --verbose" "$mode creation prune explains inspection"
+  assert_path_missing "$new_root" "$mode creation prune creates no destination"
+  assert_worktree_state_unchanged "$working" "$tmp_root/prune-create-$mode" "$mode unrelated creation prune"
+  assert_equal 'preserve unrelated bytes' "$(cat "$sentinel")" "$mode creation prune preserves bytes"
+  rc=0
+  output="$(run_new_worktree "$working" --root "$future_root" --agent codex --issue 153 2>&1)" || rc=$?
+  assert_exit_code 1 "$rc" "$mode wrapped worktree remains protected"
+  assert_output_contains "$output" "containing registered worktree: $other" "$mode creation wrap evidence survives"
+  assert_worktree_state_unchanged "$working" "$tmp_root/prune-create-$mode" "$mode subsequent wrap refusal"
+done
+
 # Version preflight handles numeric boundaries and vendor suffixes.
 working="$(setup_repo version-guard)"
 probe="$tmp_root/git-probe"

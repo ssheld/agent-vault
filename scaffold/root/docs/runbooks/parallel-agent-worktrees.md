@@ -244,6 +244,14 @@ repair its registration as appropriate. For confirmed obsolete records, preview
 prune and retry when appropriate. The helper does not automatically prune a
 descendant record to bypass this guard.
 
+Both helpers automatically prune a requested stale record only when no other
+registered worktree is missing or marked prunable by Git. Pruning is
+repository-wide: an unrelated cleanup must not silently discard another
+worktree's containment evidence. This also covers existing directories with
+missing worktree metadata, not just missing directories. Investigate and
+restore/repair those records, or deliberately preview and inspect the proposed
+prune before proceeding. Ordinary single-stale-record recovery remains supported.
+
 The registry is checked again immediately before removal. This is not an atomic
 guarantee against concurrent raw Git worktree commands or filesystem changes;
 complete manual worktree creation, moves, and repairs before cleanup.

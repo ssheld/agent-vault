@@ -241,6 +241,10 @@ temporarily unavailable. For obsolete records, preview
 `git worktree prune --dry-run --verbose`, inspect all proposed removals, then
 prune and retry when appropriate.
 
+Both helpers refuse automatic stale-record pruning if any other registered
+worktree is missing or marked prunable. Git pruning is repository-wide, so an
+unrelated cleanup must not discard those records without inspection.
+
 Branch deletion protects `main`, `master`, the primary checkout's attached
 branch, locally recorded remote defaults, and extra literal branch names added
 with `git config --local --add agentVault.protectedBranch develop`. Remote
