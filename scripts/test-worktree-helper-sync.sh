@@ -15,6 +15,8 @@ trap cleanup EXIT
 
 passed=0
 failed=0
+# shellcheck source=scripts/lib/worktree-test.sh
+source "$repo_root/scripts/lib/worktree-test.sh"
 
 assert_exit_code() {
   local expected="$1"
@@ -109,6 +111,37 @@ run_update_project() {
   bash "$repo_root/scripts/update-project.sh" "$target" "$@"
 }
 
+assert_generated_safety() {
+  local target="$1" label="$2" outer inner output rc=0
+  # Commit only the synthetic helper fixture; runtime metadata hooks are tested
+  # by their own suites and do not apply to this fixture bootstrap commit.
+  git -C "$target" add .gitignore scripts/new-worktree.sh scripts/remove-worktree.sh
+  git -C "$target" -c core.hooksPath=/dev/null commit -m "helper fixture" >/dev/null
+  outer="$target/.worktrees/outer"
+  git -C "$target" worktree add -b codex/outer "$outer" main >/dev/null
+  output="$("$helper_bash" "$outer/scripts/new-worktree.sh" --agent codex --issue 137 2>&1)" || rc=$?
+  assert_exit_code 0 "$rc" "$label linked-copy creation"
+  assert_path_exists "$target/.worktrees/codex-137/.git" "$label creates primary sibling"
+  assert_output_contains "$output" "Primary: $target" "$label identifies primary"
+  inner="$outer/.worktrees/inner"
+  git -C "$target" worktree add -b codex/inner "$inner" main >/dev/null
+  printf 'fixture data\n' >"$inner/sentinel"
+  snapshot_worktree_state "$target" "$tmp_root/$label"
+  rc=0
+  output="$("$helper_bash" "$target/scripts/remove-worktree.sh" --branch codex/outer --force 2>&1)" || rc=$?
+  assert_exit_code 1 "$rc" "$label refuses nested removal"
+  assert_worktree_state_unchanged "$target" "$tmp_root/$label" "$label nested refusal"
+  assert_equal 'fixture data' "$(cat "$inner/sentinel")" "$label preserves inner data"
+  git -C "$target" switch -c codex/current >/dev/null
+  snapshot_worktree_state "$target" "$tmp_root/$label-protected"
+  rc=0
+  output="$("$helper_bash" "$target/scripts/remove-worktree.sh" --branch main --delete-branch 2>&1)" || rc=$?
+  assert_exit_code 1 "$rc" "$label protects unchecked-out main"
+  assert_output_contains "$output" "owner confirmation" "$label refusal contains owner requirement"
+  assert_output_contains "$output" "commits are retained before deletion" "$label refusal contains preservation requirement"
+  assert_worktree_state_unchanged "$target" "$tmp_root/$label-protected" "$label branch refusal"
+}
+
 # --- Test 1: new-project seeds executable managed helpers and the runbook ---
 target="$(setup_empty_repo new-project-target)"
 rc=0
@@ -137,6 +170,7 @@ assert_file_contains "$target/scripts/compact-context-log.sh" "# agent-vault-man
 assert_path_exists "$target/scripts/check-lessons-archive.sh" "new-project creates lessons-archive checker"
 assert_executable "$target/scripts/check-lessons-archive.sh" "new-project makes lessons-archive checker executable"
 assert_file_contains "$target/scripts/check-lessons-archive.sh" "# agent-vault-managed: helper-script; file=check-lessons-archive.sh" "new-project seeds lessons-archive checker marker"
+assert_generated_safety "$target" fresh-bootstrap
 
 # --- Test 2: update-project creates missing helpers in existing vaults ---
 target="$(setup_empty_repo update-missing-target)"
@@ -254,6 +288,7 @@ assert_executable "$target/scripts/check-memory-budget.sh" "update-project fixes
 assert_executable "$target/scripts/check-context-log-rollover.sh" "update-project fixes rollover checker executable bit"
 assert_executable "$target/scripts/compact-context-log.sh" "update-project fixes rollover compactor executable bit"
 assert_executable "$target/scripts/check-lessons-archive.sh" "update-project fixes lessons-archive checker executable bit"
+assert_generated_safety "$target" managed-update
 
 # --- Test 6: runbook is seed-only after creation ---
 target="$(setup_empty_repo runbook-seed-target)"
@@ -263,6 +298,38 @@ rc=0
 output="$(run_update_project "$target" 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "update-project runbook-seed exits 0"
 assert_file_contains "$target/docs/runbooks/parallel-agent-worktrees.md" "# Local Worktree Runbook" "update-project preserves existing runbook"
+assert_generated_safety "$target" old-runbook
+rm "$target/docs/runbooks/parallel-agent-worktrees.md"
+rc=0
+output="$("$helper_bash" "$target/scripts/remove-worktree.sh" --branch main --delete-branch 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "missing runbook still protects branch"
+assert_output_contains "$output" "owner confirmation" "missing runbook refusal contains owner requirement"
+assert_output_contains "$output" "commits are retained before deletion" "missing runbook refusal contains preservation requirement"
+output="$("$helper_bash" "$target/scripts/remove-worktree.sh" --help)"
+assert_output_contains "$output" "obtain owner confirmation" "help contains owner requirement"
+assert_output_contains "$output" "commits are retained before deletion" "help contains preservation requirement"
+assert_output_contains "$output" "Git 2.36+" "help documents Git minimum"
+
+# Existing symlinked helpers are not overwritten even with migration requested.
+target="$(setup_empty_repo symlink-helper-target)"
+run_new_project "$target" >/dev/null
+printf '%s\n' '#!/usr/bin/env bash' 'echo external custom helper' >"$tmp_root/external-helper"
+rm "$target/scripts/new-worktree.sh"
+ln -s "$tmp_root/external-helper" "$target/scripts/new-worktree.sh"
+output="$(run_update_project "$target" --migrate-root-scripts 2>&1)"
+assert_output_contains "$output" "symlink files are not auto-managed" "update preserves symlinked helper"
+assert_file_contains "$tmp_root/external-helper" "echo external custom helper" "update preserves external symlink destination"
+
+# Keep standalone copies aligned without shipping another runtime file.
+sed -n '/^# BEGIN worktree discovery$/,/^# END worktree discovery$/p' "$repo_root/scaffold/root/scripts/new-worktree.sh" >"$tmp_root/new-discovery"
+sed -n '/^# BEGIN worktree discovery$/,/^# END worktree discovery$/p' "$repo_root/scaffold/root/scripts/remove-worktree.sh" >"$tmp_root/remove-discovery"
+if [[ -s "$tmp_root/new-discovery" ]] && cmp -s "$tmp_root/new-discovery" "$tmp_root/remove-discovery"; then
+  echo "PASS: standalone discovery copies match"
+  passed=$((passed + 1))
+else
+  echo "FAIL: standalone discovery copies differ or are missing" >&2
+  failed=$((failed + 1))
+fi
 
 echo ""
 echo "Results: $passed passed, $failed failed"

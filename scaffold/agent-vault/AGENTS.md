@@ -62,6 +62,7 @@
 - Switch to the printed worktree path before code edits, either by launching from that directory or by using that path for all subsequent file operations.
 - Avoid editing the main checkout unless the user explicitly asks not to use a worktree or the work is clearly non-implementation work.
 - Keep the main checkout for integration, review, and cleanup.
+- Worktree helpers require Git 2.36+ and Bash 3.2+. Upgrade unsupported Git before use. Linked helper copies resolve the primary checkout and create siblings by default; relative roots use that checkout. Creation and reuse refuse layouts inside another linked worktree.
 - See `docs/runbooks/parallel-agent-worktrees.md` for the full worktree workflow and cleanup recipe.
 
 ## Worktree Cleanup
@@ -70,6 +71,9 @@
 - If the PR is not proven merged, ask the owner before invoking `--delete-branch`. For `OPEN`, unmerged `CLOSED`, missing PR, stale, or unclear states, default to removing only the worktree, keeping the branch, and reporting what was skipped.
 - If `remove-worktree.sh` refuses cleanup because the current process is inside the target worktree, a branch/path mismatch is unsafe, or a shared `.venv` still points into the target worktree, report the remaining cleanup step instead of forcing through.
 - Never run `--force` autonomously. It is a user-confirmed escape hatch for intentionally disposable dirty worktrees, not part of normal cleanup.
+- The helper refuses any registered descendant worktree even with `--force`. For a missing descendant, confirm whether it was deleted, moved, or is temporarily unavailable. Restore/repair as appropriate; for confirmed obsolete metadata, preview `git worktree prune --dry-run --verbose`, inspect all proposed removals, then prune and retry. Never prune a blocker merely to bypass protection.
+- Every branch-deletion path protects `main`, `master`, the primary checkout's attached branch, locally recorded remote defaults, and extra literal names configured with `git config --local --add agentVault.protectedBranch <branch>`. Remote defaults may be absent or stale; repositories without remotes rely on the other sources. Neither `--force` nor `--delete-branch` overrides this protection. Manual retirement of a protected branch requires owner confirmation and verification that its commits are retained before deletion.
+- Complete concurrent raw Git worktree operations and filesystem moves before cleanup; registry checks do not provide a cross-process lock. Existing runbooks are seed-only, so use helper help and these managed rules for the current essential requirements.
 
 ## Human Decision Gate
 - Humans are the default decision-makers for material trade-offs. When multiple technically valid options exist and the choice materially affects architecture, UX, maintainability, workflow, security posture, performance, cost, or future flexibility, do not choose silently.

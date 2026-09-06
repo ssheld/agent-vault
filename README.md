@@ -213,6 +213,11 @@ issue-scoped Git worktrees:
 - `<repo>/scripts/new-worktree.sh`
 - `<repo>/scripts/remove-worktree.sh`
 
+These two helpers require Git 2.36+ and Bash 3.2+. Unsupported Git is rejected
+before repository changes; upgrade Git and ensure the supported executable is
+first on `PATH`. The regression harness still uses modern Bash and also runs
+the worktree helpers under stock macOS Bash 3.2.
+
 When running `update-project.sh` normally, missing helper scripts are created
 from the scaffold and executable permissions are enforced. Existing helper
 scripts with the managed marker are updated from the scaffold. Existing helper
@@ -227,12 +232,35 @@ worktree path before making code edits, either by launching from that directory
 or by using that path for all subsequent file operations. Users can override the
 root with `--root` or `AGENT_VAULT_WORKTREE_ROOT`.
 
+Copies invoked inside linked worktrees resolve the actual primary checkout and
+create siblings there by default; relative custom roots also use the primary
+checkout. Creation and reuse refuse layouts inside another linked worktree.
+Removal refuses any registered descendant, including missing or locked entries,
+even with `--force`. Confirm whether a missing entry was deleted, moved, or is
+temporarily unavailable. For obsolete records, preview
+`git worktree prune --dry-run --verbose`, inspect all proposed removals, then
+prune and retry when appropriate.
+
+Branch deletion protects `main`, `master`, the primary checkout's attached
+branch, locally recorded remote defaults, and extra literal branch names added
+with `git config --local --add agentVault.protectedBranch develop`. Remote
+defaults may be absent or stale; repositories without remotes rely on the other
+sources. Neither `--force` nor `--delete-branch` bypasses protection.
+Manual retirement of a protected branch requires owner confirmation and
+verification that its commits are retained before deletion.
+
 Generated guidance also treats post-merge cleanup as the standard cleanup point
 because issue branches usually map to pull requests. Before deleting a local
 branch, agents must verify the PR is merged or get explicit owner confirmation;
 otherwise they should remove only the worktree, keep the branch, and report what
 was skipped. The full cleanup recipe lives in
 `<repo>/docs/runbooks/parallel-agent-worktrees.md`.
+
+Existing runbooks remain project-owned and are only seeded when missing.
+Updated helpers and managed workflow rules carry the essential safety guidance
+even when an existing runbook predates these checks. The helpers do not serialize
+concurrent raw Git worktree commands or filesystem moves; complete those
+operations before running cleanup.
 
 When a managed file changes, the script backs up the previous version under:
 - `<repo>/agent-vault/context/updates/<timestamp>/...`
