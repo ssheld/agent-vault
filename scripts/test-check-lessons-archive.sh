@@ -5,15 +5,16 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 checker="$repo_root/scaffold/root/scripts/check-lessons-archive.sh"
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/agent-vault-lessons-test.XXXXXX")"
+tmp_root="$(cd "$tmp_root" && pwd -P)"
 
 cleanup() { rm -rf "$tmp_root"; }
 trap cleanup EXIT
 
-# expect_result <expected_exit> <must_contain|""> <checker args...>
+# expect_result <expected_exit> <required substrings, one per line|""> <checker args...>
 expect_result() {
   local expected_rc="$1" must_contain="$2"
   shift 2
-  local output rc
+  local output rc required
   set +e
   output="$("$checker" "$@" 2>&1)"
   rc=$?
@@ -23,8 +24,15 @@ expect_result() {
     printf '%s\n' "$output" >&2
     exit 1
   fi
-  if [[ -n "$must_contain" && "$output" != *"$must_contain"* ]]; then
-    echo "FAIL: output missing '$must_contain' for: $*" >&2
+  while IFS= read -r required; do
+    if [[ -n "$required" && "$output" != *"$required"* ]]; then
+      echo "FAIL: output missing '$required' for: $*" >&2
+      printf '%s\n' "$output" >&2
+      exit 1
+    fi
+  done <<<"$must_contain"
+  if [[ "$output" == *"skipped"* && "$output" == *"lessons-archive check passed:"* ]]; then
+    echo "FAIL: skipped checks must not report success for: $*" >&2
     printf '%s\n' "$output" >&2
     exit 1
   fi
@@ -75,6 +83,9 @@ cat >"$(manifest_path "$d")" <<'EOF'
 EOF
 expect_result 0 "check passed" "$(manifest_path "$d")"
 expect_result 0 "check passed" "$(manifest_path "$d")" --strict
+# Empty --archive arguments retain canonical discovery in both modes.
+expect_result 0 "check passed" "$(manifest_path "$d")" --archive ""
+expect_result 0 "check passed" "$(manifest_path "$d")" --strict --archive ""
 
 # --- 2. Invalid classification: warn (exit 0) by default, fail under --strict
 d="$tmp_root/badclass"
@@ -204,19 +215,35 @@ EOF
 expect_result 0 "check passed" "$(manifest_path "$d")" --strict \
   --rules "$d/agent-vault/lessons.md" --rules "$d/agent-vault/shared-rules.md"
 
-# --- 11. With no resolvable rules source, covered_by liveness is skipped ---
+# --- 11. Missing implicit sources warn by default and fail under --strict ---
 d="$tmp_root/norules"
-mkdir -p "$d/isolated"
-cat >"$d/isolated/lessons-manifest.md" <<'EOF'
+mkdir -p "$d/agent-vault/context/archive"
+cat >"$(manifest_path "$d")" <<'EOF'
 # Lessons Archive Manifest
 
 ## lesson: some lesson
 - classification: covered-by-a-named-always-on-rule
 - covered_by: an unverifiable rule name
 EOF
-# No archive and no lessons.md next to it -> liveness check is skipped, the
-# record is otherwise valid, so default mode passes.
-expect_result 0 "check passed" "$d/isolated/lessons-manifest.md"
+# Both implicit lookup paths stay inside this fixture; the diagnostics must
+# identify both unavailable checks, their concrete paths, and remediation.
+missing_sources="archive checks skipped
+$d/agent-vault/context/archive/lessons-archive.md
+--archive <file>
+lesson \"some lesson\" covered_by liveness check skipped
+$d/agent-vault/lessons.md
+--rules <file>"
+expect_result 0 "$missing_sources" "$(manifest_path "$d")"
+expect_result 1 "$missing_sources" "$(manifest_path "$d")" --strict
+expect_result 1 "$missing_sources" "$(manifest_path "$d")" --strict --quiet
+set +e
+quiet_out="$("$checker" "$(manifest_path "$d")" --quiet 2>&1)"
+quiet_rc=$?
+set -e
+[[ "$quiet_rc" -eq 0 && -z "$quiet_out" ]] || {
+  echo "FAIL: --quiet should suppress missing-source warnings with rc 0; rc=$quiet_rc out=$quiet_out" >&2
+  exit 1
+}
 
 # --- 11b. --rules is ADDITIVE: passing an extra source must not drop the default
 # lessons.md, so a rule that lives in lessons.md still resolves.
@@ -285,6 +312,10 @@ expect_result 2 "manifest not found" "$tmp_root/does-not-exist.md"
 expect_result 2 "" # no manifest arg
 expect_result 2 "archive file not found" "$(manifest_path "$tmp_root/ok")" --archive "$tmp_root/nope.md"
 expect_result 2 "rules file not found" "$(manifest_path "$tmp_root/ok")" --rules "$tmp_root/nope.md"
+# Explicit missing paths remain usage/IO errors even with valid fallback sources.
+expect_result 2 "archive file not found" "$(manifest_path "$tmp_root/ok")" --strict --archive "$tmp_root/nope.md"
+expect_result 2 "rules file not found" "$(manifest_path "$tmp_root/ok")" --strict \
+  --rules "$tmp_root/ok/agent-vault/lessons.md" --rules "$tmp_root/nope.md"
 
 # --- 13. --quiet means "print only on failure": silent on success and on
 # warn-mode findings (exit 0), but a --strict failure is still reported.
@@ -329,5 +360,142 @@ cat >"$tmp_root/crlf-src.md" <<'EOF'
 EOF
 sed 's/$/\r/' "$tmp_root/crlf-src.md" >"$(manifest_path "$d")"
 expect_result 0 "check passed" "$(manifest_path "$d")" --strict
+
+# --- 15. Archive required regardless of rules availability or record count ---
+d="$tmp_root/noarchive"
+mkdir -p "$d/agent-vault/context/archive"
+printf '%s\n' 'a live rule' >"$d/agent-vault/lessons.md"
+cat >"$(manifest_path "$d")" <<'EOF'
+## lesson: some lesson
+- classification: covered-by-a-named-always-on-rule
+- covered_by: a live rule
+EOF
+expect_result 0 "archive checks skipped" "$(manifest_path "$d")"
+expect_result 1 "archive checks skipped" "$(manifest_path "$d")" --strict
+expect_result 0 "archive checks skipped" "$(manifest_path "$d")" --archive ""
+expect_result 1 "archive checks skipped" "$(manifest_path "$d")" --strict --archive ""
+printf '%s\n' '# Empty manifest' >"$(manifest_path "$d")"
+expect_result 1 "archive checks skipped" "$(manifest_path "$d")" --strict
+# With an empty archive, completeness can be checked and the empty pair passes.
+printf '%s\n' '# Empty archive' >"$d/agent-vault/context/archive/lessons-archive.md"
+expect_result 0 "check passed" "$(manifest_path "$d")" --strict
+
+# --- 16. Rules required only for non-empty references on the matching class ---
+for field in covered_by quick_rule; do
+  d="$tmp_root/missing-$field"
+  mkdir -p "$d/agent-vault/context/archive"
+  printf '%s\n' '### some lesson' >"$d/agent-vault/context/archive/lessons-archive.md"
+  classification="covered-by-a-named-always-on-rule"
+  [[ "$field" != "quick_rule" ]] || classification="retained-as-quick-rule"
+  cat >"$(manifest_path "$d")" <<EOF
+## lesson: some lesson
+- classification: $classification
+- $field: a live rule
+EOF
+  missing_rules="lesson \"some lesson\" $field liveness check skipped
+no live rules source resolved
+$d/agent-vault/lessons.md
+--rules <file>"
+  expect_result 0 "$missing_rules" "$(manifest_path "$d")"
+  expect_result 1 "$missing_rules" "$(manifest_path "$d")" --strict
+  expect_result 1 "$missing_rules" "$(manifest_path "$d")" --strict --quiet
+  set +e
+  quiet_out="$("$checker" "$(manifest_path "$d")" --quiet 2>&1)"
+  quiet_rc=$?
+  set -e
+  [[ "$quiet_rc" -eq 0 && -z "$quiet_out" ]] || {
+    echo "FAIL: --quiet should suppress missing-$field warnings with rc 0; rc=$quiet_rc out=$quiet_out" >&2
+    exit 1
+  }
+
+  # An empty --rules argument is accepted but cannot establish availability.
+  expect_result 0 "$missing_rules" "$(manifest_path "$d")" --rules ""
+  expect_result 1 "$missing_rules" "$(manifest_path "$d")" --strict --rules ""
+
+  # An existing empty file IS a source: a search is possible but finds no rule.
+  : >"$d/empty-rules.md"
+  expect_result 0 "was not found in any live rules source" "$(manifest_path "$d")" --rules "$d/empty-rules.md"
+  expect_result 1 "was not found in any live rules source" "$(manifest_path "$d")" --strict --rules "$d/empty-rules.md"
+
+  # Explicit-only rules resolve even with an empty argument before or after them.
+  printf '%s\n' 'a live rule' >"$d/extra-rules.md"
+  expect_result 0 "check passed" "$(manifest_path "$d")" --strict --rules "$d/extra-rules.md"
+  expect_result 0 "check passed" "$(manifest_path "$d")" --strict --rules "" --rules "$d/extra-rules.md" --rules ""
+  # Canonical discovery must likewise survive empty explicit arguments.
+  cp "$d/extra-rules.md" "$d/agent-vault/lessons.md"
+  expect_result 0 "check passed" "$(manifest_path "$d")" --strict --rules ""
+done
+
+d="$tmp_root/no-references"
+mkdir -p "$d/agent-vault/context/archive"
+cat >"$d/agent-vault/context/archive/lessons-archive.md" <<'EOF'
+### archival lesson
+### retained lesson
+### retained lesson with empty reference
+EOF
+cat >"$(manifest_path "$d")" <<'EOF'
+## lesson: archival lesson
+- classification: archival-only
+## lesson: retained lesson
+- classification: retained-as-quick-rule
+## lesson: retained lesson with empty reference
+- classification: retained-as-quick-rule
+- quick_rule:
+EOF
+expect_result 0 "check passed" "$(manifest_path "$d")" --strict
+expect_result 0 "check passed" "$(manifest_path "$d")" --strict --rules ""
+
+# Invalid records still produce their own findings without any rules source.
+cat >"$(manifest_path "$d")" <<'EOF'
+## lesson: archival lesson
+- classification: covered-by-a-named-always-on-rule
+## lesson: retained lesson
+- classification: archival-only
+- covered_by: stray covered rule
+## lesson: retained lesson with empty reference
+- classification: archival-only
+- quick_rule: stray quick rule
+EOF
+expect_result 1 'names no "covered_by" rule
+sets covered_by but is not covered-by-a-named-always-on-rule
+sets quick_rule but is not retained-as-quick-rule' "$(manifest_path "$d")" --strict
+
+# --- 17. Explicit sources support noncanonical layouts and paths with spaces ---
+d="$tmp_root/explicit sources"
+mkdir -p "$d/manifests/nested"
+cat >"$d/manifests/nested/manifest.md" <<'EOF'
+## lesson: some lesson
+- classification: covered-by-a-named-always-on-rule
+- covered_by: a live rule
+EOF
+printf '%s\n' '### some lesson' >"$d/archive.md"
+printf '%s\n' 'a live rule' >"$d/rules.md"
+expect_result 0 "check passed" "$d/manifests/nested/manifest.md" --strict \
+  --archive "$d/archive.md" --rules "$d/rules.md"
+
+# --- 18. Report one missing archive and one liveness finding per lesson ---
+d="$tmp_root/multiple-missing-sources"
+mkdir -p "$d/agent-vault/context/archive"
+cat >"$(manifest_path "$d")" <<'EOF'
+## lesson: covered lesson
+- classification: covered-by-a-named-always-on-rule
+- covered_by: a covered rule
+## lesson: retained lesson
+- classification: retained-as-quick-rule
+- quick_rule: a retained rule
+EOF
+multi_rc=0
+multi_out="$("$checker" "$(manifest_path "$d")" --strict 2>&1)" || multi_rc=$?
+finding_counts="$(awk '
+  /^- archive checks skipped:/ { archives++ }
+  /^- lesson "covered lesson" covered_by liveness check skipped:/ { covered++ }
+  /^- lesson "retained lesson" quick_rule liveness check skipped:/ { quick++ }
+  END { printf "%d %d %d", archives, covered, quick }
+' <<<"$multi_out")"
+if [[ "$multi_rc" -ne 1 || "$finding_counts" != "1 1 1" || "$multi_out" == *"check passed"* ]]; then
+  echo "FAIL: expected one archive finding and one per lesson; rc=$multi_rc counts=$finding_counts" >&2
+  printf '%s\n' "$multi_out" >&2
+  exit 1
+fi
 
 echo "lessons-archive checker regression checks passed."

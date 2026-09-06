@@ -264,25 +264,44 @@ One manifest record per archived lesson, keyed by the lesson's archived heading:
 
 ```bash
 scripts/check-lessons-archive.sh <manifest>
-scripts/check-lessons-archive.sh <manifest> --strict        # exit 1 + completeness
-scripts/check-lessons-archive.sh <manifest> --rules <file>  # add a live-rule source
+scripts/check-lessons-archive.sh <manifest> --strict       # require sources + completeness
+scripts/check-lessons-archive.sh <manifest> --rules <file> # add a live-rule source
+
+# Outside the canonical layout, supply the archive and live rules explicitly:
+scripts/check-lessons-archive.sh <manifest> --strict --archive <archive> --rules <rules>
 ```
 
 The checker validates that every record declares one of the three classes
 (`retained-as-quick-rule`, `covered-by-a-named-always-on-rule`, `archival-only`),
 that keys are unique, and that a `covered-by-a-named-always-on-rule` record names
 a non-empty `covered_by` rule that still appears in a live always-on file. An
-optional `quick_rule` on a `retained-as-quick-rule` record is liveness-checked
-the same way, so a retained lesson whose one-liner was dropped is caught. Rule
-liveness is a substring match, so use distinctive rule text; the project
-`lessons.md` is always a source when present and `--rules` **adds** more (e.g.
-`shared-rules.md`) rather than replacing it. The checker **warns by default**
-(exit 0, so it never blocks an unrelated commit and `--quiet` stays silent);
-`--strict` exits 1 on any finding (always reported, even with `--quiet`) and
-additionally enforces **completeness** against the archive — every archived
-lesson (a `###` heading) has a manifest record, and no record points at a lesson
-absent from the archive. The archive defaults to `lessons-archive.md` next to the
-manifest.
+optional non-empty `quick_rule` on a `retained-as-quick-rule` record is
+liveness-checked the same way, so a retained lesson whose one-liner was dropped
+is caught. Rule liveness is a substring match, so use distinctive rule text.
+The canonical `<manifest-dir>/../../lessons.md` is always a source when present
+and repeatable `--rules` **adds** more (e.g. `shared-rules.md`) rather than
+replacing it. Empty `--rules` arguments are ignored; an existing empty file
+counts as a source but cannot satisfy a non-empty reference. The archive
+defaults to `lessons-archive.md` next to the manifest. Passing `--archive ""`
+also uses this default, including the usual skipped-check finding if it is absent.
+
+The checker **warns by default** (exit 0), including when implicit sources are
+unavailable. It reports which archive or rule-liveness checks were skipped,
+the expected paths, and how to supply the missing sources; skipped checks never
+produce `check passed`. This preserves useful manifest-only validation.
+`--quiet` suppresses advisory warnings and success output.
+
+**Strict mode** exits 1 on any finding, always reporting failures even with
+`--quiet`. It requires an archive even for an empty manifest, since it must
+establish that every archived lesson (a `###` heading) has a manifest record.
+A live rules source is required for a non-empty `covered_by` or `quick_rule`
+reference on its matching classification. `archival-only` records and retained
+records with an omitted or empty `quick_rule` need no rules source. Missing
+required sources are findings, so other validation problems are still reported.
+Whenever an archive resolves, both modes check that every manifest record names
+a lesson present in it; strict mode additionally checks that every archived
+lesson is classified. Usage errors and explicitly named missing files exit 2
+in either mode, even when another valid source is available.
 
 ## Compaction conventions
 
