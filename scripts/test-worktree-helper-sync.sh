@@ -61,6 +61,20 @@ assert_file_contains() {
   fi
 }
 
+assert_files_equal() {
+  local expected="$1"
+  local actual="$2"
+  local label="$3"
+
+  if cmp -s "$expected" "$actual"; then
+    echo "PASS: $label"
+    passed=$((passed + 1))
+  else
+    echo "FAIL: $label - file differs from scaffold: $actual" >&2
+    failed=$((failed + 1))
+  fi
+}
+
 assert_path_exists() {
   local path="$1"
   local label="$2"
@@ -191,6 +205,7 @@ assert_file_contains "$target/scripts/compact-context-log.sh" "# agent-vault-man
 assert_path_exists "$target/scripts/check-lessons-archive.sh" "new-project creates lessons-archive checker"
 assert_executable "$target/scripts/check-lessons-archive.sh" "new-project makes lessons-archive checker executable"
 assert_file_contains "$target/scripts/check-lessons-archive.sh" "# agent-vault-managed: helper-script; file=check-lessons-archive.sh" "new-project seeds lessons-archive checker marker"
+assert_files_equal "$repo_root/scaffold/root/scripts/check-lessons-archive.sh" "$target/scripts/check-lessons-archive.sh" "new-project seeds complete lessons-archive checker"
 assert_generated_safety "$target" fresh-bootstrap
 
 # --- Test 2: update-project creates missing helpers in existing vaults ---
@@ -302,7 +317,7 @@ assert_file_contains "$target/scripts/remove-worktree.sh" "Use only after verify
 assert_file_contains "$target/scripts/check-memory-budget.sh" "Keys: file_budget, chain_budget" "update-project refreshes stale memory-budget checker content"
 assert_file_contains "$target/scripts/check-context-log-rollover.sh" "stale duplicate \"## Current Snapshot\"" "update-project refreshes stale rollover checker content"
 assert_file_contains "$target/scripts/compact-context-log.sh" "Keeps the Current Snapshot plus the newest" "update-project refreshes stale rollover compactor content"
-assert_file_contains "$target/scripts/check-lessons-archive.sh" "Validates per-lesson classifications" "update-project refreshes stale lessons-archive checker content"
+assert_files_equal "$repo_root/scaffold/root/scripts/check-lessons-archive.sh" "$target/scripts/check-lessons-archive.sh" "update-project refreshes complete lessons-archive checker"
 assert_executable "$target/scripts/new-worktree.sh" "update-project fixes managed helper executable bit"
 assert_executable "$target/scripts/remove-worktree.sh" "update-project fixes managed remove helper executable bit"
 assert_executable "$target/scripts/check-memory-budget.sh" "update-project fixes memory-budget checker executable bit"

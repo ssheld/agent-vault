@@ -15,8 +15,9 @@ set -euo pipefail
 #
 # This is a CHECKER only: it never edits the manifest, archive, or lessons file.
 # It WARNS by default (exit 0 so it cannot block an unrelated commit); pass
-# --strict to exit 1 on any finding and to also enforce completeness against the
-# archive (every archived lesson classified, no dangling manifest record).
+# --strict to exit 1 on any finding and enforce archive completeness. Strict
+# checks require an archive and a live rules source for each non-empty reference.
+# Missing implicit sources produce skipped-check findings in both modes.
 #
 # Manifest format (one record per archived lesson):
 #   ## lesson: <key matching the archived lesson's heading text>
@@ -37,25 +38,36 @@ Validates per-lesson classifications in a lessons-archive manifest. Checks:
       retained-as-quick-rule | covered-by-a-named-always-on-rule | archival-only
   - no duplicate lesson keys
   - a covered-by-a-named-always-on-rule record names a non-empty "covered_by"
-    rule that still appears in a live always-on file (when one is resolved)
+    rule that still appears in a live always-on file
   - an optional "quick_rule" on a retained-as-quick-rule record likewise still
     appears live (so a retained lesson whose rule was dropped is caught)
   - "covered_by" / "quick_rule" are not set on records of the wrong class
-With --strict and --archive (completeness):
-  - every archived lesson (a "###" heading in the archive) has a manifest record
+When an archive is resolved:
   - every manifest record points at a lesson present in the archive
+With --strict (completeness):
+  - every archived lesson (a "###" heading in the archive) has a manifest record
+
+Missing implicit sources warn with skipped checks (exit 0) by default; a run
+with skipped checks does not report "check passed". Strict mode requires an
+archive even for an empty manifest, and a live rules source for each non-empty
+covered_by or quick_rule reference on its matching class. Archival-only records
+and retained records without a non-empty quick_rule need no rules source.
+Explicitly named missing files are usage/IO errors (exit 2) in either mode.
 
 Rule liveness is a substring match, so name the rule with distinctive text. The
 archive defaults to "<manifest-dir>/lessons-archive.md"; the canonical live
 "<manifest-dir>/../../lessons.md" is always a rules source when present, and
 --rules ADDS further sources (e.g. shared-rules.md) rather than replacing it.
+Empty --rules arguments are ignored; an existing empty file is still a source.
 
 Options:
-  --archive <file>  Lessons archive to check completeness against (--strict).
+  --archive <file>  Lessons archive to check records against (completeness with
+                    --strict).
   --rules <file>    Additional live always-on file to resolve covered_by /
                     quick_rule references in (repeatable; added to the default
                     project lessons.md).
-  --strict          Exit 1 on any finding and enforce archive completeness.
+  --strict          Exit 1 on any finding, including unavailable required sources,
+                    and enforce archive completeness.
   --quiet           Print only on failure (suppresses warn-mode warnings).
   -h, --help        Show this help.
 EOF
@@ -132,7 +144,20 @@ if [[ -f "$manifest_dir/../../lessons.md" ]]; then
   rules_files+=("$manifest_dir/../../lessons.md")
 fi
 
+# Empty explicit arguments are accepted for compatibility, but do not provide
+# a source to search. An existing empty file does provide a source.
+rules_source_available="false"
+for rule_src in "${rules_files[@]:-}"; do
+  if [[ -n "$rule_src" && -f "$rule_src" ]]; then
+    rules_source_available="true"
+    break
+  fi
+done
+
 findings=()
+if [[ -z "$archive_file" ]]; then
+  findings+=("archive checks skipped: no archive resolved (expected \"$manifest_dir/lessons-archive.md\"; supply --archive <file>)")
+fi
 
 # Emit "<rec>\t<field>\t<value>" for each record field, plus "COUNT\t<n>".
 # Records are delimited by "## lesson:" headings; any other "## " heading ends
@@ -254,9 +279,11 @@ for ((i = 1; i <= count; i++)); do
     covered="${COVERED[$i]:-}"
     if [[ -z "$covered" ]]; then
       findings+=("lesson \"$key\" is covered-by-a-named-always-on-rule but names no \"covered_by\" rule")
-    elif [[ "${#rules_files[@]}" -gt 0 ]]; then
+    elif [[ "$rules_source_available" == "true" ]]; then
       rule_is_live "$covered" ||
         findings+=("lesson \"$key\" covered_by rule \"$covered\" was not found in any live rules source")
+    else
+      findings+=("lesson \"$key\" covered_by liveness check skipped: no live rules source resolved (expected \"$manifest_dir/../../lessons.md\"; supply --rules <file>)")
     fi
   elif [[ "${HAS_COVERED[$i]:-false}" == "true" && -n "${COVERED[$i]:-}" ]]; then
     findings+=("lesson \"$key\" sets covered_by but is not covered-by-a-named-always-on-rule")
@@ -267,9 +294,13 @@ for ((i = 1; i <= count; i++)); do
   # a misclassified retained lesson whose rule is gone is caught.
   if [[ "$classification" == "retained-as-quick-rule" ]]; then
     quick="${QUICK[$i]:-}"
-    if [[ -n "$quick" && "${#rules_files[@]}" -gt 0 ]]; then
-      rule_is_live "$quick" ||
-        findings+=("lesson \"$key\" quick_rule \"$quick\" was not found in any live rules source (its retained one-line rule should still be in lessons.md)")
+    if [[ -n "$quick" ]]; then
+      if [[ "$rules_source_available" == "true" ]]; then
+        rule_is_live "$quick" ||
+          findings+=("lesson \"$key\" quick_rule \"$quick\" was not found in any live rules source (its retained one-line rule should still be in lessons.md)")
+      else
+        findings+=("lesson \"$key\" quick_rule liveness check skipped: no live rules source resolved (expected \"$manifest_dir/../../lessons.md\"; supply --rules <file>)")
+      fi
     fi
   elif [[ "${HAS_QUICK[$i]:-false}" == "true" && -n "${QUICK[$i]:-}" ]]; then
     findings+=("lesson \"$key\" sets quick_rule but is not retained-as-quick-rule")
