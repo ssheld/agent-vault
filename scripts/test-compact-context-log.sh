@@ -6,6 +6,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 compactor="$repo_root/scaffold/root/scripts/compact-context-log.sh"
 checker="$repo_root/scaffold/root/scripts/check-context-log-rollover.sh"
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/agent-vault-compact-test.XXXXXX")"
+tmp_root="$(cd "$tmp_root" && pwd -P)"
 
 cleanup() { rm -rf "$tmp_root"; }
 trap cleanup EXIT
@@ -343,6 +344,10 @@ d="$tmp_root/seq"
 mkdir -p "$d/archive"
 make_log "$d/log.md"
 today="$(date +%Y-%m-%d)"
+# Existing records now require their matching live pointer; keep this sequence
+# fixture internally consistent rather than bypassing partial-state detection.
+awk -v id="${today}-3" '/^## Current Snapshot$/ { print; print "- Context-log rollover: `" id "` — boundary: through old"; next } { print }' \
+  "$d/log.md" >"$d/log.next" && mv "$d/log.next" "$d/log.md"
 cat >"$d/archive/manifest.md" <<EOF
 # Context Log Rollover Manifest
 
@@ -601,6 +606,8 @@ pass=$((pass + 1))
 d="$tmp_root/headerless-manifest"
 mkdir -p "$d/archive"
 make_log "$d/log.md"
+awk '/^## Current Snapshot$/ { print; print "- Context-log rollover: `2026-05-01-1` — boundary: through old"; next } { print }' \
+  "$d/log.md" >"$d/log.next" && mv "$d/log.next" "$d/log.md"
 cat >"$d/archive/manifest.md" <<'EOF'
 ## rollover: 2026-05-01-1
 - archive_file: x/context-log-2026.md
@@ -765,5 +772,403 @@ assert_contains "$COMPACT_OUT" "existing archive" "mixed archive abort message"
 [[ "$(cksum "$d/archive/context-log-2026.md")" == "$before_arch" ]] || fail "mixed archive: archive must be unchanged"
 pass=$((pass + 1))
 assert_not_exists "$d/archive/manifest.md" "mixed archive: no manifest written"
+
+# --- Destination preparation must finish before any output changes (#138) ---
+d="$tmp_root/blocked-manifest-parent"
+mkdir -p "$d"
+make_log "$d/log.md"
+cp "$d/log.md" "$d/original.md"
+printf 'not a directory\n' >"$d/blocked"
+run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" \
+  --manifest "$d/blocked/manifest.md" --require-top-entry "rollover session"
+assert_rc 2 "$COMPACT_RC" "blocked manifest parent is a pre-commit IO error"
+cmp -s "$d/log.md" "$d/original.md" || fail "blocked parent changed the log"
+assert_not_exists "$d/archive.md" "blocked parent must not create archive"
+
+# A deterministic destination-specific wrapper exercises the real writer. It
+# never evaluates commands or sleeps, and only faults on a test-owned path.
+fault_bin="$tmp_root/fault-bin"
+mkdir -p "$fault_bin"
+real_mv="$(command -v mv)"
+cat >"$fault_bin/mv" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${@: -1}" == "${ROLLOVER_TEST_DEST:-}" ]]; then
+  if [[ "${ROLLOVER_TEST_FAULT:-}" == before ]]; then
+    echo 'injected failure before replacement' >&2
+    exit 73
+  fi
+  "$ROLLOVER_TEST_MV" "$@"
+  case "${ROLLOVER_TEST_FAULT:-}" in
+    after) echo 'injected failure after replacement' >&2; exit 73 ;;
+    kill) kill -KILL "$PPID" ;;
+    term) kill -TERM "$PPID" ;;
+  esac
+else
+  exec "$ROLLOVER_TEST_MV" "$@"
+fi
+EOF
+chmod +x "$fault_bin/mv"
+
+run_fault() {
+  local fault="$1" destination="$2"
+  shift 2
+  PATH="$fault_bin:$PATH" ROLLOVER_TEST_MV="$real_mv" \
+    ROLLOVER_TEST_DEST="$destination" ROLLOVER_TEST_FAULT="$fault" run_compact "$@"
+}
+
+# Named regression: a live replacement failure used to permit a silent-success
+# retry that duplicated history, issued another ID, and still passed the checker.
+d="$tmp_root/silent-success-retry"
+mkdir -p "$d"
+make_log "$d/log.md"
+run_fault before "$d/log.md" "$d/log.md" --keep 2 --archive "$d/archive.md" \
+  --manifest "$d/manifest.md" --rollover-id original-id --boundary original-boundary \
+  --require-top-entry "rollover session"
+assert_rc 3 "$COMPACT_RC" "live replacement failure requires recovery"
+assert_contains "$COMPACT_OUT" "--recover" "failure explains recovery"
+[[ "$(count_entries "$d/archive.md")" == 3 ]] || fail "partial archive batch count"
+run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" \
+  --manifest "$d/manifest.md" --require-top-entry "rollover session"
+assert_rc 3 "$COMPACT_RC" "ordinary retry must not duplicate history"
+run_compact "$d/log.md" --recover
+assert_rc 0 "$COMPACT_RC" "explicit recovery finishes original operation"
+assert_file_contains "$d/log.md" 'original-id' "recovery keeps original ID"
+assert_file_contains "$d/log.md" 'original-boundary' "recovery keeps original boundary"
+[[ "$(count_entries "$d/archive.md")" == 3 ]] || fail "recovery duplicated history"
+[[ "$(grep -c '^## rollover:' "$d/manifest.md")" == 1 ]] || fail "recovery duplicated manifest"
+"$checker" "$d/log.md" --archive "$d/archive.md" --manifest "$d/manifest.md" >/dev/null
+run_compact "$d/log.md" --recover
+assert_rc 0 "$COMPACT_RC" "repeated recovery is a no-op"
+
+# Snapshot assertions compare exact bytes (including all historical entries),
+# not only counts. The oracle is an uninterrupted run at the SAME destinations.
+snapshot_outputs() {
+  local destination="$1" role
+  mkdir -p "$destination"
+  for role in log archive manifest; do
+    if [[ -f "$d/$role.md" ]]; then cp -p "$d/$role.md" "$destination/$role.md"; fi
+  done
+}
+
+assert_outputs() {
+  local expected="$1" label="$2" role
+  for role in log archive manifest; do
+    if [[ -f "$expected/$role.md" ]]; then
+      cmp -s "$d/$role.md" "$expected/$role.md" || fail "$label: $role bytes differ"
+    else
+      [[ ! -e "$d/$role.md" ]] || fail "$label: $role should be absent"
+    fi
+    pass=$((pass + 1))
+  done
+}
+
+assert_no_transaction_artifacts() {
+  [[ -z "$(find "$d" -name '.agent-vault-rollover-*' -print)" ]] || fail "$1: transaction artifacts remain"
+  pass=$((pass + 1))
+}
+
+prepare_recovery_case() {
+  local name="$1" existing="${2:-false}" role
+  d="$tmp_root/$name"
+  mkdir -p "$d"
+  make_log "$d/log.md"
+  if [[ "$existing" == true ]]; then
+    cat >"$d/archive.md" <<'EOF'
+# Context Log Archive
+
+### 2026-05-01 09:00 local - bootstrap - earlier archived work
+- Preserve this older history, including its body.
+EOF
+    printf '# Context Log Rollover Manifest\n' >"$d/manifest.md"
+    chmod 640 "$d/archive.md"
+    chmod 444 "$d/manifest.md"
+  fi
+  snapshot_outputs "$d/before"
+  run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" \
+    --rollover-id frozen-id --boundary 'frozen boundary' --anchors 'older work; initial project setup' \
+    --require-top-entry 'rollover session'
+  assert_rc 0 "$COMPACT_RC" "$name: uninterrupted oracle"
+  snapshot_outputs "$d/expected"
+  for role in log archive manifest; do
+    # Remove before copying so read-only destinations are faithfully restored.
+    rm -f "$d/$role.md"
+    if [[ -f "$d/before/$role.md" ]]; then cp -p "$d/before/$role.md" "$d/$role.md"; fi
+  done
+}
+
+fault_recovery_case() {
+  run_fault "$1" "$2" "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" \
+    --rollover-id frozen-id --boundary 'frozen boundary' --anchors 'older work; initial project setup' \
+    --require-top-entry 'rollover session'
+}
+
+read_test_record() {
+  record=()
+  local field
+  while IFS= read -r -d '' field; do record+=("$field"); done <"$d/.agent-vault-rollover-log.md/record"
+}
+
+for existing in false true; do
+  for fault in before after; do
+    for role in archive manifest log; do
+      prepare_recovery_case "matrix-$existing-$fault-$role" "$existing"
+      fault_recovery_case "$fault" "$d/$role.md"
+      assert_rc 3 "$COMPACT_RC" "matrix $existing/$fault/$role reports pending transaction"
+      snapshot_outputs "$d/partial"
+      run_compact "$d/log.md" --keep 99 --archive "$d/different-archive.md" --manifest "$d/different-manifest.md"
+      assert_rc 3 "$COMPACT_RC" "pending detection precedes no-op and changed targets"
+      run_compact "$d/log.md" --recover --keep 2
+      assert_rc 2 "$COMPACT_RC" "recovery rejects generation options"
+      run_compact "$d/log.md" --recover --dry-run
+      assert_rc 0 "$COMPACT_RC" "pending dry-run validates without writing"
+      assert_outputs "$d/partial" "dry-run and retries leave partial state untouched"
+      run_compact "$d/log.md" --recover
+      assert_rc 0 "$COMPACT_RC" "matrix recovery succeeds"
+      assert_outputs "$d/expected" "recovery equals uninterrupted result"
+      assert_no_transaction_artifacts 'successful recovery cleanup'
+      run_compact "$d/log.md" --recover
+      assert_rc 0 "$COMPACT_RC" "recovery is idempotent"
+      run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md"
+      assert_rc 0 "$COMPACT_RC" "ordinary retry after recovery is a no-op"
+      assert_outputs "$d/expected" "repeated recovery/retry is unchanged"
+    done
+  done
+done
+
+# Both a caught signal and termination bypassing EXIT cleanup leave recoverable
+# state. The wrapper signals only its own writer parent, after a known rename.
+for signal_fault in term kill; do
+  prepare_recovery_case "signal-$signal_fault"
+  fault_recovery_case "$signal_fault" "$d/archive.md"
+  expected_rc=143
+  [[ "$signal_fault" != kill ]] || expected_rc=137
+  assert_rc "$expected_rc" "$COMPACT_RC" "$signal_fault preserves signal status"
+  run_compact "$d/log.md" --recover
+  assert_rc 0 "$COMPACT_RC" "recover after $signal_fault"
+  assert_outputs "$d/expected" "$signal_fault recovery bytes"
+done
+
+prepare_recovery_case killed-after-publication
+fault_recovery_case kill "$d/.agent-vault-rollover-log.md/record"
+assert_rc 137 "$COMPACT_RC" "kill after journal publication"
+assert_outputs "$d/before" "no output replaced before journal publication"
+run_compact "$d/log.md" --recover
+assert_rc 0 "$COMPACT_RC" "recover an unstarted prepared transaction"
+assert_outputs "$d/expected" "unstarted recovery bytes"
+
+prepare_recovery_case interrupted-recovery
+fault_recovery_case after "$d/archive.md"
+run_fault after "$d/manifest.md" "$d/log.md" --recover
+assert_rc 3 "$COMPACT_RC" "recovery can itself be interrupted"
+run_compact "$d/log.md" --recover
+assert_rc 0 "$COMPACT_RC" "retry interrupted recovery"
+assert_outputs "$d/expected" 'interrupted recovery bytes'
+
+# Committed-state cleanup must never replay over later user edits.
+real_rm="$(command -v rm)"
+cat >"$fault_bin/rm" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${@: -1}" == "${ROLLOVER_TEST_CLEANUP_DEST:-}" ]]; then exit 73; fi
+exec "$ROLLOVER_TEST_RM" "$@"
+EOF
+chmod +x "$fault_bin/rm"
+prepare_recovery_case interrupted-cleanup
+PATH="$fault_bin:$PATH" ROLLOVER_TEST_RM="$real_rm" ROLLOVER_TEST_MV="$real_mv" \
+  ROLLOVER_TEST_CLEANUP_DEST="$d/.agent-vault-rollover-log.md/record" \
+  run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" \
+  --rollover-id frozen-id --boundary 'frozen boundary' --anchors 'older work; initial project setup' \
+  --require-top-entry 'rollover session'
+assert_rc 3 "$COMPACT_RC" 'cleanup failure leaves committed state'
+assert_outputs "$d/expected" 'cleanup failure leaves complete outputs'
+printf '\nUser edit after successful output installation.\n' >>"$d/log.md"
+snapshot_outputs "$d/edited"
+run_compact "$d/log.md" --recover
+assert_rc 0 "$COMPACT_RC" 'committed cleanup succeeds after user edit'
+assert_outputs "$d/edited" 'committed cleanup never replays output bytes'
+assert_no_transaction_artifacts 'committed cleanup removes metadata'
+# The rm wrapper is no longer needed; do not affect later fault fixtures.
+rm "$fault_bin/rm"
+
+for role in archive manifest log; do
+  prepare_recovery_case "edited-$role" true
+  fault_recovery_case after "$d/archive.md"
+  chmod u+w "$d/$role.md"
+  printf '\nAn intervening user edit.\n' >>"$d/$role.md"
+  snapshot_outputs "$d/edited"
+  run_compact "$d/log.md" --recover
+  assert_rc 3 "$COMPACT_RC" "refuse edited $role"
+  assert_contains "$COMPACT_OUT" 'diverged' "explain edited $role"
+  assert_outputs "$d/edited" 'all outputs checked before any recovery write'
+done
+
+for damage in missing-payload altered-payload version truncated extra-field outside-stage; do
+  prepare_recovery_case "damaged-$damage"
+  fault_recovery_case before "$d/archive.md"
+  read_test_record
+  case "$damage" in
+    missing-payload) rm "${record[6]}/archive.md" ;;
+    altered-payload) printf '\nchanged payload\n' >>"${record[6]}/archive.md" ;;
+    version) record[0]=unrecognized-version ;;
+    truncated) printf 'agent-vault-rollover-v1\0ready' >"$d/.agent-vault-rollover-log.md/record" ;;
+    extra-field) record+=(unexpected) ;;
+    outside-stage)
+      record[6]="$tmp_root/precious"
+      mkdir -p "$tmp_root/precious"
+      printf 'keep\n' >"$tmp_root/precious/archive.md"
+      ;;
+  esac
+  case "$damage" in
+    version | extra-field | outside-stage) printf '%s\0' "${record[@]}" >"$d/.agent-vault-rollover-log.md/record" ;;
+  esac
+  run_compact "$d/log.md" --recover
+  assert_rc 3 "$COMPACT_RC" "refuse damaged state: $damage"
+  assert_outputs "$d/before" 'damaged record/payload causes no output writes'
+  run_compact "$d/log.md" --keep 99 --archive "$d/archive.md" --manifest "$d/manifest.md"
+  assert_rc 3 "$COMPACT_RC" 'damaged state does not become a fresh rollover'
+done
+assert_file_contains "$tmp_root/precious/archive.md" keep 'untrusted staging reference is never cleaned'
+
+# Remove just the journal to model cleanup of ignored state (or an old helper
+# with no journal). In both partial states, fallback must refuse, not resume.
+for role in archive manifest; do
+  prepare_recovery_case "missing-record-$role"
+  fault_recovery_case after "$d/$role.md"
+  rm "$d/.agent-vault-rollover-log.md/record"
+  rmdir "$d/.agent-vault-rollover-log.md"
+  snapshot_outputs "$d/partial"
+  for retry_keep in 1 2 4 99; do
+    run_compact "$d/log.md" --keep "$retry_keep" --archive "$d/archive.md" --manifest "$d/manifest.md" \
+      --require-top-entry 'rollover session'
+    assert_rc 3 "$COMPACT_RC" 'missing-record fallback cannot be bypassed by keep changes/no-op'
+    assert_contains "$COMPACT_OUT" 'reconcile manually' 'missing-record diagnostic'
+    assert_outputs "$d/partial" 'missing-record fallback writes nothing'
+  done
+done
+
+# Last/single-entry overlap exercises the EOF flush, not just heading transitions.
+d="$tmp_root/single-entry-overlap"
+mkdir -p "$d"
+make_log "$d/log.md"
+sed -n '/^### 2026-05-26/,$p' "$d/log.md" >"$d/archive.md"
+run_compact "$d/log.md" --keep 99 --archive "$d/archive.md" --manifest "$d/manifest.md"
+assert_rc 3 "$COMPACT_RC" 'one-entry overlap at archive EOF refuses before no-op'
+
+d="$tmp_root/heading-collision"
+mkdir -p "$d"
+make_log "$d/log.md"
+printf '# Context Log Archive\n\n### 2026-05-28 10:00 local - codex - older work\n- A different body, not the same entry.\n' >"$d/archive.md"
+run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" --require-top-entry 'rollover session'
+assert_rc 0 "$COMPACT_RC" 'same heading with different bodies is not overlap'
+
+# Full destination preflight also covers special files, aliases, and hierarchy.
+for unsafe in symlink fifo hardlink parent; do
+  d="$tmp_root/unsafe-$unsafe"
+  mkdir -p "$d"
+  make_log "$d/log.md"
+  case "$unsafe" in
+    symlink) ln -s "$d/log.md" "$d/archive.md" ;;
+    fifo) mkfifo "$d/archive.md" ;;
+    hardlink) ln "$d/log.md" "$d/archive.md" ;;
+    parent) : ;;
+  esac
+  unsafe_manifest="$d/manifest.md"
+  [[ "$unsafe" != parent ]] || unsafe_manifest="$d/archive.md/manifest.md"
+  before="$(cksum <"$d/log.md")"
+  run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$unsafe_manifest" --require-top-entry 'rollover session'
+  assert_rc 2 "$COMPACT_RC" "unsafe destination: $unsafe"
+  [[ "$(cksum <"$d/log.md")" == "$before" ]] || fail 'unsafe destination changed live log'
+done
+
+prepare_recovery_case 'spaces $literal; [brackets] and\backslash'
+fault_recovery_case after "$d/archive.md"
+assert_rc 3 "$COMPACT_RC" 'literal shell metacharacters in destination paths'
+run_compact "$d/log.md" --keep 99 --archive "$d/archive.md" --manifest "$d/manifest.md"
+assert_rc 3 "$COMPACT_RC" 'literal destination ordinary retry requires recovery'
+printf -v expected_command '%q %q --recover' "$compactor" "$d/log.md"
+assert_contains "$COMPACT_OUT" "run $expected_command before" 'recovery guidance quotes literal shell metacharacters'
+run_compact "$d/log.md" --recover
+assert_rc 0 "$COMPACT_RC" 'recover literal destination paths'
+assert_outputs "$d/expected" 'literal destination bytes'
+
+# Every candidate copy must succeed before the first output replacement. Existing
+# outputs (including a read-only manifest) are unchanged on a late staging error.
+real_cp="$(command -v cp)"
+cat >"$fault_bin/cp" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+destination="${@: -1}"
+if [[ "$destination" == */.agent-vault-rollover-stage.* && "${destination##*/}" == "$ROLLOVER_TEST_COPY_FILE" ]]; then
+  if [[ "$ROLLOVER_TEST_COPY_FAULT" == fail ]]; then exit 73; fi
+  "$ROLLOVER_TEST_CP" "$@"
+  printf '\ncorrupted staged copy\n' >>"$destination"
+else
+  exec "$ROLLOVER_TEST_CP" "$@"
+fi
+EOF
+chmod +x "$fault_bin/cp"
+for role in archive manifest log; do
+  for copy_fault in fail corrupt; do
+    prepare_recovery_case "stage-$copy_fault-$role" true
+    PATH="$fault_bin:$PATH" ROLLOVER_TEST_MV="$real_mv" ROLLOVER_TEST_CP="$real_cp" \
+      ROLLOVER_TEST_COPY_FILE="$role.md" ROLLOVER_TEST_COPY_FAULT="$copy_fault" \
+      run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" --require-top-entry 'rollover session'
+    assert_rc 2 "$COMPACT_RC" 'staging failure/corruption is a no-output IO failure'
+    assert_outputs "$d/before" 'all originals unchanged when staging fails'
+    assert_no_transaction_artifacts 'preparation cleans its own staging data'
+  done
+done
+rm "$fault_bin/cp"
+
+# An empty journal is ambiguous: it can also be a deleted ready record. Do not
+# claim successful recovery or discard the remaining evidence automatically.
+prepare_recovery_case empty-journal
+mkdir "$d/.agent-vault-rollover-log.md"
+run_compact "$d/log.md" --recover --dry-run
+assert_rc 3 "$COMPACT_RC" 'empty journal preview refuses to guess'
+[[ -d "$d/.agent-vault-rollover-log.md" ]] || fail 'dry-run removed empty journal'
+run_compact "$d/log.md" --recover
+assert_rc 3 "$COMPACT_RC" 'empty journal requires inspection'
+assert_outputs "$d/before" 'empty journal never replaces outputs'
+printf 'unfinished metadata\n' >"$d/.agent-vault-rollover-log.md/record.next"
+run_compact "$d/log.md" --recover
+assert_rc 3 "$COMPACT_RC" 'incomplete nonempty journal requires inspection'
+assert_file_contains "$d/.agent-vault-rollover-log.md/record.next" 'unfinished metadata' 'incomplete data preserved'
+
+# The helper must not follow a malicious record.next symlink on ready->committed.
+prepare_recovery_case unsafe-next-record
+fault_recovery_case before "$d/archive.md"
+printf 'precious\n' >"$d/precious"
+ln -s "$d/precious" "$d/.agent-vault-rollover-log.md/record.next"
+run_compact "$d/log.md" --recover
+assert_rc 3 "$COMPACT_RC" 'unsafe next-record path refuses'
+assert_file_contains "$d/precious" precious 'record writer did not follow symlink'
+assert_outputs "$d/before" 'unsafe metadata refuses before output replacement'
+
+# A genuinely new annual archive is compatible with a consistent OLD pointer
+# and manifest. The safety floor must not validate the old record against it.
+prepare_recovery_case annual-archive
+run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" --require-top-entry 'rollover session'
+assert_rc 0 "$COMPACT_RC" 'initial annual-archive rollover'
+awk '/^## Entries$/ { print; print ""; print "### 2027-01-01 09:00 local - codex - new rollover session"; print "- New work."; next } { print }' \
+  "$d/log.md" >"$d/log.next" && mv "$d/log.next" "$d/log.md"
+cp "$d/archive.md" "$d/prior-archive.md"
+run_compact "$d/log.md" --keep 1 --archive "$d/next-year/archive.md" --manifest "$d/manifest.md" --require-top-entry 'rollover session'
+assert_rc 0 "$COMPACT_RC" 'new annual archive does not spuriously look inconsistent'
+cmp -s "$d/archive.md" "$d/prior-archive.md" || fail 'annual rollover touched previous archive'
+
+prepare_recovery_case missing-manifest
+run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" --require-top-entry 'rollover session'
+rm "$d/manifest.md"
+run_compact "$d/log.md" --keep 99 --archive "$d/archive.md" --manifest "$d/manifest.md"
+assert_rc 3 "$COMPACT_RC" 'missing manifest with a live pointer refuses before no-op'
+
+d="$tmp_root/private-dry-run"
+mkdir -p "$d"
+make_log "$d/log.md"
+run_compact "$d/log.md" --keep 2 --archive "$d/new/a/archive.md" --manifest "$d/new/b/manifest.md" --require-top-entry 'rollover session' --dry-run
+assert_rc 0 "$COMPACT_RC" 'dry-run validates nested missing destinations'
+assert_not_exists "$d/new" 'dry-run does not create destination parents'
+assert_no_transaction_artifacts 'dry-run does not create recovery state'
 
 echo "compact-context-log compactor regression checks passed ($pass assertions)."

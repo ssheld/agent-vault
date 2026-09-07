@@ -177,6 +177,53 @@ assert_generated_safety() {
   done
 }
 
+assert_generated_rollover_recovery() {
+  local target="$1" label="$2" fixture rc=0 ignore_rc=0 output actual_mv
+  target="$(cd "$target" && pwd -P)"
+  fixture="$target/rollover-fixture"
+  mkdir -p "$fixture/bin"
+  cp "$target/agent-vault/context-log.md" "$fixture/project-log-before.md"
+  cat >"$fixture/log.md" <<'EOF'
+# Context Log
+
+## Usage Rules
+- Newest first.
+
+## Current Snapshot
+- Branch: main
+
+## Entries
+
+### 2026-06-01 09:00 local - codex - rollover session
+- Keep this newest entry.
+
+### 2026-05-31 09:00 local - codex - archived entry
+- Preserve this body exactly once.
+EOF
+  actual_mv="$(command -v mv)"
+  cat >"$fixture/bin/mv" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${@: -1}" == "$ROLLOVER_FIXTURE_LOG" ]]; then exit 73; fi
+exec "$ROLLOVER_FIXTURE_MV" "$@"
+EOF
+  chmod +x "$fixture/bin/mv"
+  output="$(PATH="$fixture/bin:$PATH" ROLLOVER_FIXTURE_LOG="$fixture/log.md" ROLLOVER_FIXTURE_MV="$actual_mv" \
+    "$target/scripts/compact-context-log.sh" "$fixture/log.md" --keep 1 --archive "$fixture/archive.md" \
+    --manifest "$fixture/manifest.md" --rollover-id installed-helper --require-top-entry 'rollover session' 2>&1)" || rc=$?
+  assert_exit_code 3 "$rc" "$label installed helper preserves pending operation"
+  assert_output_contains "$output" '--recover' "$label installed recovery guidance"
+  git -C "$target" check-ignore -q rollover-fixture/.agent-vault-rollover-log.md/record ||
+    ignore_rc=$?
+  assert_exit_code 0 "$ignore_rc" "$label installed recovery ignore rule"
+  rc=0
+  output="$("$target/scripts/compact-context-log.sh" "$fixture/log.md" --recover 2>&1)" || rc=$?
+  assert_exit_code 0 "$rc" "$label installed recovery succeeds"
+  assert_file_contains "$fixture/log.md" installed-helper "$label recovery preserves ID"
+  assert_equal 1 "$(grep -c '^### ' "$fixture/archive.md")" "$label recovery archives once"
+  "$target/scripts/check-context-log-rollover.sh" "$fixture/log.md" --archive "$fixture/archive.md" --manifest "$fixture/manifest.md" --quiet
+  assert_files_equal "$fixture/project-log-before.md" "$target/agent-vault/context-log.md" "$label leaves project-owned log unchanged"
+}
+
 # --- Test 1: new-project seeds executable managed helpers and the runbook ---
 target="$(setup_empty_repo new-project-target)"
 rc=0
@@ -202,6 +249,7 @@ assert_file_contains "$target/scripts/check-context-log-rollover.sh" "# agent-va
 assert_path_exists "$target/scripts/compact-context-log.sh" "new-project creates rollover compactor"
 assert_executable "$target/scripts/compact-context-log.sh" "new-project makes rollover compactor executable"
 assert_file_contains "$target/scripts/compact-context-log.sh" "# agent-vault-managed: helper-script; file=compact-context-log.sh" "new-project seeds rollover compactor marker"
+assert_generated_rollover_recovery "$target" fresh-bootstrap
 assert_path_exists "$target/scripts/check-lessons-archive.sh" "new-project creates lessons-archive checker"
 assert_executable "$target/scripts/check-lessons-archive.sh" "new-project makes lessons-archive checker executable"
 assert_file_contains "$target/scripts/check-lessons-archive.sh" "# agent-vault-managed: helper-script; file=check-lessons-archive.sh" "new-project seeds lessons-archive checker marker"
@@ -323,6 +371,7 @@ assert_executable "$target/scripts/remove-worktree.sh" "update-project fixes man
 assert_executable "$target/scripts/check-memory-budget.sh" "update-project fixes memory-budget checker executable bit"
 assert_executable "$target/scripts/check-context-log-rollover.sh" "update-project fixes rollover checker executable bit"
 assert_executable "$target/scripts/compact-context-log.sh" "update-project fixes rollover compactor executable bit"
+assert_generated_rollover_recovery "$target" managed-update
 assert_executable "$target/scripts/check-lessons-archive.sh" "update-project fixes lessons-archive checker executable bit"
 assert_generated_safety "$target" managed-update
 

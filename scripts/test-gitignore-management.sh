@@ -134,6 +134,8 @@ write_managed_gitignore() {
 /agent-vault/context/updates/
 # Agent Vault -- local worktrees (ignore these)
 /.worktrees/
+# Agent Vault -- rollover recovery data (recover before cleaning)
+.agent-vault-rollover-*/
 EOF
 }
 
@@ -164,6 +166,8 @@ assert_managed_worktree_ignore() {
   assert_has_line "$file_path" "# Agent Vault -- local worktrees (ignore these)"
   assert_has_line "$file_path" "/.worktrees/"
   assert_line_count "$file_path" "/.worktrees/" 1
+  assert_has_line "$file_path" '# Agent Vault -- rollover recovery data (recover before cleaning)'
+  assert_line_count "$file_path" '.agent-vault-rollover-*/' 1
 }
 
 new_project_repo="$tmp_root/new-project-existing-patterns"
@@ -214,5 +218,22 @@ assert_output_not_contains "$update_project_output" "unbound variable"
 assert_output_not_contains "$update_project_output" "missing_lines[@]"
 assert_has_line "$update_project_managed_repo/.gitignore" "# Agent Vault -- local sync and migration backups (ignore these)"
 assert_managed_worktree_ignore "$update_project_managed_repo/.gitignore"
+
+# Actual matching is directory-specific and works at arbitrary destination depth.
+for target in "$new_project_repo" "$update_project_repo"; do
+  mkdir -p "$target/agent-vault/.agent-vault-rollover-context-log.md" \
+    "$target/elsewhere/.agent-vault-rollover-stage.ABC123"
+  printf 'private record\n' >"$target/agent-vault/.agent-vault-rollover-context-log.md/record"
+  printf 'private stage\n' >"$target/elsewhere/.agent-vault-rollover-stage.ABC123/archive.md"
+  git -C "$target" check-ignore -q agent-vault/.agent-vault-rollover-context-log.md/record
+  git -C "$target" check-ignore -q elsewhere/.agent-vault-rollover-stage.ABC123/archive.md
+  printf 'ordinary file\n' >"$target/.agent-vault-rollover-not-a-directory"
+  if git -C "$target" check-ignore -q .agent-vault-rollover-not-a-directory; then
+    echo 'Rollover rule must not ignore ordinary similarly named files' >&2
+    exit 1
+  fi
+  "$repo_root/scripts/update-project.sh" "$target" >/dev/null
+  assert_line_count "$target/.gitignore" '.agent-vault-rollover-*/' 1
+done
 
 echo "gitignore management regression checks passed."

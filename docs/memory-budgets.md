@@ -216,7 +216,7 @@ scripts/compact-context-log.sh agent-vault/context-log.md --keep 20 \
   --require-top-entry "rollover" --dry-run
 ```
 
-It is built so a half-finished rollover can never land:
+Rollover is recoverable, not an atomic three-file transaction:
 
 - **It does not invent the gate-required entry.** Add the rollover session entry
   first (the metadata gate), then run the compactor. A write-producing rollover
@@ -227,19 +227,106 @@ It is built so a half-finished rollover can never land:
   what keeps the cite-then-mutate workflow closed.
 - **Counts and boundary are finalized after that entry is in place**, from the
   live file as it stands, so they cannot describe a pre-entry state.
-- **The result is self-validated** with `check-context-log-rollover.sh
-  --manifest` before anything is written; any precondition or validation failure
-  aborts non-zero having written nothing. The three output paths (log, archive,
-  manifest) must be distinct — a collision is rejected before any build, so the
-  sequential commit renames cannot clobber a validated output.
-- **Each file is replaced by an atomic same-directory rename** of a fully-formed
-  temp file, live log last, so an interrupted run never loses entries.
+- **Prepare all outputs before replacing any.** Validate destination types,
+  parent paths, and distinct identities; reject final-component symlinks, special
+  files, hard-link aliases, and file/parent collisions. Build from temporary input
+  snapshots, self-validate with `check-context-log-rollover.sh --manifest`, and
+  stage all three replacements before publishing a recovery record. Recheck the
+  original fingerprints before committing. Preparation failures leave the three
+  outputs unchanged, although new parent directories may remain.
+- **Each file is replaced by an atomic destination-local rename** of a complete
+  staged file, in archive → manifest → live-log order. The stages are private
+  subdirectories of the destination directories, on their respective filesystems.
+  An interruption can leave a mixture of old/new outputs; the persisted record
+  and remaining staged files allow explicit roll-forward without duplicating
+  entries or issuing a second rollover ID.
+- **One writer for the whole destination set.** Do not run compaction, recovery,
+  or an editor concurrently against these files. There is no cross-process lock,
+  simultaneous three-path visibility, or power-loss/network-filesystem durability
+  guarantee. Stop the original process and any children before recovery.
 
 `--rollover-id`, `--boundary`, and `--anchors` default to a dated id (the next
 same-day sequence is the max existing suffix + 1, never a re-used gap) and values
-derived from the moved entries; pass them to override. `--dry-run` builds and
-self-validates without writing. Exit status: `0` rolled over (or nothing to do),
-`1` precondition/validation failure (no writes), `2` usage/IO error.
+derived from the moved entries; pass them to override. Ordinary `--dry-run`
+builds and validates using temporary scratch, but creates no destination parents,
+stages, or persistent recovery record. A healthy no-op also leaves no persistent
+artifacts. Paths with spaces and shell metacharacters are supported; newline/CR
+paths are rejected because the Markdown metadata format cannot represent them.
+SHA-256 uses the platform's `sha256sum` or `shasum`. Existing output mode bits
+are preserved; new outputs are owner-only (`0600`). Newly created directories use
+a private umask. As with the prior rename-based writer, this does not preserve
+inode identity or explicitly copy ownership, ACLs, or extended attributes.
+
+### Recovery and failure handling
+
+```bash
+scripts/compact-context-log.sh agent-vault/context-log.md --recover --dry-run
+scripts/compact-context-log.sh agent-vault/context-log.md --recover
+```
+
+Recovery takes the original destinations and validated replacement bytes from the
+record. Do not pass `--keep`, destination paths, or other generation options with
+`--recover`. Before any recovery write, every output must match its recorded
+before/after fingerprint and expected type/permissions; the complete effective
+result must pass the checker. Already-installed files are skipped, unchanged
+originals are replaced, and diverged files or damaged/missing required stages
+cause refusal without recovery writes. Fix the underlying IO problem before
+retrying recovery. Interrupted recovery is itself retryable.
+
+A committed record permits cleanup only, never replay over later edits. An empty
+transaction directory can indicate interrupted setup/final cleanup, but can also
+mean someone deleted a ready record. Like other incomplete/corrupt records, it
+requires manual inspection; recovery does not infer that outputs are consistent.
+With no record, `--recover` reports that fact; it cannot discover arbitrary old
+destination arguments. Use the original ordinary command with `--dry-run` to
+inspect those destinations instead.
+
+Recovery data lives in a reserved `.agent-vault-rollover-*` namespace:
+
+- Beside the live log: `.agent-vault-rollover-<log-basename>/record`, a private,
+  bounded, versioned data record (never sourced/evaluated as shell). It contains
+  destination identities, before/after SHA-256 fingerprints, permissions, stage
+  references, the chosen ID, and ready/committed state—not original-file backups.
+- Beside each output: `.agent-vault-rollover-stage.<random>/<output-basename>`.
+  Staging directories are private, even when an existing output has shared-read
+  permissions. A successful rename consumes that output's staged file.
+
+Bootstrap/update adds narrow ignore rules for these directories. **Ignored does
+not mean disposable:** do not run cleanup such as `git clean -fdx`, move the
+destinations, or remove recovery data while a transaction is pending. Successful
+completion removes only recorded artifacts; unexpected extra files are retained
+for inspection. Unreferenced stages left by termination before record publication
+may be removed manually after confirming no compactor/recovery process is active.
+
+If a record was deleted, or a partial rollover predates this recovery mechanism,
+the ordinary invocation still checks for complete-entry overlap between live log
+and archive and for inconsistent manifest/live-pointer metadata, before a fresh
+write or no-op. It compares entry bodies, not just headings, and ignores only
+trailing blank separators. Recognizable inconsistencies require manual
+reconciliation; this fallback never reconstructs an ID or resumes automatically.
+Healthy later rollovers with no overlap continue normally. Deliberately identical
+entries are ambiguous and also require reconciliation. Removing the record *and*
+editing away evidence is outside this detection guarantee.
+
+For manual reconciliation, preserve copies of all three outputs and remaining
+recovery data first. Establish whether the archived batch/manifest record was
+already applied, retain each intended entry exactly once, reconcile the live
+pointer with the manifest, and run the checker with explicit `--archive` and
+`--manifest`. Do not clear a pending record merely to bypass a refusal. When
+starting a different manifest, reconcile its relationship to the live pointer
+explicitly. Selecting a new annual archive with the existing consistent manifest
+is supported.
+
+| Status | Meaning | Next action |
+| --- | --- | --- |
+| `0` | Successful rollover/recovery or healthy no-op; recovery dry-run also uses `0` | Continue; a dry-run has not applied its plan. |
+| `1` | Gate or self-validation refusal; outputs unchanged | Fix the input/gate. |
+| `2` | Usage or preparation IO error before output replacement | Fix arguments/IO, then retry. |
+| `3` | Pending/partial operation, failed recovery/cleanup, or recognizable inconsistency without a record | Recover explicitly or reconcile manually; do not retry a fresh rollover. |
+
+Handled HUP/INT/TERM retain `129`/`130`/`143` with recovery guidance when a record
+is pending. An uncatchable kill cannot print a diagnostic; the next invocation
+detects its surviving record or recognizable partial output state.
 
 ## `check-lessons-archive.sh`
 
