@@ -51,10 +51,12 @@ With --strict (completeness):
 The flat format uses headings at the start of a line. Other level-1/level-2
 headings end a manifest record; deeper headings stay inside it. Unknown fields
 (including "key") are ignored. Both inputs ignore fenced examples before
-interpreting headings or fields. Fences use at least three backticks or tildes,
-with up to three leading spaces. A closing fence uses the same marker, at least
-the opening length, and only spaces/tabs afterward. Backtick opening info
-strings cannot contain backticks. CRLF and a missing final newline are accepted.
+interpreting headings or fields. HTML comments are not filtered; their contents
+can still affect validation. Put reference examples in fenced code blocks.
+Fences use at least three backticks or tildes, with up to three leading spaces.
+A closing fence uses the same marker, at least the opening length, and only
+spaces/tabs afterward. Backtick opening info strings cannot contain backticks.
+CRLF and a missing final newline are accepted.
 The checker requires every fence to close: an unterminated fence is a finding
 with its source/opening line, and cross-file completeness checks are skipped.
 

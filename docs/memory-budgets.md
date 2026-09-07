@@ -408,8 +408,12 @@ record, including bare `#` and `##` headings. Deeper headings stay within the
 record, and the next `## lesson:` starts a new one.
 
 Both inputs ignore fenced content before interpreting headings or fields, so
-sample records cannot classify lessons or change a real record. Fence delimiter
-rules follow [CommonMark](https://spec.commonmark.org/0.31.2/#fenced-code-blocks):
+sample records inside those fences cannot classify lessons or change a real
+record. HTML comments are not filtered: a commented-out manifest record can
+still satisfy completeness, and a commented-out archive heading can still
+require classification. Put reference examples in fenced code blocks.
+Fence delimiter rules follow
+[CommonMark](https://spec.commonmark.org/0.31.2/#fenced-code-blocks):
 at least three backticks or tildes, with zero to three leading spaces; a closer
 uses the same marker, at least the opening length, and only spaces/tabs after
 it. Opening info strings are allowed, but a backtick fence's info string cannot
