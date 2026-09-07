@@ -495,23 +495,36 @@ only once per record. Repeated fields produce a finding, with the first value
 retained for diagnostics. A repeated classification cannot count toward the
 classified total or satisfy strict completeness.
 
-Both inputs ignore fenced content before interpreting headings or fields, so
-sample records inside those fences cannot classify lessons or change a real
-record. HTML comments are not filtered: a commented-out manifest record can
-still satisfy completeness, and a commented-out archive heading can still
-require classification. Put reference examples in fenced code blocks.
+Both inputs ignore fenced content and HTML comment blocks before interpreting
+headings or fields. Sample records and fields inside those blocks cannot classify
+lessons, change a real record, or end it with a section heading. An HTML comment
+block starts with `<!--` after zero to three leading spaces and ends with the
+physical line containing the first `-->`, following the
+[CommonMark HTML-block rules](https://spec.commonmark.org/0.31.2/#html-blocks).
+The entire closing line is ignored:
+`<!-- example --> ## lesson: sample` supplies no record, and a second comment
+opener on that line does not start another block. Comments do not nest. Fence
+markers inside a comment and comment markers inside a fence are inert.
+
+Four-space or tab-indented comment markers do not open a block. Inline comments
+are unsupported and remain literal text in headings and field values; they are
+not guaranteed to produce a finding. Identical inline comments in a manifest key
+and archive heading still match as raw text. Use comment blocks or fenced code
+blocks for reference examples. Setext section boundaries remain a separate
+follow-up in [#155](https://github.com/ssheld/agent-vault/issues/155).
 Fence delimiter rules follow
 [CommonMark](https://spec.commonmark.org/0.31.2/#fenced-code-blocks):
 at least three backticks or tildes, with zero to three leading spaces; a closer
 uses the same marker, at least the opening length, and only spaces/tabs after
 it. Opening info strings are allowed, but a backtick fence's info string cannot
 contain backticks. CRLF and files without a final newline are accepted.
-**The checker additionally requires closure**, although CommonMark allows a
-fence to continue to EOF. An unterminated fence produces a finding with its
-source path and opening line. Only absence checks that search the incomplete
-input are skipped: manifest lesson presence needs a complete archive, while
+**The checker additionally requires closure** of fences and comment blocks,
+although CommonMark allows these blocks to continue to EOF. An unterminated
+fence or HTML comment produces a finding with its source path and opening line.
+Only absence checks that search the incomplete input are skipped: manifest
+lesson presence needs a complete archive, while
 strict classification completeness needs a complete manifest. Known keys from
-the other input still support checks even if that input ends in an open fence.
+the other input still support checks even if that input ends in an open block.
 Local record validation also continues.
 
 The checker validates that every record declares exactly one of the three classes
@@ -524,8 +537,10 @@ is caught. Concatenated class names are invalid. A missing or invalid class
 does not count toward the classified total or satisfy strict completeness; in
 strict mode an archived lesson with an invalid class reports both the authoring
 error and the resulting classification gap. Advisory mode reports only the
-classification error. Rule liveness is a substring match, so use distinctive
-rule text.
+classification error. Rule liveness is a substring match over unfiltered rules
+files, so use distinctive rule text. A rule found only in a comment or fenced
+example in a rules source still counts as live; correcting that separate search
+is tracked in [#158](https://github.com/ssheld/agent-vault/issues/158).
 The canonical `<manifest-dir>/../../lessons.md` is always a source when present
 and repeatable `--rules` **adds** more (e.g. `shared-rules.md`) rather than
 replacing it. Empty `--rules` arguments are ignored; an existing empty file
