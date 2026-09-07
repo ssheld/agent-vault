@@ -137,6 +137,24 @@ clear_context_log_entries() {
   perl -0pi -e 's/^## Entries\s*\n.*\z/## Entries\n/mgs' "$file_path"
 }
 
+assert_clock_rejects() {
+  local expected_diagnostic="$1"
+  shift
+  local output="" rc=0
+
+  output="$("$clock_bin/date" "$@" 2>&1)" || rc=$?
+  if [[ "$rc" -ne 2 ]]; then
+    echo "Expected fixed test clock to reject [$*] with exit 2; got $rc." >&2
+    printf '%s\n' "$output" >&2
+    exit 1
+  fi
+  assert_output_contains "$output" "$expected_diagnostic"
+}
+
+assert_clock_rejects "Unsupported fixed test clock date format" '+%F'
+assert_clock_rejects "Fixed test clock expects one date format argument."
+assert_clock_rejects "Fixed test clock expects one date format argument." '+%Y-%m-%d' extra
+
 legacy_context_log_fixture="$repo_root/scripts/test-fixtures/context-log/legacy-known.md"
 
 hook_repo="$tmp_root/hook-enforcement"
