@@ -31,12 +31,63 @@ expect_result() {
       exit 1
     fi
   done <<<"$must_contain"
-  if [[ "$output" == *"skipped"* && "$output" == *"lessons-archive check passed:"* ]]; then
-    echo "FAIL: skipped checks must not report success for: $*" >&2
+  if [[ "$output" == *"lessons-archive check passed:"* ]] &&
+    [[ "$rc" -ne 0 || "$output" == *"warning:"* || "$output" == *"FAILED:"* || "$output" == *"skipped"* || "$output" == *"Error:"* ]]; then
+    echo "FAIL: findings and errors must not report success for: $*" >&2
     printf '%s\n' "$output" >&2
     exit 1
   fi
+  result_output="$output"
 }
+
+reject_output() {
+  local forbidden
+  for forbidden in "$@"; do
+    if [[ "$result_output" == *"$forbidden"* ]]; then
+      echo "FAIL: unexpected output '$forbidden'" >&2
+      printf '%s\n' "$result_output" >&2
+      exit 1
+    fi
+  done
+}
+
+expect_occurrences() {
+  local expected="$1" needle="$2" actual
+  actual="$(grep -Fo -- "$needle" <<<"$result_output" | wc -l)" || :
+  actual="${actual//[[:space:]]/}"
+  [[ "$actual" == "$expected" ]] || {
+    echo "FAIL: expected $expected occurrences of '$needle', got $actual" >&2
+    printf '%s\n' "$result_output" >&2
+    exit 1
+  }
+}
+
+expect_silent() {
+  expect_result 0 "" "$@" --quiet
+  [[ -z "$result_output" ]] || {
+    echo "FAIL: --quiet advisory mode must be silent" >&2
+    printf '%s\n' "$result_output" >&2
+    exit 1
+  }
+}
+
+expect_finding_modes() {
+  local required="$1"
+  shift
+  expect_result 0 "$required" "$@"
+  reject_output "check passed"
+  expect_silent "$@"
+  expect_result 1 "$required" "$@" --strict
+  reject_output "check passed"
+  expect_result 1 "$required" "$@" --strict --quiet
+  reject_output "check passed"
+}
+
+# Count literal occurrences even when multiple matches share one line.
+result_output=$'repeated repeated\nonce'
+expect_occurrences 2 repeated
+expect_occurrences 1 once
+expect_occurrences 0 absent
 
 # --- Canonical layout fixture: agent-vault/{lessons.md, context/archive/...} ---
 mk_layout() {
@@ -497,5 +548,362 @@ if [[ "$multi_rc" -ne 1 || "$finding_counts" != "1 1 1" || "$multi_out" == *"che
   printf '%s\n' "$multi_out" >&2
   exit 1
 fi
+
+# --- 19. Both inputs share delimiter-aware fences before interpreting content ---
+d="$tmp_root/parser cases"
+mkdir -p "$d/agent-vault/context/archive"
+parser_manifest="$(manifest_path "$d")"
+parser_archive="$d/agent-vault/context/archive/lessons-archive.md"
+printf '%s\n' 'a live rule' >"$d/agent-vault/lessons.md"
+# opener | line that must NOT close it | closer. Closing runs may be longer,
+# info strings are allowed, and indentation is limited to three spaces.
+fence_cases=(
+  '```|~~~|```'
+  '~~~|```|~~~'
+  '````|```|````'
+  '~~~~|~~~|~~~~'
+  '```sh|``` trailing text|````  '
+  $'~~~markdown|~~~ trailing text|~~~~\t'
+  ' ```sh|``| ```'
+  '  ~~~ info `ok`|~~|  ~~~'
+  '   ```sh|``|   ```'
+  '   ```sh|~~~| ```'
+  '~~~|```|   ~~~~'
+  '```|    ```|```'
+  '~~~|    ~~~|~~~'
+)
+for fence_case in "${fence_cases[@]}"; do
+  IFS='|' read -r opener false_closer closer <<<"$fence_case"
+  for line_ending in lf crlf; do
+    # The sample must not invent an archive heading, even after a false closer.
+    printf '%s\n' '## lesson: real lesson' '- classification: archival-only' >"$parser_manifest"
+    printf '%s\n' '### real lesson' "$opener" "$false_closer" '### ghost lesson' >"$parser_archive"
+    # No final newline is intentional; CRLF conversion must preserve that case.
+    printf '%s' "$closer" >>"$parser_archive"
+    if [[ "$line_ending" == crlf ]]; then
+      awk 'NR > 1 { printf "\r\n" } { printf "%s", $0 }' "$parser_archive" >"$d/converted.md"
+      mv "$d/converted.md" "$parser_archive"
+    fi
+    cp "$parser_archive" "$d/archive-before.md"
+    cp "$parser_manifest" "$d/manifest-before.md"
+    expect_result 0 '(1 classified)' "$parser_manifest" --strict
+    cmp "$d/archive-before.md" "$parser_archive"
+    cmp "$d/manifest-before.md" "$parser_manifest"
+    # A real heading after the closing fence must reach strict completeness.
+    printf '\n%s\n' '### unclassified lesson' >>"$parser_archive"
+    expect_result 1 'archived lesson is not classified in the manifest: "unclassified lesson"' "$parser_manifest" --strict
+    reject_output 'ghost lesson' 'check passed'
+    expect_result 0 'check passed' "$parser_manifest"
+
+    # Fenced headings, section boundaries, identity and classification bullets
+    # cannot create a record, end the real record, or alter its fields.
+    printf '%s\n' '### real lesson' >"$parser_archive"
+    printf '%s\n' '## lesson: real lesson' '- classification: covered-by-a-named-always-on-rule' \
+      "$opener" "$false_closer" '- classification: invalid-inside-fence' \
+      '- key: hijacked' '- quick_rule: hidden rule' '# Example section' '## Example subsection' \
+      '## lesson: unclassified lesson' '- classification: archival-only' "$closer" >"$parser_manifest"
+    printf '%s' '- covered_by: a live rule' >>"$parser_manifest"
+    if [[ "$line_ending" == crlf ]]; then
+      awk 'NR > 1 { printf "\r\n" } { printf "%s", $0 }' "$parser_manifest" >"$d/converted.md"
+      mv "$d/converted.md" "$parser_manifest"
+    fi
+    expect_result 0 '(1 classified)' "$parser_manifest" --strict
+    printf '%s\n' '### unclassified lesson' >>"$parser_archive"
+    expect_result 1 'archived lesson is not classified in the manifest: "unclassified lesson"' "$parser_manifest" --strict
+    reject_output 'not present in the archive' 'hijacked' 'invalid-inside-fence' 'check passed'
+  done
+done
+
+# A backtick in a backtick opener's info string invalidates the opener; four
+# leading spaces and runs shorter than three are likewise not fence openers.
+for non_opener in '```bad`info' '    ```' '    ~~~' '``' '~~'; do
+  printf '%s\n' "$non_opener" '### real lesson' >"$parser_archive"
+  printf '%s\n' "$non_opener" '## lesson: real lesson' '- classification: archival-only' >"$parser_manifest"
+  expect_result 0 '(1 classified)' "$parser_manifest" --strict
+  reject_output 'unterminated'
+done
+
+# --- 20. Unclosed fences are findings, not successful or complete parses ---
+for input_kind in manifest archive; do
+  for prefix in empty populated; do
+    for opener in '```' '~~~'; do
+      printf '%s\n' '# Manifest' >"$parser_manifest"
+      printf '%s\n' '# Archive' >"$parser_archive"
+      if [[ "$prefix" == populated ]]; then
+        printf '%s\n' '## lesson: real lesson' '- classification: archival-only' >>"$parser_manifest"
+        printf '%s\n' '### real lesson' >>"$parser_archive"
+      fi
+      if [[ "$input_kind" == archive ]]; then
+        source_path="$parser_archive"
+        # This lesson may be hidden in the truncated archive: do not infer absence.
+        printf '%s\n' '## lesson: hidden lesson' '- classification: archival-only' >>"$parser_manifest"
+      else
+        source_path="$parser_manifest"
+        printf '%s\n' '### hidden lesson' >>"$parser_archive"
+      fi
+      opening_line="$(awk 'END { print NR + 1 }' "$source_path")"
+      printf '%s\n' "$opener" >>"$source_path"
+      printf '%s' 'unterminated content without final newline' >>"$source_path"
+      expect_finding_modes "unterminated fence in $input_kind
+$source_path:$opening_line" "$parser_manifest"
+      reject_output 'not present in the archive' 'not classified in the manifest'
+      expect_occurrences 1 'unterminated fence'
+    done
+  done
+done
+# Even known headings in an incomplete input cannot support absence claims.
+printf '%s\n' '## lesson: missing from archive' '- classification: archival-only' '```' >"$parser_manifest"
+printf '%s\n' '### missing from manifest' '~~~' >"$parser_archive"
+expect_finding_modes 'unterminated fence in manifest
+unterminated fence in archive' "$parser_manifest"
+reject_output 'not present in the archive' 'not classified in the manifest'
+
+# --- 21. Classifications are exact values; invalid records do not cover lessons ---
+printf '%s\n' '### real lesson' >"$parser_archive"
+for bad_class in \
+  'retained-as-quick-rule covered-by-a-named-always-on-rule' \
+  'covered-by-a-named-always-on-rule archival-only' \
+  'retained-as-quick-rule covered-by-a-named-always-on-rule archival-only' \
+  'totally-bogus' 'archival-only extra-garbage' ''; do
+  printf '%s\n' '## lesson: real lesson' "- classification: $bad_class" \
+    '- covered_by: irrelevant' '- quick_rule: irrelevant' >"$parser_manifest"
+  class_finding='has an invalid classification'
+  [[ -n "$bad_class" ]] || class_finding='has no classification'
+  expect_result 0 "$class_finding" "$parser_manifest"
+  reject_output 'not classified in the manifest' 'sets covered_by' 'sets quick_rule' 'check passed'
+  expect_occurrences 1 "$class_finding"
+  expect_silent "$parser_manifest"
+  for quiet_flag in '' '--quiet'; do
+    mode_flags=(--strict)
+    [[ -z "$quiet_flag" ]] || mode_flags+=("$quiet_flag")
+    expect_result 1 "$class_finding
+archived lesson is not classified in the manifest" "$parser_manifest" "${mode_flags[@]}"
+    expect_occurrences 1 "$class_finding"
+    expect_occurrences 1 'archived lesson is not classified in the manifest'
+    reject_output 'sets covered_by' 'sets quick_rule' 'check passed'
+  done
+done
+# All three exact values still pass, including surrounding whitespace.
+printf '%s\n' 'a live rule' >"$d/agent-vault/lessons.md"
+for good_class in retained-as-quick-rule covered-by-a-named-always-on-rule archival-only; do
+  printf '%s\n' '## lesson: real lesson' "- classification:   $good_class   " >"$parser_manifest"
+  if [[ "$good_class" == covered-by-a-named-always-on-rule ]]; then
+    printf '%s\n' '- covered_by: a live rule' >>"$parser_manifest"
+  fi
+  expect_result 0 '(1 classified)' "$parser_manifest" --strict
+done
+# Independent valid records still receive their own class-specific checks.
+printf '%s\n' '## lesson: real lesson' '- classification: totally-bogus' \
+  '## lesson: another lesson' '- classification: covered-by-a-named-always-on-rule' >"$parser_manifest"
+printf '%s\n' '### another lesson' >>"$parser_archive"
+expect_result 1 'invalid classification
+names no "covered_by" rule
+archived lesson is not classified in the manifest: "real lesson"' "$parser_manifest" --strict
+expect_occurrences 1 'archived lesson is not classified in the manifest'
+
+# --- 22. Only the heading supplies identity; field names cannot hide duplicates ---
+printf '%s\n' '### real lesson' >"$parser_archive"
+printf '%s\n' '## lesson: real lesson' '- classification: archival-only' \
+  '- key: hijacked' '- record: hijacked' '- heading: hijacked' '- COUNT: 99' >"$parser_manifest"
+expect_result 0 '(1 classified)' "$parser_manifest" --strict
+printf '%s\n' '## lesson: real lesson' '- classification: archival-only' \
+  '- key: another hijacked key' >>"$parser_manifest"
+expect_finding_modes 'duplicate lesson key: "real lesson"' "$parser_manifest"
+reject_output 'hijacked' 'not present in the archive' 'not classified in the manifest'
+expect_occurrences 1 'duplicate lesson key'
+
+# --- 23. H1/H2 sections end records; H3+ stays in the active record ---
+for boundary in '# Section' '## Section' '#' '##' $'#\tSection' $'##\t'; do
+  for line_ending in lf crlf; do
+    printf '%s\n' '## lesson: real lesson' '- classification: archival-only' \
+      "$boundary" '- classification: invalid-after-section' '- key: hijacked' \
+      '## lesson: another lesson' '### Details' '- classification: archival-only' >"$parser_manifest"
+    printf '%s\n' '### real lesson' '### another lesson' >"$parser_archive"
+    if [[ "$line_ending" == crlf ]]; then
+      awk '{ printf "%s\r\n", $0 }' "$parser_manifest" >"$d/converted.md"
+      mv "$d/converted.md" "$parser_manifest"
+    fi
+    expect_result 0 '(2 classified)' "$parser_manifest" --strict
+  done
+done
+
+# --- 24. Repeated --archive validates every nonempty value, selects the last ---
+printf '%s\n' '## lesson: real lesson' '- classification: archival-only' >"$parser_manifest"
+printf '%s\n' '### real lesson' >"$parser_archive"
+printf '%s\n' '### different lesson' >"$d/other archive.md"
+for mode in advisory quiet strict strict-quiet; do
+  mode_flags=()
+  case "$mode" in
+    quiet) mode_flags=(--quiet) ;;
+    strict) mode_flags=(--strict) ;;
+    strict-quiet) mode_flags=(--strict --quiet) ;;
+  esac
+  expect_result 2 "archive file not found: $d/missing.md" "$parser_manifest" "${mode_flags[@]}" \
+    --archive "$d/missing.md" --archive "$parser_archive"
+  expect_result 2 "archive file not found: $d/missing.md" "$parser_manifest" "${mode_flags[@]}" \
+    --archive "$parser_archive" --archive "$d/missing.md"
+  expect_result 2 "archive file not found: $d/missing.md" "$parser_manifest" "${mode_flags[@]}" \
+    --archive "$d/missing.md" --archive ''
+done
+expect_result 0 '(1 classified)' "$parser_manifest" --strict --archive "$d/other archive.md" --archive "$parser_archive"
+expect_result 1 'not present in the archive: "real lesson"' "$parser_manifest" --strict \
+  --archive "$parser_archive" --archive "$d/other archive.md"
+expect_result 0 '(1 classified)' "$parser_manifest" --strict --archive '' --archive "$parser_archive"
+expect_result 0 '(1 classified)' "$parser_manifest" --strict --archive "$d/other archive.md" --archive ''
+expect_result 0 '(1 classified)' "$parser_manifest" --strict --archive '' --archive ''
+
+# --- 25. Parser errors cannot become empty/partial success, even as root ---
+# Intercept awk only for a marked input. Run its real parser on a prefix for the
+# partial-output case, then fail. Other awk calls retain normal behavior. This
+# exercises status propagation rather than relying on chmod, which root bypasses.
+mkdir -p "$d/bin"
+real_awk="$(command -v awk)"
+cat >"$d/bin/awk" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+args=("$@")
+last_arg="${args[${#args[@]} - 1]}"
+# Accept either file arguments or redirected stdin, so this fixture also
+# exercises the historical parser when demonstrating the regression.
+if [[ -f "$last_arg" ]]; then
+  cp "$last_arg" "$PARSER_CAPTURE"
+  unset 'args[${#args[@]}-1]'
+else
+  cat >"$PARSER_CAPTURE"
+fi
+if grep -Fq '# INJECT PARSER FAILURE' "$PARSER_CAPTURE"; then
+  if [[ "$PARSER_FAILURE_OUTPUT" == partial ]]; then
+    head -n 3 "$PARSER_CAPTURE" | "$REAL_AWK" "${args[@]}"
+  fi
+  echo 'injected parser read failure' >&2
+  exit 74
+fi
+exec "$REAL_AWK" "${args[@]}" <"$PARSER_CAPTURE"
+EOF
+chmod +x "$d/bin/awk"
+for input_kind in manifest archive; do
+  for failure_output in empty partial; do
+    printf '%s\n' '# Manifest' '## lesson: real lesson' '- classification: archival-only' \
+      '## lesson: later lesson' '- classification: archival-only' >"$parser_manifest"
+    printf '%s\n' '# Archive' '### real lesson' 'write-up' '### later lesson' >"$parser_archive"
+    source_path="$parser_manifest"
+    [[ "$input_kind" == manifest ]] || source_path="$parser_archive"
+    printf '%s\n' '# INJECT PARSER FAILURE' >>"$source_path"
+    cp "$parser_manifest" "$d/manifest-before.md"
+    cp "$parser_archive" "$d/archive-before.md"
+    for mode in advisory quiet strict strict-quiet; do
+      mode_flags=()
+      case "$mode" in
+        quiet) mode_flags=(--quiet) ;;
+        strict) mode_flags=(--strict) ;;
+        strict-quiet) mode_flags=(--strict --quiet) ;;
+      esac
+      PATH="$d/bin:$PATH" REAL_AWK="$real_awk" PARSER_CAPTURE="$d/awk-input" PARSER_FAILURE_OUTPUT="$failure_output" \
+        expect_result 2 "could not parse $input_kind: $source_path
+injected parser read failure" "$parser_manifest" "${mode_flags[@]}"
+      reject_output 'check passed' 'not present in the archive' 'not classified in the manifest'
+    done
+    cmp "$d/manifest-before.md" "$parser_manifest"
+    cmp "$d/archive-before.md" "$parser_archive"
+  done
+done
+
+# --- 26. Indented examples cannot supply fields to a live record ---
+printf '%s\n' '### real lesson' >"$parser_archive"
+for indent in '    ' '        ' $'\t'; do
+  for example_kind in bare fenced; do
+    for example_field in '- classification: archival-only' '- covered_by: a live rule'; do
+      printf '%s\n' '## lesson: real lesson' '- classification: covered-by-a-named-always-on-rule' '' >"$parser_manifest"
+      [[ "$example_kind" != fenced ]] || printf '%s%s\n' "$indent" '```md' >>"$parser_manifest"
+      printf '%s%s\n' "$indent" "$example_field" >>"$parser_manifest"
+      [[ "$example_kind" != fenced ]] || printf '%s%s\n' "$indent" '```' >>"$parser_manifest"
+      expect_finding_modes 'names no "covered_by" rule' "$parser_manifest"
+    done
+  done
+done
+printf '%s\n' '## lesson: real lesson' '- classification: retained-as-quick-rule' '' \
+  '    - quick_rule: an inert example' >"$parser_manifest"
+expect_result 0 '(1 classified)' "$parser_manifest" --strict
+# Zero through three leading spaces still support real field bullets.
+for indent in '' ' ' '  ' '   '; do
+  printf '%s\n' '## lesson: real lesson' >"$parser_manifest"
+  printf '%s%s\n' "$indent" '- classification: covered-by-a-named-always-on-rule' \
+    "$indent" '- covered_by: a live rule' >>"$parser_manifest"
+  expect_result 0 '(1 classified)' "$parser_manifest" --strict
+done
+
+# --- 27. Only the input being checked for absence must be complete ---
+printf '%s\n' '# Empty manifest' >"$parser_manifest"
+printf '%s\n' '### visible lesson' '```' '### hidden example' >"$parser_archive"
+expect_result 0 'unterminated fence in archive' "$parser_manifest"
+reject_output 'not classified in the manifest' 'check passed'
+expect_silent "$parser_manifest"
+for quiet_flag in '' '--quiet'; do
+  mode_flags=(--strict)
+  [[ -z "$quiet_flag" ]] || mode_flags+=("$quiet_flag")
+  expect_result 1 'unterminated fence in archive
+archived lesson is not classified in the manifest: "visible lesson"' "$parser_manifest" "${mode_flags[@]}"
+  reject_output 'hidden example' 'check passed'
+done
+printf '%s\n' '# Empty archive' >"$parser_archive"
+printf '%s\n' '## lesson: visible lesson' '- classification: archival-only' '~~~' \
+  '## lesson: hidden example' >"$parser_manifest"
+expect_finding_modes 'unterminated fence in manifest
+manifest classifies a lesson not present in the archive: "visible lesson"' "$parser_manifest"
+reject_output 'hidden example'
+
+# --- 28. Archive ATX headings accept up to three leading spaces ---
+for indent in '' ' ' '  ' '   '; do
+  for ending in lf crlf; do
+    printf '%s\n' '# Empty manifest' >"$parser_manifest"
+    printf '%s%s' "$indent" '### real lesson' >"$parser_archive"
+    [[ "$ending" != crlf ]] || printf '\r\n' >>"$parser_archive"
+    expect_result 1 'archived lesson is not classified in the manifest: "real lesson"' "$parser_manifest" --strict
+    reject_output 'check passed'
+    printf '%s\n' '## lesson: real lesson' '- classification: archival-only' >"$parser_manifest"
+    expect_result 0 '(1 classified)' "$parser_manifest" --strict
+  done
+done
+printf '%s\n' '### real lesson' '    ### indented code' $'\t### tab-indented code' >"$parser_archive"
+expect_result 0 '(1 classified)' "$parser_manifest" --strict
+
+# --- 29. Repeated recognized fields cannot silently replace earlier values ---
+printf '%s\n' '### real lesson' >"$parser_archive"
+for values in 'totally-bogus|archival-only' 'archival-only|totally-bogus' 'archival-only|archival-only' '|archival-only'; do
+  IFS='|' read -r first_class second_class <<<"$values"
+  printf '%s\n' '## lesson: real lesson' "- classification: $first_class" \
+    "- classification: $second_class" '- classification: archival-only' >"$parser_manifest"
+  expect_finding_modes 'repeats "classification" field' "$parser_manifest"
+  expect_occurrences 1 'repeats "classification" field'
+  expect_occurrences 1 'archived lesson is not classified in the manifest'
+  case "$first_class" in
+    totally-bogus) expect_occurrences 1 'has an invalid classification "totally-bogus"' ;;
+    '') expect_occurrences 1 'has no classification' ;;
+    *) reject_output 'has an invalid classification' ;;
+  esac
+done
+for reference_field in covered_by quick_rule; do
+  reference_class=covered-by-a-named-always-on-rule
+  [[ "$reference_field" != quick_rule ]] || reference_class=retained-as-quick-rule
+  printf '%s\n' '## lesson: real lesson' "- classification: $reference_class" \
+    "- $reference_field: a live rule" "- $reference_field: a live rule" \
+    "- $reference_field: a live rule" >"$parser_manifest"
+  expect_finding_modes "repeats \"$reference_field\" field" "$parser_manifest"
+  expect_occurrences 1 "repeats \"$reference_field\" field"
+done
+# Repeated unknown extension fields remain ignored.
+printf '%s\n' '## lesson: real lesson' '- classification: archival-only' \
+  '- key: ignored' '- key: also ignored' '- note: one' '- note: two' >"$parser_manifest"
+expect_result 0 '(1 classified)' "$parser_manifest" --strict
+
+# --- 30. Each distinct missing lesson has one absence finding ---
+printf '%s\n' '# Empty archive' >"$parser_archive"
+printf '%s\n' '## lesson: missing lesson' '- classification: archival-only' \
+  '## lesson: missing lesson' '- classification: archival-only' >"$parser_manifest"
+expect_finding_modes 'duplicate lesson key: "missing lesson"
+manifest classifies a lesson not present in the archive: "missing lesson"' "$parser_manifest"
+expect_occurrences 1 'duplicate lesson key'
+expect_occurrences 1 'not present in the archive'
+expect_result 0 '2 warning(s)' "$parser_manifest"
 
 echo "lessons-archive checker regression checks passed."
