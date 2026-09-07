@@ -5,13 +5,40 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd "$script_dir/.." && pwd -P)"
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/agent-vault-session-hook-test.XXXXXX")"
-today="$(date '+%Y-%m-%d')"
+today="2026-09-06"
 
 cleanup() {
   rm -rf "$tmp_root"
 }
 
 trap cleanup EXIT
+
+# Keep fixture expectations and child setup/migration commands on one clock,
+# even when the real clock crosses midnight. Reject new formats rather than
+# silently falling back to wall time. The override stays in this test process.
+clock_bin="$tmp_root/clock-bin"
+mkdir -p "$clock_bin"
+cat <<'EOF' >"$clock_bin/date"
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "Fixed test clock expects one date format argument." >&2
+  exit 2
+fi
+
+case "$1" in
+  '+%Y-%m-%d') printf '%s\n' '2026-09-06' ;;
+  '+%Y-%m-%d %H:%M') printf '%s\n' '2026-09-06 23:59' ;;
+  '+%Y%m%d-%H%M%S') printf '%s\n' '20260906-235959' ;;
+  *)
+    printf 'Unsupported fixed test clock date format: %s\n' "$1" >&2
+    exit 2
+    ;;
+esac
+EOF
+chmod +x "$clock_bin/date"
+export PATH="$clock_bin:$PATH"
 
 assert_output_contains() {
   local output="$1"
@@ -115,6 +142,10 @@ legacy_context_log_fixture="$repo_root/scripts/test-fixtures/context-log/legacy-
 hook_repo="$tmp_root/hook-enforcement"
 init_repo "$hook_repo"
 "$repo_root/scripts/new-project.sh" "hook-test" "$hook_repo" >/dev/null
+seeded_context_log="$(cat "$hook_repo/agent-vault/context-log.md")"
+assert_output_contains "$seeded_context_log" "last_updated: $today"
+assert_output_contains "$seeded_context_log" "- Last updated: $today"
+assert_output_contains "$seeded_context_log" "### $today 23:59 local - bootstrap - initial project setup"
 assert_file_exists "$hook_repo/agent-vault/_assets/hooks/pre-commit"
 assert_file_exists "$hook_repo/agent-vault/_assets/hooks/pre-push"
 assert_file_exists "$hook_repo/agent-vault/_assets/hooks/lib/runtime-note.sh"
@@ -209,7 +240,7 @@ cp "$legacy_context_log_fixture" "$legacy_known_dry_run_repo/agent-vault/context
 legacy_known_before="$tmp_root/legacy-context-log-before.md"
 cp "$legacy_known_dry_run_repo/agent-vault/context-log.md" "$legacy_known_before"
 legacy_known_dry_run_output="$("$repo_root/scripts/update-project.sh" "$legacy_known_dry_run_repo" --dry-run --sync-templates 2>&1)"
-assert_output_contains "$legacy_known_dry_run_output" "Update: agent-vault/context-log.md (backup -> agent-vault/context/updates/"
+assert_output_contains "$legacy_known_dry_run_output" "Update: agent-vault/context-log.md (backup -> agent-vault/context/updates/20260906-235959/agent-vault/context-log.md)"
 assert_files_equal "$legacy_known_before" "$legacy_known_dry_run_repo/agent-vault/context-log.md"
 
 legacy_known_repo="$tmp_root/legacy-context-log-migration"
@@ -218,7 +249,8 @@ init_repo "$legacy_known_repo"
 cp "$legacy_context_log_fixture" "$legacy_known_repo/agent-vault/context-log.md"
 "$repo_root/scripts/update-project.sh" "$legacy_known_repo" --sync-templates >/dev/null
 assert_output_contains "$(sed -n '1,80p' "$legacy_known_repo/agent-vault/context-log.md")" "## Current Snapshot"
-assert_output_contains "$(sed -n '1,80p' "$legacy_known_repo/agent-vault/context-log.md")" "### $today"
+assert_output_contains "$(sed -n '1,80p' "$legacy_known_repo/agent-vault/context-log.md")" "### $today 23:59 local - update-project - context-log-layout-migration"
+assert_files_equal "$legacy_context_log_fixture" "$legacy_known_repo/agent-vault/context/updates/20260906-235959/agent-vault/context-log.md"
 assert_output_contains "$(cat "$legacy_known_repo/agent-vault/context-log.md")" "## Legacy Unindexed Entries"
 assert_output_contains "$(cat "$legacy_known_repo/agent-vault/context-log.md")" "## Historical Snapshot"
 assert_output_contains "$(cat "$legacy_known_repo/agent-vault/context-log.md")" "## Historical Indexed Entries"
