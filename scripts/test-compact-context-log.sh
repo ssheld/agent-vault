@@ -53,8 +53,18 @@ assert_not_exists() {
 # and checker split on; nested date-prefixed sub-headings must not count).
 count_entries() {
   awk '
-    /^(```|~~~)/ { f = !f; next }
-    { if (f) next; l = $0; sub(/\r$/, "", l)
+    {
+      l = $0; sub(/\r$/, "", l); candidate = l
+      sub(/^ ? ? ?/, "", candidate)
+      match(candidate, /^(`+|~+)/); run = RLENGTH
+      m = substr(candidate, 1, 1); rest = substr(candidate, run + 1)
+      if (marker != "") {
+        if (m == marker && run >= length_open && rest ~ /^[ \t]*$/) marker = ""
+        next
+      }
+      if (run >= 3 && (m == "~" || !index(rest, "`"))) {
+        marker = m; length_open = run; next
+      }
       if (l ~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] local - /) c++ }
     END { print c + 0 }
   ' "$1"
@@ -1083,12 +1093,14 @@ run_fault() {
     ROLLOVER_TEST_DEST="$destination" ROLLOVER_TEST_FAULT="$fault" run_compact "$@"
 }
 
-# Combine #139 formatting, strict paths and a byte-sensitive suffix with #138
-# interruption recovery. Compare with an uninterrupted run at identical paths.
+# Combine #139 formatting/paths/suffix and #156 mixed fences with #138 recovery.
+# Compare with an uninterrupted run at identical paths.
 d="$tmp_root/combined-recovery"
 mkdir -p "$d"
 make_log "$d/log.md"
 sed 's/older work/fix `foo` in **setup**/' "$d/log.md" >"$d/log.next"
+mv "$d/log.next" "$d/log.md"
+awk '/^- Body/ { print "````md\n```\n## Example inside a longer fence\n~~~\n````" } { print }' "$d/log.md" >"$d/log.next"
 mv "$d/log.next" "$d/log.md"
 printf '\n## Appendix\r\n- Keep exactly, without final newline.' >>"$d/log.md"
 cp "$d/log.md" "$d/before"
@@ -1099,14 +1111,15 @@ assert_rc 0 "$COMPACT_RC" 'combined uninterrupted oracle'
 cp "$d/log.md" "$d/expected-log"
 cp "$d/history/archive.md" "$d/expected-archive"
 cp "$d/metadata/manifest.md" "$d/expected-manifest"
-for destination in "$d/history/archive.md" "$d/metadata/manifest.md"; do
+for destination in "$d/history/archive.md" "$d/metadata/manifest.md" "$d/log.md"; do
   cp "$d/before" "$d/log.md"
   rm "$d/history/archive.md" "$d/metadata/manifest.md"
   run_fault after "$destination" "${combined_args[@]}"
   assert_rc 3 "$COMPACT_RC" 'combined interrupted replacement'
   run_compact "$d/log.md" --recover --dry-run
   assert_rc 0 "$COMPACT_RC" 'combined recovery preview'
-  cmp -s "$d/log.md" "$d/before" || fail 'combined recovery preview wrote live log'
+  if [[ "$destination" == "$d/log.md" ]]; then expected_live="$d/expected-log"; else expected_live="$d/before"; fi
+  cmp -s "$d/log.md" "$expected_live" || fail 'combined recovery preview wrote live log'
   run_compact "$d/log.md" --recover
   assert_rc 0 "$COMPACT_RC" 'combined recovery'
   cmp -s "$d/log.md" "$d/expected-log" || fail 'combined live bytes differ'
@@ -1206,6 +1219,48 @@ read_test_record() {
   local field
   while IFS= read -r -d '' field; do record+=("$field"); done <"$d/.agent-vault-rollover-log.md/record"
 }
+
+# Model older-helper after-images explicitly, including hashes, rather than
+# relying on a historical Git checkout being available in a shallow CI clone.
+# Only these disposable fixtures author their records; recovery must never
+# rewrite a real journal or repair payloads to make them validate.
+for legacy_case in archive-tail manifest-tail archive-hidden manifest-hidden; do
+  prepare_recovery_case "legacy-fence-$legacy_case"
+  fault_recovery_case before "$d/archive.md"
+  assert_rc 3 "$COMPACT_RC" 'prepare legacy fence after-images'
+  read_test_record
+  role="${legacy_case%%-*}"
+  if [[ "$role" == archive ]]; then offset=3; else offset=8; fi
+  payload="${record[$((offset + 3))]}/$role.md"
+  if [[ "$legacy_case" == *-tail ]]; then
+    printf '\n```md\nOld example through EOF.\n' >>"$payload"
+    cp -p "$payload" "$d/expected/$role.md"
+  else
+    cp -p "$payload" "$d/payload.before"
+    {
+      printf '```md\n'
+      cat "$d/payload.before"
+    } >"$payload"
+  fi
+  digest="$(shasum -a 256 "$payload")"
+  record[$((offset + 2))]="${digest%% *}"
+  printf '%s\0' "${record[@]}" >"$d/.agent-vault-rollover-log.md/record"
+  cp "$d/.agent-vault-rollover-log.md/record" "$d/record.before"
+  cp "$payload" "$d/payload.recorded"
+  for mode in preview apply; do
+    if [[ "$mode" == preview ]]; then run_compact "$d/log.md" --recover --dry-run; else run_compact "$d/log.md" --recover; fi
+    if [[ "$legacy_case" == *-tail ]]; then
+      assert_rc 0 "$COMPACT_RC" 'safe legacy tail remains recoverable'
+      if [[ "$mode" == preview ]]; then assert_outputs "$d/before" 'legacy tail preview does not write'; else assert_outputs "$d/expected" 'legacy tail recovery preserves bytes'; fi
+    else
+      assert_rc 3 "$COMPACT_RC" 'hidden legacy structure refuses recovery'
+      assert_contains "$COMPACT_OUT" 'failed validation' 'refusal comes from structural validation, not fingerprints'
+      assert_outputs "$d/before" 'invalid after-images write nothing'
+      cmp -s "$d/record.before" "$d/.agent-vault-rollover-log.md/record" || fail 'recovery changed legacy journal'
+      cmp -s "$d/payload.recorded" "$payload" || fail 'recovery changed legacy payload'
+    fi
+  done
+done
 
 for existing in false true; do
   for fault in before after; do

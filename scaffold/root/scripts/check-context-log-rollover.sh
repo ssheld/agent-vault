@@ -3,6 +3,38 @@
 
 set -euo pipefail
 
+# Keep this trusted, static awk source identical in all three standalone helpers.
+# Tests check marker integrity, equality, and caller behavior.
+# BEGIN markdown fences
+markdown_fences='
+    function reset_fence() { fence_marker = ""; fence_length = 0; fence_line = 0 }
+    function fenced(line, candidate, marker, run, tail) {
+      candidate = line
+      sub(/\r$/, "", candidate)
+      sub(/^ ? ? ?/, "", candidate)
+      marker = substr(candidate, 1, 1)
+      run = 0
+      if (marker == "`" || marker == "~") {
+        while (substr(candidate, run + 1, 1) == marker) run++
+      }
+      tail = substr(candidate, run + 1)
+      if (fence_marker != "") {
+        if (marker == fence_marker && run >= fence_length && tail ~ /^[ \t]*$/) {
+          fence_marker = ""
+        }
+        return 1
+      }
+      if (run < 3) return 0
+      if (marker == "`" && index(tail, "`") != 0) return 0
+      fence_marker = marker
+      fence_length = run
+      fence_line = FNR
+      return 1
+    }
+    FNR == 1 { reset_fence() }
+'
+# END markdown fences
+
 # Validate the structure of an agent-vault context log after a rollover /
 # compaction. This is a CHECKER only: it never edits, moves, or rewrites the
 # log. It catches the failure modes a manual or scripted rollover can leave
@@ -46,6 +78,15 @@ Section headings are matched exactly (a distinct heading such as
 are tolerated. Live entry-heading style is enforced by the pre-commit hook, not
 here; archive boundary verification counts only canonical
 "### YYYY-MM-DD HH:MM local - <agent> - <topic>" entry headings.
+
+All structural scans ignore fenced examples, including pointer and manifest
+fields. Fences open with 3+ backticks or tildes and 0-3 leading spaces; only the
+same marker with an equal/longer run and whitespace-only suffix closes them.
+Backtick info strings cannot contain backticks. Four-space/tab-indented markers
+do not open fences in this flat subset (no list/blockquote container parsing).
+At EOF, an unclosed block ends without a closure finding; this does not expose its
+contents as structure. This is distinct from read/parser failure, which exits 2.
+Anchor searches still include raw fenced content.
 
 The rollover manifest (parsed source of truth) holds one record per rollover,
 newest first. All fields except archive_path_base are required for legacy records;
@@ -150,15 +191,14 @@ findings=()
 # exact section headings outside fences. Line 2 (optional): space-separated line
 # numbers of leftover Git conflict markers found outside fences.
 scan_log() {
-  awk '
+  awk "$markdown_fences"'
     function strip(s) {
       sub(/\r$/, "", s)
       sub(/[[:space:]]+$/, "", s)
       return s
     }
-    /^(```|~~~)/ { in_fence = !in_fence; next }
+    { if (fenced($0)) next }
     {
-      if (in_fence) next
       line = strip($0)
       if (line == "## Current Snapshot") snap++
       else if (line == "## Usage Rules") usage++
@@ -190,9 +230,10 @@ check_count() {
 # a field. Prints "EMPTY" when the declared pointer has no inline value (markup
 # stripped); prints nothing otherwise.
 inspect_handoff_pointer() {
-  awk '
+  awk "$markdown_fences"'
+    { if (fenced($0)) next }
     /^## Current Snapshot[[:space:]]*$/ { in_snap = 1; next }
-    in_snap && /^## / { exit }
+    in_snap && /^## / { in_snap = 0 }
     in_snap {
       line = $0
       sub(/\r$/, "", line)
@@ -211,15 +252,14 @@ inspect_handoff_pointer() {
 # an archived snapshot cannot read as active. The label must be in the heading,
 # e.g. "## Current Snapshot - SUPERSEDED (archived ...)".
 inspect_archive_superseded() {
-  awk '
+  awk "$markdown_fences"'
     function strip(s) {
       sub(/\r$/, "", s)
       sub(/[[:space:]]+$/, "", s)
       return s
     }
-    /^(```|~~~)/ { in_fence = !in_fence; next }
+    { if (fenced($0)) next }
     {
-      if (in_fence) next
       line = strip($0)
       if (line ~ /^## Current Snapshot/ && tolower(line) !~ /superseded/) {
         printf "%d\t%s\n", NR, line
@@ -238,16 +278,15 @@ inspect_archive_superseded() {
 #                   boundary scan would silently skip)
 # Dated sub-headings of depth 4+ inside an entry are legal body text.
 inspect_archive_dated_headings() {
-  awk '
+  awk "$markdown_fences"'
     function strip(s) {
       sub(/\r$/, "", s)
       sub(/^[[:space:]]+/, "", s)
       sub(/[[:space:]]+$/, "", s)
       return s
     }
-    /^(```|~~~)/ { in_fence = !in_fence; next }
+    { if (fenced($0)) next }
     {
-      if (in_fence) next
       line = strip($0)
       if (line !~ /^#+[[:space:]]/) next
       text = line
@@ -315,7 +354,8 @@ verify_anchors() {
 
 # Newest manifest record (first "## rollover:" block) as "key<TAB>value" lines.
 parse_manifest_newest() {
-  awk '
+  awk "$markdown_fences"'
+    { if (fenced($0) || done) next }
     function strip(s) {
       sub(/\r$/, "", s)
       sub(/^[[:space:]]+/, "", s)
@@ -323,14 +363,14 @@ parse_manifest_newest() {
       return s
     }
     /^##[[:space:]]+rollover:/ {
-      if (seen) exit
+      if (seen) { done = 1; next }
       seen = 1
       id = $0
       sub(/^##[[:space:]]+rollover:[[:space:]]*/, "", id)
       printf "id\t%s\n", strip(id)
       next
     }
-    seen && /^##[[:space:]]/ { exit }
+    seen && /^##[[:space:]]/ { done = 1; next }
     seen {
       line = $0
       sub(/\r$/, "", line)
@@ -345,7 +385,8 @@ parse_manifest_newest() {
 
 # Live-log Current Snapshot rollover pointer as "field/id/boundary" rows.
 parse_live_pointer() {
-  awk '
+  awk "$markdown_fences"'
+    { if (fenced($0)) next }
     function strip(s) {
       sub(/\r$/, "", s)
       sub(/^[[:space:]]+/, "", s)
@@ -353,7 +394,7 @@ parse_live_pointer() {
       return s
     }
     /^##[[:space:]]+Current Snapshot[[:space:]]*$/ { in_snap = 1; next }
-    in_snap && /^##[[:space:]]/ { exit }
+    in_snap && /^##[[:space:]]/ { in_snap = 0 }
     in_snap {
       line = $0
       sub(/\r$/, "", line)
@@ -377,16 +418,16 @@ parse_live_pointer() {
 # is body text, not a boundary. The leading "YYYY-MM-DD HH:MM" is the timestamp,
 # so lexical compare gives chronological order and a shared minute is unambiguous.
 verify_archive_boundaries() {
-  awk -v newest="$1" -v oldest="$2" '
+  ROLLOVER_NEWEST="$1" ROLLOVER_OLDEST="$2" awk "$markdown_fences"'
+    BEGIN { newest = ENVIRON["ROLLOVER_NEWEST"]; oldest = ENVIRON["ROLLOVER_OLDEST"] }
     function strip(s) {
       sub(/\r$/, "", s)
       sub(/^[[:space:]]+/, "", s)
       sub(/[[:space:]]+$/, "", s)
       return s
     }
-    /^(```|~~~)/ { in_fence = !in_fence; next }
+    { if (fenced($0)) next }
     {
-      if (in_fence) next
       line = strip($0)
       # mawk has no interval expressions ({4}), so digits are spelled out.
       if (line !~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] local - /) next
@@ -415,15 +456,14 @@ verify_archive_boundaries() {
 # Line numbers of top-level (# or ##) "Next Prompt" headings outside fences --
 # a Next Prompt belongs nested under its entry, never as a standalone section.
 find_orphan_next_prompts() {
-  awk '
+  awk "$markdown_fences"'
     function strip(s) {
       sub(/\r$/, "", s)
       sub(/[[:space:]]+$/, "", s)
       return s
     }
-    /^(```|~~~)/ { in_fence = !in_fence; next }
+    { if (fenced($0)) next }
     {
-      if (in_fence) next
       line = strip($0)
       # "##?" = one or two hashes (top-level only); mawk lacks intervals ({1,2}).
       if (line ~ /^##?[[:space:]]+(Suggested[[:space:]]+)?Next Prompt[[:space:]]*$/) printf "%d ", NR
@@ -431,7 +471,8 @@ find_orphan_next_prompts() {
   ' "$1"
 }
 
-mapfile -t scan < <(scan_log "$context_log")
+scan_output="$(scan_log "$context_log")" || die "cannot parse context log: $context_log"
+mapfile -t scan <<<"$scan_output"
 read -r snap_count usage_count entries_count <<<"${scan[0]:-0 0 0}"
 conflict_lines="${scan[1]:-}"
 
@@ -443,17 +484,20 @@ if [[ -n "${conflict_lines// /}" ]]; then
   findings+=("Git conflict markers present at line(s): ${conflict_lines% }")
 fi
 
-handoff_state="$(inspect_handoff_pointer "$context_log")"
+handoff_state="$(inspect_handoff_pointer "$context_log")" || die "cannot check handoff pointer: $context_log"
 if [[ "$handoff_state" == *EMPTY* ]]; then
   findings+=("Current Snapshot declares a latest-handoff pointer but it has no inline value")
 fi
 
 check_archive_structure() {
-  local archive="$1" row row_line row_kind row_heading
+  local archive="$1" row row_line row_kind row_heading parsed
+  parsed="$(inspect_archive_superseded "$archive")" || die "cannot check archived snapshots: $archive"
   while IFS= read -r row; do
     [[ -n "$row" ]] || continue
     findings+=("archived snapshot is not labeled superseded (archive line ${row%%$'\t'*}) -- archived snapshots must be marked superseded so they cannot read as active")
-  done < <(inspect_archive_superseded "$archive")
+  done <<<"$parsed"
+
+  parsed="$(inspect_archive_dated_headings "$archive")" || die "cannot parse archive headings: $archive"
 
   while IFS=$'\t' read -r row_line row_kind row_heading; do
     [[ -n "$row_line" ]] || continue
@@ -465,13 +509,14 @@ check_archive_structure() {
         findings+=("archive has a noncanonical dated entry heading (archive line $row_line): \"$row_heading\" -- normalize it to \"### YYYY-MM-DD HH:MM local - <agent> - <topic>\" so boundary validation can see it")
         ;;
     esac
-  done < <(inspect_archive_dated_headings "$archive")
+  done <<<"$parsed"
 }
 
 resolved_archive="$archive_file"
 if [[ -n "$manifest_file" ]]; then
   declare -A manifest=()
   manifest_has_record="false"
+  manifest_output="$(parse_manifest_newest "$manifest_file")" || die "cannot parse manifest: $manifest_file"
   while IFS=$'\t' read -r key value; do
     [[ -n "$key" ]] || continue
     if [[ "$key" == archive_path_base && -n "${manifest[archive_path_base]+present}" ]]; then
@@ -479,12 +524,13 @@ if [[ -n "$manifest_file" ]]; then
     fi
     manifest["$key"]="$value"
     manifest_has_record="true"
-  done < <(parse_manifest_newest "$manifest_file")
+  done <<<"$manifest_output"
 
   pointer_field="false"
   pointer_id=""
   pointer_boundary=""
   pointer_boundary_missing="false"
+  pointer_output="$(parse_live_pointer "$context_log")" || die "cannot parse live pointer: $context_log"
   while IFS=$'\t' read -r key value; do
     case "$key" in
       field) pointer_field="true" ;;
@@ -492,7 +538,7 @@ if [[ -n "$manifest_file" ]]; then
       boundary) pointer_boundary="$value" ;;
       boundary_missing) pointer_boundary_missing="true" ;;
     esac
-  done < <(parse_live_pointer "$context_log")
+  done <<<"$pointer_output"
 
   if [[ "$manifest_has_record" != "true" ]]; then
     # An empty manifest with no live pointer is a scaffolded "no rollover yet"
@@ -561,6 +607,7 @@ if [[ -n "$manifest_file" ]]; then
 
     if [[ -n "$resolved_archive" ]]; then
       declare -A boundary=()
+      boundary_output="$(verify_archive_boundaries "${manifest[newest_archived]:-}" "${manifest[oldest_archived]:-}" "$resolved_archive")" || die "cannot check archive boundaries: $resolved_archive"
       while IFS=$'\t' read -r tag col_a col_b; do
         case "$tag" in
           newest_found) boundary[nf]="$col_a" ;;
@@ -568,7 +615,7 @@ if [[ -n "$manifest_file" ]]; then
           max) boundary[maxh]="$col_b" ;;
           min) boundary[minh]="$col_b" ;;
         esac
-      done < <(verify_archive_boundaries "${manifest[newest_archived]:-}" "${manifest[oldest_archived]:-}" "$resolved_archive")
+      done <<<"$boundary_output"
 
       # Require an exact heading match against the entry the checker independently
       # selects as newest/oldest (max/min timestamp, ties broken by position), so
@@ -595,7 +642,7 @@ if [[ -n "$manifest_file" ]]; then
         done <<<"$anchor_findings"
       fi
 
-      orphans="$(find_orphan_next_prompts "$resolved_archive")"
+      orphans="$(find_orphan_next_prompts "$resolved_archive")" || die "cannot check archive prompts: $resolved_archive"
       orphans="${orphans%% }"
       if [[ -n "${orphans// /}" ]]; then
         findings+=("orphaned top-level \"Next Prompt\" heading in the archive at line(s): $orphans -- a Next Prompt must stay nested under its archived entry")
