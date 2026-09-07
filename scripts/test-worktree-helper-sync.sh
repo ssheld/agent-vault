@@ -125,6 +125,30 @@ run_update_project() {
   bash "$repo_root/scripts/update-project.sh" "$target" "$@"
 }
 
+assert_generated_rule_eligibility() {
+  local target="$1" label="$2" fixture="$tmp_root/generated-lessons-$2"
+  local manifest archive rules output rc needle
+  mkdir -p "$fixture/context/archive"
+  manifest="$fixture/context/archive/lessons-manifest.md"
+  archive="$fixture/context/archive/lessons-archive.md"
+  rules="$fixture/lessons.md"
+  needle='Preserve literal \n and "quotes" [.*]'
+  printf '%s\n' '### covered lesson' '### retained lesson' >"$archive"
+  printf '%s\n' '## lesson: covered lesson' '- classification: covered-by-a-named-always-on-rule' \
+    "- covered_by: $needle" '## lesson: retained lesson' '- classification: retained-as-quick-rule' \
+    "- quick_rule: $needle" >"$manifest"
+  printf '%s\n' 'Notes <!--' "$needle" '-->' '> ```md' "> $needle" '> ```' >"$rules"
+  rc=0
+  output="$("$target/scripts/check-lessons-archive.sh" "$manifest" --strict 2>&1)" || rc=$?
+  assert_exit_code 1 "$rc" "$label copied checker rejects inactive-only references"
+  assert_output_contains "$output" 'was not found in any live rules source' "$label copied checker reports missing live rules"
+  printf '%s\n' "$needle" >>"$rules"
+  rc=0
+  output="$("$target/scripts/check-lessons-archive.sh" "$manifest" --strict 2>&1)" || rc=$?
+  assert_exit_code 0 "$rc" "$label copied checker preserves literal reference data"
+  assert_output_contains "$output" '(2 classified)' "$label copied checker resolves both reference types"
+}
+
 assert_generated_safety() {
   local target="$1" label="$2" outer inner stale helper output rc=0
   # Commit only the synthetic helper fixture; runtime metadata hooks are tested
@@ -303,6 +327,7 @@ assert_path_exists "$target/scripts/check-lessons-archive.sh" "new-project creat
 assert_executable "$target/scripts/check-lessons-archive.sh" "new-project makes lessons-archive checker executable"
 assert_file_contains "$target/scripts/check-lessons-archive.sh" "# agent-vault-managed: helper-script; file=check-lessons-archive.sh" "new-project seeds lessons-archive checker marker"
 assert_files_equal "$repo_root/scaffold/root/scripts/check-lessons-archive.sh" "$target/scripts/check-lessons-archive.sh" "new-project seeds complete lessons-archive checker"
+assert_generated_rule_eligibility "$target" fresh-bootstrap
 assert_generated_safety "$target" fresh-bootstrap
 
 # --- Test 2: update-project creates missing helpers in existing vaults ---
@@ -415,6 +440,7 @@ assert_file_contains "$target/scripts/check-memory-budget.sh" "Keys: file_budget
 assert_file_contains "$target/scripts/check-context-log-rollover.sh" "stale duplicate \"## Current Snapshot\"" "update-project refreshes stale rollover checker content"
 assert_file_contains "$target/scripts/compact-context-log.sh" "Keeps the Current Snapshot plus the newest" "update-project refreshes stale rollover compactor content"
 assert_files_equal "$repo_root/scaffold/root/scripts/check-lessons-archive.sh" "$target/scripts/check-lessons-archive.sh" "update-project refreshes complete lessons-archive checker"
+assert_generated_rule_eligibility "$target" managed-update
 assert_executable "$target/scripts/new-worktree.sh" "update-project fixes managed helper executable bit"
 assert_executable "$target/scripts/remove-worktree.sh" "update-project fixes managed remove helper executable bit"
 assert_executable "$target/scripts/check-memory-budget.sh" "update-project fixes memory-budget checker executable bit"

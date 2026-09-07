@@ -590,10 +590,57 @@ is caught. Concatenated class names are invalid. A missing or invalid class
 does not count toward the classified total or satisfy strict completeness; in
 strict mode an archived lesson with an invalid class reports both the authoring
 error and the resulting classification gap. Advisory mode reports only the
-classification error. Rule liveness is a substring match over unfiltered rules
-files, so use distinctive rule text. A rule found only in a comment or fenced
-example in a rules source still counts as live; correcting that separate search
-is tracked in [#158](https://github.com/ssheld/agent-vault/issues/158).
+classification error.
+
+Rule liveness uses **case-sensitive, literal substring matching on eligible
+physical lines**. Prose, headings, bullets, and ordinary inline code are eligible;
+fenced examples and four-space/tab-indented lines are excluded. For a rule
+expressed only as code or a deeply indented list item, add a descriptive prose
+heading outside the excluded content and reference that heading. Matching never
+joins lines, files, or fragments around a comment. Use distinctive rule text.
+
+Rules sources share the fence markers, length checks, info-string restrictions,
+and EOF diagnostics described above. They additionally recognize repeated
+blockquote and list prefixes: `>`, `-`/`+`/`*`, and one-to-nine-digit ordered
+markers ending in `.` or `)`. Each prefix permits up to three leading spaces;
+quote markers permit one following space and list markers use one to four.
+Tabs are expanded to four-column stops for delimiter recognition only. Closing
+fences must retain each quote prefix and each list's content indentation, followed
+by the normal zero-to-three-space closing fence. A sibling list item or container
+end does not implicitly close a fence: an explicit closing fence is required.
+This bounds recognition without treating arbitrary delimiter mentions in prose
+as errors.
+
+HTML comments in rules sources can start anywhere outside excluded code, unlike
+the manifest/archive block-only contract. Only the prefix before the first
+`<!--` is eligible on its opening line. Content through the whole closing line
+is excluded; additional comments in that discarded suffix still carry state onto
+later lines. Fences inside comments and comments inside fences stay inert.
+This is deliberately conservative filtering, not a full Markdown parser: even
+when a list interrupts a paragraph and Markdown would display the comment-like
+text, the checker excludes it through `-->`. Literal markers in inline code and
+backslash-escaped HTML comment markers also participate; use entity spelling
+when describing those markers. A complete comment never invalidates unrelated
+matches elsewhere in the source.
+
+When references need checking, every resolved source is scanned once, including
+sources after an earlier match. Repeated identical resolved paths are deduplicated.
+Reference strings are supplied as data, preserving quotes, tabs, backslashes,
+and metacharacters. Temporary reference data is private and removed on exit.
+
+| Rules-source state | Result |
+| --- | --- |
+| All sources complete; eligible occurrence found | Reference resolves. |
+| All sources complete; no eligible occurrence | Per-reference “not found” finding, including comment-only, fence-only, and empty files. |
+| No source resolves | Existing skipped-check finding with the expected path and remediation. |
+| Any source has an unterminated fence/comment | Source/opening-line finding; discard that source's matches, even if another source matches. |
+| No match in complete sources and at least one incomplete source | Per-reference skipped/unverifiable finding; no global absence claim. |
+| Any required source has a read/parser execution failure | Exit 2 in all modes, even after another source matches; partial producer output is discarded. |
+
+Independent manifest/archive checks continue when sources have findings.
+Records requiring no reference check do not cause rules contents to be scanned;
+explicitly named missing paths remain usage errors.
+
 The canonical `<manifest-dir>/../../lessons.md` is always a source when present
 and repeatable `--rules` **adds** more (e.g. `shared-rules.md`) rather than
 replacing it. Empty `--rules` arguments are ignored; an existing empty file
