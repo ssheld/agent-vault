@@ -3,6 +3,38 @@
 
 set -euo pipefail
 
+# Keep this trusted, static awk source identical in all three standalone helpers.
+# Tests check marker integrity, equality, and caller behavior.
+# BEGIN markdown fences
+markdown_fences='
+    function reset_fence() { fence_marker = ""; fence_length = 0; fence_line = 0 }
+    function fenced(line, candidate, marker, run, tail) {
+      candidate = line
+      sub(/\r$/, "", candidate)
+      sub(/^ ? ? ?/, "", candidate)
+      marker = substr(candidate, 1, 1)
+      run = 0
+      if (marker == "`" || marker == "~") {
+        while (substr(candidate, run + 1, 1) == marker) run++
+      }
+      tail = substr(candidate, run + 1)
+      if (fence_marker != "") {
+        if (marker == fence_marker && run >= fence_length && tail ~ /^[ \t]*$/) {
+          fence_marker = ""
+        }
+        return 1
+      }
+      if (run < 3) return 0
+      if (marker == "`" && index(tail, "`") != 0) return 0
+      fence_marker = marker
+      fence_length = run
+      fence_line = FNR
+      return 1
+    }
+    FNR == 1 { reset_fence() }
+'
+# END markdown fences
+
 # Roll over agent-vault/context-log.md: keep the single Current Snapshot plus the
 # most recent --keep entries, move older entries into a dated archive, update the
 # live "Context-log rollover" pointer, and prepend a record to the rollover
@@ -48,6 +80,14 @@ section remains live byte-for-byte. Canonical headings outside Entries warn
 with count/line numbers, including on no-op/dry-run and under --quiet; fix
 unintentionally stranded entries before rollover. Top-level (Suggested) Next
 Prompt sections after Entries still refuse writes; nest prompts under entries.
+
+All structural scans use the checker's delimiter-aware fence rules, including
+pointer rewriting, manifest record discovery, and default-ID sequencing.
+Unclosed blocks extend to EOF; no blanket closure warning/refusal is imposed.
+A write (or write-producing dry-run) does refuse an insertion after an unclosed
+archive/manifest header, or a moved unclosed block before existing history:
+concatenation must not hide generated records or previously visible entries.
+These safety checks cannot be overridden by metadata or adoption options.
 
 New records include archive_path_base: manifest and an archive_file relative to
 the FINAL manifest directory, so nested paths resolve without --archive. Update
@@ -226,10 +266,9 @@ strip_trailing_blanks() {
 # the shape the pre-commit hook enforces) count: a nested sub-heading that merely
 # starts with a date must never become a split boundary or inflate the entry count.
 inspect_entries() {
-  awk '
-    /^(```|~~~)/ { in_fence = !in_fence; next }
+  awk "$markdown_fences"'
+    { if (fenced($0)) next }
     {
-      if (in_fence) next
       line = $0; sub(/\r$/, "", line)
       if (line ~ /^## Entries[[:space:]]*$/ && !started) { started = 1; next }
       if (!started) next
@@ -245,7 +284,9 @@ inspect_entries() {
 # Inject the rollover pointer as the first bullet of "## Current Snapshot",
 # dropping any existing rollover-pointer line (idempotent across rollovers).
 inject_pointer() {
-  awk -v ptr="$1" '
+  ROLLOVER_POINTER="$1" awk "$markdown_fences"'
+    BEGIN { ptr = ENVIRON["ROLLOVER_POINTER"] }
+    { if (fenced($0)) { print; next } }
     /^## Current Snapshot[[:space:]]*$/ { print; print ptr; in_snap = 1; next }
     in_snap && /^## / { in_snap = 0; print; next }
     in_snap {
@@ -259,27 +300,50 @@ inject_pointer() {
 # Split a file at the first entry heading: prints the line number of the first
 # canonical entry heading (nothing if none), so the caller can slice header/entries.
 first_entry_line() {
-  awk '
-    /^(```|~~~)/ { in_fence = !in_fence; next }
+  awk "$markdown_fences"'
+    { if (fenced($0)) next }
     {
-      if (in_fence) next
       line = $0; sub(/\r$/, "", line)
       if (line !~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] local - /) next
-      print NR
-      exit
+      if (!seen) print NR
+      seen = 1
     }
     END { }
   ' "$1"
+}
+
+# Like entry discovery, record discovery must ignore examples and read to EOF.
+first_record_line() {
+  awk "$markdown_fences"'
+    { if (fenced($0)) next }
+    /^##[[:space:]]+rollover:/ { if (!seen) print NR; seen = 1 }
+  ' "$1"
+}
+
+# EOF-terminated blocks are readable, but concatenation must not extend them
+# over inserted records or previously visible history. This is a write-safety
+# check, not a blanket explicit-closure requirement on historical files.
+unclosed_fence_line() {
+  awk "$markdown_fences"'
+    { fenced($0) }
+    END { if (fence_marker != "") print fence_line }
+  ' "$1"
+}
+
+require_closed_insertion() {
+  local input="$1" source="$2" opening
+  opening="$(unclosed_fence_line "$input")" || die "cannot inspect insertion boundary: $source"
+  [[ -z "$opening" ]] ||
+    abort "unsafe insertion after an unterminated fence in $source (opening line $opening); close the intended example before rolling over"
 }
 
 # Newest/oldest archive entry headings, selected exactly as the checker does:
 # max/min normalized timestamp, ties broken by newest-at-top position (newest =
 # top-most at the max minute, oldest = bottom-most at the min minute).
 select_boundaries() {
-  awk '
-    /^(```|~~~)/ { in_fence = !in_fence; next }
+  awk "$markdown_fences"'
+    { if (fenced($0)) next }
     {
-      if (in_fence) next
       line = $0; sub(/\r$/, "", line)
       if (line !~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] local - /) next
       sub(/^### /, "", line)
@@ -299,12 +363,12 @@ select_boundaries() {
 # archive in place would silently stale its own header while self-validation
 # still passes.
 archive_header_has_unmanaged_metadata() {
-  awk '
+  awk "$markdown_fences"'
+    { if (fenced($0)) next }
     NR == 1 && $0 ~ /^---[[:space:]]*$/ { in_fm = 1; next }
     in_fm && $0 ~ /^---[[:space:]]*$/ { in_fm = 0; next }
     in_fm && tolower($0) ~ /^[[:space:]]*covers[[:space:]]*:/ { found = 1; next }
-    /^(```|~~~)/ { in_fence = !in_fence; next }
-    !in_fence && tolower($0) ~ /^#+[[:space:]]+.*relocation manifest/ { found = 1 }
+    tolower($0) ~ /^#+[[:space:]]+.*relocation manifest/ { found = 1 }
     END { if (found) print "1" }
   ' "$1"
 }
@@ -582,7 +646,7 @@ apply_transaction() {
 # Compare complete entries, ignoring only trailing blank separators. Matching
 # headings with different bodies are not duplicates. Never infer a resume here.
 overlapping_entry() {
-  awk '
+  awk "$markdown_fences"'
     function flush() {
       if (entry == "") return
       while (entry ~ /\n[ \t\r]*$/) sub(/\n[ \t\r]*$/, "", entry)
@@ -590,16 +654,16 @@ overlapping_entry() {
       else if (entry in entries) overlap = heading
       entry = ""
     }
-    FNR == 1 { flush(); live = (FILENAME == ARGV[1]); active = !live; fence = 0 }
+    FNR == 1 { flush(); live = (FILENAME == ARGV[1]); active = !live }
     {
       line = $0; sub(/\r$/, "", line)
-      if (!fence && (line ~ /^##[[:space:]]/ || (live && line ~ /^##?([[:space:]]|$)/))) {
+      quoted = fenced(line)
+      if (!quoted && (line ~ /^##[[:space:]]/ || (live && line ~ /^##?([[:space:]]|$)/))) {
         flush(); active = (!live || line ~ /^## Entries[[:space:]]*$/)
       }
-      if (!fence && active && line ~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] local - /) {
+      if (!quoted && active && line ~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] local - /) {
         flush(); heading = line; entry = $0 "\n"
       } else if (entry != "") entry = entry $0 "\n"
-      if (line ~ /^(```|~~~)/) fence = !fence
     }
     END { if (overlap == "") flush(); if (overlap != "") print overlap }
   ' "$1" "$2"
@@ -608,13 +672,12 @@ overlapping_entry() {
 # Only compare the live pointer and newest record here, not the archive named
 # by that OLD record: a fresh rollover may legitimately select a new annual file.
 classify_pointer() {
-  awk '
+  awk "$markdown_fences"'
     function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
     function norm(s) { gsub(/[`*]/, "", s); gsub(/[[:space:]]+/, " ", s); return trim(s) }
+    { if (fenced($0)) next }
     FILENAME == ARGV[1] {
       # A preserved appendix may quote a snapshot/pointer; it is not live state.
-      if ($0 ~ /^(```|~~~)/) { fence = !fence; next }
-      if (fence) next
       if ($0 ~ /^##[[:space:]]+Current Snapshot[[:space:]]*$/) { snapshot = 1; next }
       if ($0 ~ /^##[[:space:]]/) snapshot = 0
       if (snapshot && tolower($0) ~ /context-log rollover[[:space:]]*:/) {
@@ -625,11 +688,12 @@ classify_pointer() {
       }
       next
     }
+    done { next }
     /^##[[:space:]]+rollover:/ {
-      if (record) exit
+      if (record) { done = 1; next }
       record = 1; id = $0; sub(/^##[[:space:]]+rollover:[[:space:]]*/, "", id); id = trim(id); next
     }
-    record && /^##[[:space:]]/ { exit }
+    record && /^##[[:space:]]/ { done = 1; next }
     record && /^[[:space:]]*[-*][[:space:]]*boundary[[:space:]]*:/ {
       mb = $0; sub(/^[^:]*:/, "", mb); mb = norm(mb)
     }
@@ -727,7 +791,11 @@ log_input="${inputs[2]}"
 # prose and silently reordered above the newer batch.
 checker_args=("$log_input")
 [[ -f "$archive_input" ]] && checker_args+=(--archive "$archive_input")
-if ! "$checker" "${checker_args[@]}" --quiet >/dev/null 2>&1; then
+if "$checker" "${checker_args[@]}" --quiet >/dev/null 2>&1; then
+  :
+else
+  checker_status=$?
+  [[ "$checker_status" -eq 1 ]] || die "structural rollover check could not read/parse inputs; run check-context-log-rollover.sh with the original paths"
   if [[ -f "$archive_file" ]]; then
     abort "context log or existing archive fails the structural rollover check; run check-context-log-rollover.sh $context_log --archive $archive_file and normalize before rolling over"
   fi
@@ -827,7 +895,7 @@ archived_count=$((total_entries - keep))
 
 # Build the new archive: existing header + this (newer) batch + existing entries.
 if [[ -f "$archive_input" ]]; then
-  first_existing="$(first_entry_line "$archive_input")"
+  first_existing="$(first_entry_line "$archive_input")" || die "cannot locate first archive entry: $archive_file"
   if [[ -n "$first_existing" ]]; then
     if [[ "$first_existing" -gt 1 ]]; then
       sed -n "1,$((first_existing - 1))p" "$archive_input" | strip_trailing_blanks - >"$scratch/arch_header"
@@ -846,7 +914,7 @@ if [[ -f "$archive_input" ]]; then
   # sync (a frontmatter "covers:" claim or a relocation manifest). Prepending a
   # newer batch below such a header silently stales it while self-validation still
   # passes, so fail closed unless the maintainer explicitly overrides.
-  unmanaged_metadata="$(archive_header_has_unmanaged_metadata "$scratch/arch_header")"
+  unmanaged_metadata="$(archive_header_has_unmanaged_metadata "$scratch/arch_header")" || die "cannot check archive header: $archive_file"
   if [[ "$allow_stale_archive_metadata" != "true" && -n "$unmanaged_metadata" ]]; then
     abort "existing archive \"$archive_file\" carries header metadata this tool cannot keep in sync (a frontmatter \"covers:\" field or a relocation manifest). Prepending a newer batch would leave that header claiming an older newest entry than the archive now holds, while check-context-log-rollover.sh still passes. Update the archive frontmatter/manifest by hand (or roll over manually), or pass --allow-stale-archive-metadata to override."
   fi
@@ -855,6 +923,10 @@ else
   : >"$scratch/arch_existing"
 fi
 
+require_closed_insertion "$scratch/arch_header" "$archive_file header"
+if [[ -s "$scratch/arch_existing" ]]; then
+  require_closed_insertion "$scratch/batch" "$context_log archived batch (line numbers relative to the batch)"
+fi
 {
   cat "$scratch/arch_header"
   printf '\n'
@@ -868,7 +940,8 @@ fi
 
 # Boundary fields, finalized now from the built archive (matches the checker's
 # selection so the manifest can never cite a stale boundary).
-mapfile -t bounds < <(select_boundaries "$new_archive")
+bounds_output="$(select_boundaries "$new_archive")" || die "cannot determine new archive boundaries"
+mapfile -t bounds <<<"$bounds_output"
 newest_archived="${bounds[0]:-}"
 oldest_archived="${bounds[1]:-}"
 [[ -n "$newest_archived" && -n "$oldest_archived" ]] ||
@@ -886,13 +959,14 @@ if [[ -z "$rollover_id" ]]; then
   # re-issues an in-use id (counting would). Default to 1 when none exist.
   next_seq=1
   if [[ -f "$manifest_input" ]]; then
-    next_seq="$(awk -v day="$day" '
+    next_seq="$(awk -v day="$day" "$markdown_fences"'
+      { if (fenced($0)) next }
       $0 ~ ("^## rollover: " day "-[0-9]+[[:space:]]*$") {
         s = $0; sub(/.*-/, "", s); sub(/[[:space:]]+$/, "", s)
         if (s + 0 > max) max = s + 0
       }
       END { print max + 1 }
-    ' "$manifest_input")"
+    ' "$manifest_input")" || die "cannot determine next rollover id: $manifest_file"
   fi
   rollover_id="${day}-${next_seq}"
 fi
@@ -920,7 +994,7 @@ new_record="$scratch/record"
 } >"$new_record"
 
 if [[ -f "$manifest_input" ]]; then
-  first_record="$(grep -n '^## rollover:' "$manifest_input" | head -n1 | cut -d: -f1 || true)"
+  first_record="$(first_record_line "$manifest_input")" || die "cannot locate first manifest record: $manifest_file"
   if [[ -n "$first_record" ]]; then
     if [[ "$first_record" -gt 1 ]]; then
       sed -n "1,$((first_record - 1))p" "$manifest_input" | strip_trailing_blanks - >"$scratch/man_header"
@@ -940,6 +1014,7 @@ else
   : >"$scratch/man_existing"
 fi
 
+require_closed_insertion "$scratch/man_header" "$manifest_file header"
 {
   cat "$scratch/man_header"
   printf '\n'
@@ -952,8 +1027,12 @@ fi
 
 # --- self-validate the built result with the real checker ----------------
 
-if ! validation="$("$checker" "$new_log" --archive "$new_archive" --manifest "$new_manifest" 2>&1)"; then
+if validation="$("$checker" "$new_log" --archive "$new_archive" --manifest "$new_manifest" 2>&1)"; then
+  :
+else
+  checker_status=$?
   echo "$validation" >&2
+  [[ "$checker_status" -eq 1 ]] || die "could not validate the rolled-over result"
   abort "the rolled-over result failed check-context-log-rollover.sh (see above); this is a bug in the rollover, not your log"
 fi
 

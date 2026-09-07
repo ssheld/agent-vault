@@ -143,6 +143,12 @@ Run the scaffold regression scripts locally when changing bootstrap, sync, or tr
 - `bash scripts/test-new-worktree.sh`
 - `bash scripts/test-remove-worktree.sh`
 - `bash scripts/test-worktree-helper-sync.sh`
+- `bash scripts/test-markdown-fences.sh`
+
+The rollover checker, compactor, and lessons checker embed the same marked awk
+fence-state block to remain standalone. When changing delimiter rules, update all
+three copies together. The fence suite checks marker integrity and equality as
+well as behavior; there is no generator or separately installed runtime library.
 
 CI runs these checks via `.github/workflows/scaffold-regression-checks.yml` on
 both `ubuntu-latest` and `macos-latest`, so GNU-vs-BSD userland assumptions in

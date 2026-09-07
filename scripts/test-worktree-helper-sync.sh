@@ -178,11 +178,18 @@ assert_generated_safety() {
 }
 
 assert_generated_rollover_recovery() {
-  local target="$1" label="$2" fixture rc=0 ignore_rc=0 output actual_mv
+  local target="$1" label="$2" fixture rc=0 ignore_rc=0 output actual_mv standalone helper
   target="$(cd "$target" && pwd -P)"
   fixture="$target/rollover-fixture"
   mkdir -p "$fixture/bin" "$fixture/history" "$fixture/metadata"
   cp "$target/agent-vault/context-log.md" "$fixture/project-log-before.md"
+  # Exercise only the installed copies from an unrelated directory, with no
+  # support library or template files beside them.
+  standalone="$fixture/standalone"
+  mkdir "$standalone"
+  for helper in compact-context-log check-context-log-rollover check-lessons-archive; do
+    cp "$target/scripts/$helper.sh" "$standalone/$helper.sh"
+  done
   cat >"$fixture/log.md" <<'EOF'
 # Context Log
 
@@ -197,6 +204,11 @@ assert_generated_rollover_recovery() {
 
 ### 2026-06-01 09:00 local - codex - rollover session
 - Keep this newest entry.
+````md
+```
+## Example section inside a longer fence
+~~~
+````
 
 ### 2026-05-31 09:00 local - codex - fix `foo` in **setup**
 - Preserve this body exactly once.
@@ -217,8 +229,8 @@ if [[ "${@: -1}" == "$ROLLOVER_FIXTURE_LOG" ]]; then exit 73; fi
 exec "$ROLLOVER_FIXTURE_MV" "$@"
 EOF
   chmod +x "$fixture/bin/mv"
-  output="$(PATH="$fixture/bin:$PATH" ROLLOVER_FIXTURE_LOG="$fixture/log.md" ROLLOVER_FIXTURE_MV="$actual_mv" \
-    "$target/scripts/compact-context-log.sh" "$fixture/log.md" --keep 1 --archive "$fixture/history/archive.md" \
+  output="$(cd "$fixture" && PATH="$fixture/bin:$PATH" ROLLOVER_FIXTURE_LOG="$fixture/log.md" ROLLOVER_FIXTURE_MV="$actual_mv" \
+    "$standalone/compact-context-log.sh" "$fixture/log.md" --keep 1 --archive "$fixture/history/archive.md" \
     --manifest "$fixture/metadata/manifest.md" --rollover-id installed-helper --require-top-entry 'rollover session' --adopt-manual-rollover 2>&1)" || rc=$?
   assert_exit_code 3 "$rc" "$label installed helper preserves pending operation"
   assert_output_contains "$output" '--recover' "$label installed recovery guidance"
@@ -226,7 +238,7 @@ EOF
     ignore_rc=$?
   assert_exit_code 0 "$ignore_rc" "$label installed recovery ignore rule"
   rc=0
-  output="$("$target/scripts/compact-context-log.sh" "$fixture/log.md" --recover 2>&1)" || rc=$?
+  output="$(cd "$fixture" && "$standalone/compact-context-log.sh" "$fixture/log.md" --recover 2>&1)" || rc=$?
   assert_exit_code 0 "$rc" "$label installed recovery succeeds"
   assert_file_contains "$fixture/log.md" installed-helper "$label recovery preserves ID"
   assert_equal 2 "$(grep -c '^### ' "$fixture/history/archive.md")" "$label recovery archives once"
@@ -235,7 +247,29 @@ EOF
   assert_file_contains "$fixture/log.md" '## Appendix' "$label suffix stays live"
   assert_file_contains "$fixture/metadata/manifest.md" '- archive_path_base: manifest' "$label marked new record"
   assert_file_contains "$fixture/metadata/manifest.md" '- archive_file: ../history/archive.md' "$label final-relative archive path"
-  "$target/scripts/check-context-log-rollover.sh" "$fixture/log.md" --manifest "$fixture/metadata/manifest.md" --quiet
+  (cd "$fixture" && "$standalone/check-context-log-rollover.sh" "$fixture/log.md" --manifest "$fixture/metadata/manifest.md" --quiet)
+  cat >"$fixture/lessons-archive.md" <<'EOF'
+# Lessons Archive
+````md
+```
+### Quoted lesson
+<!-- Not an HTML block inside a fence
+````
+<!--
+~~~ Not a fence inside a comment
+### Commented lesson
+-->
+### Historical lesson
+- Historical body.
+EOF
+  cat >"$fixture/lessons-manifest.md" <<'EOF'
+# Lessons Manifest
+## lesson: Historical lesson
+- classification: archival-only
+EOF
+  rc=0
+  output="$(cd "$fixture" && "$standalone/check-lessons-archive.sh" "$fixture/lessons-manifest.md" --archive "$fixture/lessons-archive.md" --strict 2>&1)" || rc=$?
+  assert_exit_code 0 "$rc" "$label standalone lessons parser preserves fence/comment precedence"
   assert_files_equal "$fixture/project-log-before.md" "$target/agent-vault/context-log.md" "$label leaves project-owned log unchanged"
 }
 

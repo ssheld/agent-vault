@@ -143,6 +143,49 @@ The checker keys on the named section headings, so it tolerates mixed entry
 heading styles (`### YYYY-MM-DD ...`, compact `## YYYY-MM-DD ...`, em-dash
 variants) that a real matured log accumulates.
 
+### Fence syntax and EOF behavior
+
+Every structural scan in the rollover checker and compactor uses the same
+delimiter rules, including snapshot/handoff pointers, archive boundaries,
+manifest fields, record insertion, and default-ID sequencing. Fenced examples
+never supply active headings, fields, or rollover IDs. Anchor searches remain
+raw-content searches and may match inside examples.
+
+The supported flat subset follows the delimiter rules in
+[CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/#fenced-code-blocks):
+an opener has at least three identical backticks or tildes with zero to three
+leading spaces. Only the same marker with an equal or longer run, zero to three
+leading spaces, and a spaces/tabs-only suffix closes it. Opposite markers,
+shorter runs, and apparent closers with trailing content stay inside the block.
+Backtick info strings cannot contain backticks; tilde info strings may.
+Four-space/tab-indented markers are not fences in this subset; list/blockquote
+containers and HTML-comment parsing are not added to the context-log helpers.
+Recognition tolerates CRLF without stripping carriage returns from stored bodies.
+
+For now, an unclosed fence extends to EOF with no closure warning or blanket
+refusal, including on no-ops. This is a complete parse of an EOF-terminated
+block, not a read/parser failure. Actual read/awk failures exit 2 and partial
+results must not authorize successful checking or rollover. Stricter live-log
+closure, historical-tail warnings, and additional upgrade policy remain separate
+work under [#156](https://github.com/ssheld/agent-vault/issues/156).
+
+### Safe insertion around historical fences
+
+A write-producing rollover or dry-run refuses (exit 1, outputs unchanged) if an
+unclosed archive/manifest header would enclose new entries or a generated record.
+It also refuses to put an unclosed moved batch before existing archived entries.
+These are structural-preservation checks, not optional lint: neither
+`--allow-stale-archive-metadata` nor `--adopt-manual-rollover` bypasses them.
+The diagnostic identifies the source and opening line; batch-relative lines are
+explicitly labeled. An existing unclosed historical tail can remain unchanged
+when the new batch/record is inserted outside it. No automatic closer is added.
+
+Older helpers could write manifest records inside an unclosed header while
+reporting success. The corrected checker does not promote those fenced records
+to active history: a live pointer with no visible record fails validation.
+Back up the files, inspect version history and the intended example boundaries,
+and manually reconcile them; do not use adoption merely to bypass this state.
+
 ### Layer-2 rollover assertions (`--manifest`)
 
 The structural checks above catch a botched *shape*; they cannot catch a
@@ -366,6 +409,16 @@ refuse as before. This option cannot be combined with `--recover`, and does not
 override the separate archive-header metadata check.
 
 ### Recovery and failure handling
+
+**Before upgrading helpers, finish or reconcile pending transactions.** Update
+the rollover checker and compactor together. A ready transaction is checked
+using its entire effective after-image set under the corrected delimiter rules.
+If fences hide the required manifest record or cited archive boundaries, or a
+parser fails, recovery refuses with exit 3 before further writes, retaining the
+journal and stages. An otherwise valid EOF-terminated
+historical tail alone does not block recovery. Never edit staged payloads or
+their recorded fingerprints to force validation, and do not delete recovery
+data to enable a fresh rollover. Committed cleanup remains cleanup-only.
 
 ```bash
 scripts/compact-context-log.sh agent-vault/context-log.md --recover --dry-run

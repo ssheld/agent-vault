@@ -3,6 +3,38 @@
 
 set -euo pipefail
 
+# Keep this trusted, static awk source identical in all three standalone helpers.
+# Tests check marker integrity, equality, and caller behavior.
+# BEGIN markdown fences
+markdown_fences='
+    function reset_fence() { fence_marker = ""; fence_length = 0; fence_line = 0 }
+    function fenced(line, candidate, marker, run, tail) {
+      candidate = line
+      sub(/\r$/, "", candidate)
+      sub(/^ ? ? ?/, "", candidate)
+      marker = substr(candidate, 1, 1)
+      run = 0
+      if (marker == "`" || marker == "~") {
+        while (substr(candidate, run + 1, 1) == marker) run++
+      }
+      tail = substr(candidate, run + 1)
+      if (fence_marker != "") {
+        if (marker == fence_marker && run >= fence_length && tail ~ /^[ \t]*$/) {
+          fence_marker = ""
+        }
+        return 1
+      }
+      if (run < 3) return 0
+      if (marker == "`" && index(tail, "`") != 0) return 0
+      fence_marker = marker
+      fence_length = run
+      fence_line = FNR
+      return 1
+    }
+    FNR == 1 { reset_fence() }
+'
+# END markdown fences
+
 # Validate a lessons-archive manifest (the #116 AC5 enforcement): every archived
 # lesson is classified, and the classification is well-formed. The three classes
 # (from the Memory Size Budgets & Compaction policy) are:
@@ -203,7 +235,7 @@ fi
 #   unclosed_comment <opening-line>
 # All fields are tab-separated. Only the final value can contain tabs.
 parse_lessons_input() {
-  awk -v input_kind="$1" '
+  awk -v input_kind="$1" "$markdown_fences"'
     function strip(s) {
       sub(/^[[:space:]]+/, "", s)
       sub(/[[:space:]]+$/, "", s)
@@ -217,29 +249,6 @@ parse_lessons_input() {
       }
       if (index(line, "-->") != 0) in_comment = 0
       # HTML blocks end with the whole physical closing line, including suffixes.
-      return 1
-    }
-    function fenced(line, candidate, marker, run, tail) {
-      candidate = line
-      sub(/^ ? ? ?/, "", candidate)
-      marker = substr(candidate, 1, 1)
-      run = 0
-      if (marker == "`" || marker == "~") {
-        while (substr(candidate, run + 1, 1) == marker) run++
-      }
-      tail = substr(candidate, run + 1)
-      if (fence_marker != "") {
-        if (marker == fence_marker && run >= fence_length && tail ~ /^[ \t]*$/) {
-          fence_marker = ""
-        }
-        return 1
-      }
-      if (run < 3) return 0
-      # Backtick info strings cannot contain backticks; tilde strings can.
-      if (marker == "`" && index(tail, "`") != 0) return 0
-      fence_marker = marker
-      fence_length = run
-      fence_line = NR
       return 1
     }
     {
