@@ -401,37 +401,65 @@ scripts/check-lessons-archive.sh <manifest> --rules <file> # add a live-rule sou
 scripts/check-lessons-archive.sh <manifest> --strict --archive <archive> --rules <rules>
 ```
 
-The checker validates that every record declares one of the three classes
+The flat manifest format uses headings at the start of a line. Only a
+`## lesson:` heading supplies a record's key; a body `- key:` field cannot change
+it. Unrecognized fields are ignored. Other level-1 and level-2 headings end the
+record, including bare `#` and `##` headings. Deeper headings stay within the
+record, and the next `## lesson:` starts a new one.
+
+Both inputs ignore fenced content before interpreting headings or fields, so
+sample records cannot classify lessons or change a real record. Fence delimiter
+rules follow [CommonMark](https://spec.commonmark.org/0.31.2/#fenced-code-blocks):
+at least three backticks or tildes, with zero to three leading spaces; a closer
+uses the same marker, at least the opening length, and only spaces/tabs after
+it. Opening info strings are allowed, but a backtick fence's info string cannot
+contain backticks. CRLF and files without a final newline are accepted.
+**The checker additionally requires closure**, although CommonMark allows a
+fence to continue to EOF. An unterminated fence produces a finding with its
+source path and opening line. Cross-file completeness checks are then skipped;
+local record validation still runs.
+
+The checker validates that every record declares exactly one of the three classes
 (`retained-as-quick-rule`, `covered-by-a-named-always-on-rule`, `archival-only`),
 that keys are unique, and that a `covered-by-a-named-always-on-rule` record names
 a non-empty `covered_by` rule that still appears in a live always-on file. An
 optional non-empty `quick_rule` on a `retained-as-quick-rule` record is
 liveness-checked the same way, so a retained lesson whose one-liner was dropped
-is caught. Rule liveness is a substring match, so use distinctive rule text.
+is caught. Concatenated class names are invalid. A missing or invalid class
+does not count toward the classified total or satisfy strict completeness; in
+strict mode an archived lesson with an invalid class reports both the authoring
+error and the resulting classification gap. Advisory mode reports only the
+classification error. Rule liveness is a substring match, so use distinctive
+rule text.
 The canonical `<manifest-dir>/../../lessons.md` is always a source when present
 and repeatable `--rules` **adds** more (e.g. `shared-rules.md`) rather than
 replacing it. Empty `--rules` arguments are ignored; an existing empty file
 counts as a source but cannot satisfy a non-empty reference. The archive
-defaults to `lessons-archive.md` next to the manifest. Passing `--archive ""`
-also uses this default, including the usual skipped-check finding if it is absent.
+defaults to `lessons-archive.md` next to the manifest. Repeated `--archive` flags
+select the **last value**, but every nonempty supplied path must exist, even
+when a later value selects another archive. A final `--archive ""` uses the
+canonical default, including the usual skipped-check finding if it is absent.
 
 The checker **warns by default** (exit 0), including when implicit sources are
 unavailable. It reports which archive or rule-liveness checks were skipped,
-the expected paths, and how to supply the missing sources; skipped checks never
-produce `check passed`. This preserves useful manifest-only validation.
+the expected paths, and how to supply the missing sources. No run with findings
+produces `check passed`. This preserves useful manifest-only validation.
 `--quiet` suppresses advisory warnings and success output.
 
 **Strict mode** exits 1 on any finding, always reporting failures even with
 `--quiet`. It requires an archive even for an empty manifest, since it must
-establish that every archived lesson (a `###` heading) has a manifest record.
+establish that every archived lesson (a `###` heading outside fences) has a
+manifest record with a valid classification.
 A live rules source is required for a non-empty `covered_by` or `quick_rule`
 reference on its matching classification. `archival-only` records and retained
 records with an omitted or empty `quick_rule` need no rules source. Missing
 required sources are findings, so other validation problems are still reported.
-Whenever an archive resolves, both modes check that every manifest record names
-a lesson present in it; strict mode additionally checks that every archived
-lesson is classified. Usage errors and explicitly named missing files exit 2
-in either mode, even when another valid source is available.
+Whenever an archive resolves and both inputs parse completely, both modes check
+that every manifest record names a lesson present in it; strict mode additionally
+checks that every archived lesson is classified. Usage errors, explicitly named
+missing files, and manifest/archive parser execution or read failures exit 2
+in either mode, even with `--quiet` or another valid source available. A failed
+parser's empty or partial output cannot produce success.
 
 ## Compaction conventions
 

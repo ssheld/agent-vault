@@ -31,12 +31,12 @@ VALID_CLASSES="retained-as-quick-rule covered-by-a-named-always-on-rule archival
 
 usage() {
   cat <<EOF
-Usage: $0 <manifest-file> [--archive <file>] [--rules <file>]... [--strict] [--quiet]
+Usage: $0 <manifest-file> [--archive <file>]... [--rules <file>]... [--strict] [--quiet]
 
 Validates per-lesson classifications in a lessons-archive manifest. Checks:
   - every "## lesson:" record declares a classification, and it is one of:
       retained-as-quick-rule | covered-by-a-named-always-on-rule | archival-only
-  - no duplicate lesson keys
+  - no duplicate lesson keys; only the "## lesson:" heading supplies the key
   - a covered-by-a-named-always-on-rule record names a non-empty "covered_by"
     rule that still appears in a live always-on file
   - an optional "quick_rule" on a retained-as-quick-rule record likewise still
@@ -45,25 +45,40 @@ Validates per-lesson classifications in a lessons-archive manifest. Checks:
 When an archive is resolved:
   - every manifest record points at a lesson present in the archive
 With --strict (completeness):
-  - every archived lesson (a "###" heading in the archive) has a manifest record
+  - every archived lesson (a "###" heading in the archive) has a record with an
+    exactly valid classification; combined class names are invalid
+
+The flat format uses headings at the start of a line. Other level-1/level-2
+headings end a manifest record; deeper headings stay inside it. Unknown fields
+(including "key") are ignored. Both inputs ignore fenced examples before
+interpreting headings or fields. Fences use at least three backticks or tildes,
+with up to three leading spaces. A closing fence uses the same marker, at least
+the opening length, and only spaces/tabs afterward. Backtick opening info
+strings cannot contain backticks. CRLF and a missing final newline are accepted.
+The checker requires every fence to close: an unterminated fence is a finding
+with its source/opening line, and cross-file completeness checks are skipped.
 
 Missing implicit sources warn with skipped checks (exit 0) by default; a run
 with skipped checks does not report "check passed". Strict mode requires an
 archive even for an empty manifest, and a live rules source for each non-empty
 covered_by or quick_rule reference on its matching class. Archival-only records
 and retained records without a non-empty quick_rule need no rules source.
-Explicitly named missing files are usage/IO errors (exit 2) in either mode.
+Any finding prevents "check passed". Usage errors, explicitly named missing
+files, and manifest/archive parser execution or read errors exit 2 in either
+mode, including --quiet. Partial parser output is never accepted as success.
 
 Rule liveness is a substring match, so name the rule with distinctive text.
 The archive defaults to "<manifest-dir>/lessons-archive.md", including when
---archive "" is supplied. The canonical live "<manifest-dir>/../../lessons.md"
-is always a rules source when present, and --rules ADDS further sources (e.g.
-shared-rules.md) rather than replacing it.
+the final --archive value is "". Repeated --archive flags select the last value,
+but every nonempty supplied archive path must exist.
+The canonical live "<manifest-dir>/../../lessons.md" is always a rules source
+when present, and --rules ADDS further sources (e.g. shared-rules.md) rather
+than replacing it.
 Empty --rules arguments are ignored; an existing empty file is still a source.
 
 Options:
   --archive <file>  Lessons archive to check records against (completeness with
-                    --strict).
+                    --strict; repeatable, last value selects the archive).
   --rules <file>    Additional live always-on file to resolve covered_by /
                     quick_rule references in (repeatable; added to the default
                     project lessons.md).
@@ -84,12 +99,14 @@ archive_file=""
 strict="false"
 quiet="false"
 rules_files=()
+archive_args=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --archive)
       [[ $# -ge 2 ]] || die "--archive requires a path"
       archive_file="$2"
+      archive_args+=("$2")
       shift 2
       ;;
     --rules)
@@ -125,9 +142,9 @@ done
   exit 2
 }
 [[ -f "$manifest" ]] || die "manifest not found: $manifest"
-if [[ -n "$archive_file" && ! -f "$archive_file" ]]; then
-  die "archive file not found: $archive_file"
-fi
+for archive_arg in "${archive_args[@]:-}"; do
+  [[ -z "$archive_arg" || -f "$archive_arg" ]] || die "archive file not found: $archive_arg"
+done
 for rule_src in "${rules_files[@]:-}"; do
   [[ -z "$rule_src" || -f "$rule_src" ]] || die "rules file not found: $rule_src"
 done
@@ -162,59 +179,82 @@ if [[ -z "$archive_file" ]]; then
   findings+=("archive checks skipped: no archive resolved (expected \"$manifest_dir/lessons-archive.md\"; supply --archive <file>)")
 fi
 
-# Emit "<rec>\t<field>\t<value>" for each record field, plus "COUNT\t<n>".
-# Records are delimited by "## lesson:" headings; any other "## " heading ends
-# the current record.
-parse_manifest() {
-  awk '
+# One standalone parser for both inputs keeps fence precedence and delimiter
+# rules identical. Events distinguish headings from user-supplied field names:
+#   record <number> key <value> | field <number> <name> <value>
+#   lesson 0 heading <value> | count <number> | unclosed <opening-line>
+# All fields are tab-separated. Only the final value can contain tabs.
+parse_lessons_input() {
+  awk -v input_kind="$1" '
     function strip(s) {
-      sub(/\r$/, "", s)
       sub(/^[[:space:]]+/, "", s)
       sub(/[[:space:]]+$/, "", s)
       return s
     }
-    /^##[[:space:]]+lesson:/ {
-      rec++
-      k = $0
-      sub(/^##[[:space:]]+lesson:[[:space:]]*/, "", k)
-      printf "%d\tkey\t%s\n", rec, strip(k)
-      inrec = 1
-      next
-    }
-    inrec && /^##[[:space:]]/ { inrec = 0 }
-    inrec {
-      line = $0
-      sub(/\r$/, "", line)
-      if (match(line, /^[[:space:]]*[-*][[:space:]]*[A-Za-z_]+[[:space:]]*:/)) {
-        sub(/^[[:space:]]*[-*][[:space:]]*/, "", line)
-        ci = index(line, ":")
-        printf "%d\t%s\t%s\n", rec, strip(substr(line, 1, ci - 1)), strip(substr(line, ci + 1))
+    function fenced(line, candidate, marker, run, tail) {
+      candidate = line
+      sub(/^ ? ? ?/, "", candidate)
+      marker = substr(candidate, 1, 1)
+      run = 0
+      if (marker == "`" || marker == "~") {
+        while (substr(candidate, run + 1, 1) == marker) run++
       }
+      tail = substr(candidate, run + 1)
+      if (fence_marker != "") {
+        if (marker == fence_marker && run >= fence_length && tail ~ /^[ \t]*$/) {
+          fence_marker = ""
+        }
+        return 1
+      }
+      if (run < 3) return 0
+      # Backtick info strings cannot contain backticks; tilde strings can.
+      if (marker == "`" && index(tail, "`") != 0) return 0
+      fence_marker = marker
+      fence_length = run
+      fence_line = NR
+      return 1
     }
-    END { printf "COUNT\t%d\n", rec + 0 }
-  ' "$1"
-}
-
-# Lesson headings in the archive: level-3 "### <title>" outside fenced code.
-archive_lessons() {
-  awk '
-    function strip(s) {
-      sub(/\r$/, "", s)
-      sub(/[[:space:]]+$/, "", s)
-      return s
-    }
-    /^(```|~~~)/ { in_fence = !in_fence; next }
     {
-      if (in_fence) next
-      line = strip($0)
-      if (line ~ /^###[[:space:]]/) {
-        sub(/^###[[:space:]]+/, "", line)
-        print line
+      sub(/\r$/, "")
+      if (fenced($0)) next
+      if (input_kind == "archive") {
+        line = $0
+        sub(/[[:space:]]+$/, "", line)
+        if (line ~ /^###[[:space:]]/) {
+          sub(/^###[[:space:]]+/, "", line)
+          printf "lesson\t0\theading\t%s\n", line
+        }
+        next
+      }
+      if ($0 ~ /^##[[:space:]]+lesson:/) {
+        rec++
+        key = $0
+        sub(/^##[[:space:]]+lesson:[[:space:]]*/, "", key)
+        printf "record\t%d\tkey\t%s\n", rec, strip(key)
+        inrec = 1
+        next
+      }
+      if ($0 ~ /^##?([[:space:]]|$)/) inrec = 0
+      if (inrec) {
+        line = $0
+        if (match(line, /^[[:space:]]*[-*][[:space:]]*[A-Za-z_]+[[:space:]]*:/)) {
+          sub(/^[[:space:]]*[-*][[:space:]]*/, "", line)
+          ci = index(line, ":")
+          printf "field\t%d\t%s\t%s\n", rec, strip(substr(line, 1, ci - 1)), strip(substr(line, ci + 1))
+        }
       }
     }
-  ' "$1"
+    END {
+      if (input_kind == "manifest") printf "count\t%d\n", rec + 0
+      if (fence_marker != "") printf "unclosed\t%d\n", fence_line
+    }
+  ' <"$2"
 }
 
+# Capture status before consuming any output. A failing producer can emit an
+# empty or partial parse, and process substitution would hide that failure.
+manifest_output="$(parse_lessons_input manifest "$manifest")" || die "could not parse manifest: $manifest"
+manifest_complete="true"
 declare -A KEY=()
 declare -A CLASS=()
 declare -A COVERED=()
@@ -222,26 +262,29 @@ declare -A HAS_COVERED=()
 declare -A QUICK=()
 declare -A HAS_QUICK=()
 count=0
-while IFS=$'\t' read -r rec field value; do
-  case "$rec" in
-    COUNT)
-      count="$field"
-      continue
+while IFS=$'\t' read -r event rec field value; do
+  case "$event" in
+    count) count="$rec" ;;
+    record) KEY[$rec]="$value" ;;
+    unclosed)
+      manifest_complete="false"
+      findings+=("unterminated fence in manifest: $manifest:$rec (completeness checks skipped)")
+      ;;
+    field)
+      case "$field" in
+        classification) CLASS[$rec]="$value" ;;
+        covered_by)
+          COVERED[$rec]="$value"
+          HAS_COVERED[$rec]="true"
+          ;;
+        quick_rule)
+          QUICK[$rec]="$value"
+          HAS_QUICK[$rec]="true"
+          ;;
+      esac
       ;;
   esac
-  case "$field" in
-    key) KEY[$rec]="$value" ;;
-    classification) CLASS[$rec]="$value" ;;
-    covered_by)
-      COVERED[$rec]="$value"
-      HAS_COVERED[$rec]="true"
-      ;;
-    quick_rule)
-      QUICK[$rec]="$value"
-      HAS_QUICK[$rec]="true"
-      ;;
-  esac
-done < <(parse_manifest "$manifest")
+done <<<"$manifest_output"
 
 # A rule reference (covered_by / quick_rule) is "live" if it appears in any
 # resolved rules file.
@@ -257,6 +300,8 @@ rule_is_live() {
 }
 
 declare -A SEEN_KEY=()
+declare -A CLASSIFIED_KEY=()
+classified_count=0
 manifest_keys=()
 for ((i = 1; i <= count; i++)); do
   key="${KEY[$i]:-}"
@@ -272,11 +317,22 @@ for ((i = 1; i <= count; i++)); do
   fi
   SEEN_KEY[$key]="true"
 
-  if [[ -z "$classification" ]]; then
-    findings+=("lesson \"$key\" has no classification (expected one of: $VALID_CLASSES)")
-  elif [[ " $VALID_CLASSES " != *" $classification "* ]]; then
-    findings+=("lesson \"$key\" has an invalid classification \"$classification\" (expected one of: $VALID_CLASSES)")
-  fi
+  case "$classification" in
+    retained-as-quick-rule | covered-by-a-named-always-on-rule | archival-only)
+      if [[ -z "${CLASSIFIED_KEY[$key]:-}" ]]; then
+        CLASSIFIED_KEY[$key]="true"
+        classified_count=$((classified_count + 1))
+      fi
+      ;;
+    '')
+      findings+=("lesson \"$key\" has no classification (expected one of: $VALID_CLASSES)")
+      continue
+      ;;
+    *)
+      findings+=("lesson \"$key\" has an invalid classification \"$classification\" (expected one of: $VALID_CLASSES)")
+      continue
+      ;;
+  esac
 
   if [[ "$classification" == "covered-by-a-named-always-on-rule" ]]; then
     covered="${COVERED[$i]:-}"
@@ -310,32 +366,42 @@ for ((i = 1; i <= count; i++)); do
   fi
 done
 
-# Completeness: archive lessons <-> manifest records. The manifest->archive
-# direction always runs when an archive is resolved; the archive->manifest
-# (every archived lesson classified) direction is the --strict completeness gate.
+# Cross-file absence checks require complete parses. Keep local record findings,
+# but do not infer missing lessons from an input truncated by an open fence.
 if [[ -n "$archive_file" ]]; then
+  archive_output="$(parse_lessons_input archive "$archive_file")" || die "could not parse archive: $archive_file"
+  archive_complete="true"
   declare -A ARCHIVE_LESSON=()
-  while IFS= read -r heading; do
-    [[ -n "$heading" ]] || continue
-    ARCHIVE_LESSON[$heading]="true"
-  done < <(archive_lessons "$archive_file")
+  while IFS=$'\t' read -r event rec field value; do
+    case "$event" in
+      lesson)
+        [[ -z "$value" ]] || ARCHIVE_LESSON[$value]="true"
+        ;;
+      unclosed)
+        archive_complete="false"
+        findings+=("unterminated fence in archive: $archive_file:$rec (completeness checks skipped)")
+        ;;
+    esac
+  done <<<"$archive_output"
 
-  for key in "${manifest_keys[@]}"; do
-    [[ -n "$key" ]] || continue
-    [[ -n "${ARCHIVE_LESSON[$key]:-}" ]] ||
-      findings+=("manifest classifies a lesson not present in the archive: \"$key\"")
-  done
-
-  if [[ "$strict" == "true" ]]; then
-    for heading in "${!ARCHIVE_LESSON[@]}"; do
-      [[ -n "${SEEN_KEY[$heading]:-}" ]] ||
-        findings+=("archived lesson is not classified in the manifest: \"$heading\"")
+  if [[ "$manifest_complete" == "true" && "$archive_complete" == "true" ]]; then
+    for key in "${manifest_keys[@]}"; do
+      [[ -n "$key" ]] || continue
+      [[ -n "${ARCHIVE_LESSON[$key]:-}" ]] ||
+        findings+=("manifest classifies a lesson not present in the archive: \"$key\"")
     done
+
+    if [[ "$strict" == "true" ]]; then
+      for heading in "${!ARCHIVE_LESSON[@]}"; do
+        [[ -n "${CLASSIFIED_KEY[$heading]:-}" ]] ||
+          findings+=("archived lesson is not classified in the manifest: \"$heading\"")
+      done
+    fi
   fi
 fi
 
 if [[ "${#findings[@]}" -eq 0 ]]; then
-  [[ "$quiet" == "true" ]] || echo "lessons-archive check passed: $manifest ($count classified)"
+  [[ "$quiet" == "true" ]] || echo "lessons-archive check passed: $manifest ($classified_count classified)"
   exit 0
 fi
 
