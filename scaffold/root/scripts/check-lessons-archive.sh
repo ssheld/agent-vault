@@ -56,17 +56,23 @@ Archive ### headings and manifest field bullets allow up to three leading
 spaces; four-space or tab-indented code cannot supply headings or fields.
 Unknown fields (including "key") are ignored. Repeated recognized fields are
 findings, and a repeated classification cannot satisfy completeness.
-Both inputs ignore fenced examples before
-interpreting headings or fields. HTML comments are not filtered; their contents
-can still affect validation. Put reference examples in fenced code blocks.
+Both inputs ignore fenced examples and HTML comment blocks before interpreting
+headings or fields. A comment block starts with <!-- after zero to three leading
+spaces and consumes through the whole physical line containing the first -->.
+Commented headings/fields and closing-line suffixes never become records or fields.
+Fences inside comments and comment markers inside fences are inert.
+Inline comments are unsupported and remain literal heading/field text; they are
+not guaranteed to produce a finding. Four-space or tab-indented comment markers
+do not open a block. Use comment blocks or fenced code for reference examples.
 Fences use at least three backticks or tildes, with up to three leading spaces.
 A closing fence uses the same marker, at least the opening length, and only
 spaces/tabs afterward. Backtick opening info strings cannot contain backticks.
 CRLF and a missing final newline are accepted.
-The checker requires every fence to close: an unterminated fence is a finding
-with its source/opening line. Manifest-to-archive presence checks need a complete
-archive; strict archive-to-manifest classification checks need a complete
-manifest. Known keys from the other input still support checks if it is incomplete.
+The checker requires every fence and comment block to close: an unterminated
+block is a finding with its source/opening line. Manifest-to-archive presence
+checks need a complete archive; strict archive-to-manifest classification checks
+need a complete manifest. Known keys from the other input still support checks
+if it is incomplete.
 
 Missing implicit sources warn with skipped checks (exit 0) by default; a run
 with skipped checks does not report "check passed". Strict mode requires an
@@ -77,7 +83,8 @@ Any finding prevents "check passed". Usage errors, explicitly named missing
 files, and manifest/archive parser execution or read errors exit 2 in either
 mode, including --quiet. Partial parser output is never accepted as success.
 
-Rule liveness is a substring match, so name the rule with distinctive text.
+Rule liveness is a substring match over unfiltered rules files, including their
+comments and fenced examples (follow-up #158). Name the rule with distinctive text.
 The archive defaults to "<manifest-dir>/lessons-archive.md", including when
 the final --archive value is "". Repeated --archive flags select the last value,
 but every nonempty supplied archive path must exist.
@@ -189,10 +196,11 @@ if [[ -z "$archive_file" ]]; then
   findings+=("archive checks skipped: no archive resolved (expected \"$manifest_dir/lessons-archive.md\"; supply --archive <file>)")
 fi
 
-# One standalone parser for both inputs keeps fence precedence and delimiter
+# One standalone parser for both inputs keeps block precedence and delimiter
 # rules identical. Events distinguish headings from user-supplied field names:
 #   record <number> key <value> | field <number> <name> <value>
 #   lesson 0 heading <value> | count <number> | unclosed <opening-line>
+#   unclosed_comment <opening-line>
 # All fields are tab-separated. Only the final value can contain tabs.
 parse_lessons_input() {
   awk -v input_kind="$1" '
@@ -200,6 +208,16 @@ parse_lessons_input() {
       sub(/^[[:space:]]+/, "", s)
       sub(/[[:space:]]+$/, "", s)
       return s
+    }
+    function commented(line) {
+      if (!in_comment) {
+        if (line !~ /^ ? ? ?<!--/) return 0
+        in_comment = 1
+        comment_line = NR
+      }
+      if (index(line, "-->") != 0) in_comment = 0
+      # HTML blocks end with the whole physical closing line, including suffixes.
+      return 1
     }
     function fenced(line, candidate, marker, run, tail) {
       candidate = line
@@ -226,7 +244,13 @@ parse_lessons_input() {
     }
     {
       sub(/\r$/, "")
+      # An active block owns its contents; neither parser can start the other.
+      if (in_comment) {
+        commented($0)
+        next
+      }
       if (fenced($0)) next
+      if (commented($0)) next
       if (input_kind == "archive") {
         line = $0
         sub(/^ ? ? ?/, "", line)
@@ -258,6 +282,7 @@ parse_lessons_input() {
     END {
       if (input_kind == "manifest") printf "count\t%d\n", rec + 0
       if (fence_marker != "") printf "unclosed\t%d\n", fence_line
+      if (in_comment) printf "unclosed_comment\t%d\n", comment_line
     }
   ' <"$2"
 }
@@ -282,6 +307,10 @@ while IFS=$'\t' read -r event rec field value; do
     unclosed)
       manifest_complete="false"
       findings+=("unterminated fence in manifest: $manifest:$rec (archive classification completeness check skipped)")
+      ;;
+    unclosed_comment)
+      manifest_complete="false"
+      findings+=("unterminated HTML comment in manifest: $manifest:$rec (archive classification completeness check skipped)")
       ;;
     field)
       case "$field" in
@@ -412,6 +441,10 @@ if [[ -n "$archive_file" ]]; then
       unclosed)
         archive_complete="false"
         findings+=("unterminated fence in archive: $archive_file:$rec (manifest lesson presence checks skipped)")
+        ;;
+      unclosed_comment)
+        archive_complete="false"
+        findings+=("unterminated HTML comment in archive: $archive_file:$rec (manifest lesson presence checks skipped)")
         ;;
     esac
   done <<<"$archive_output"
