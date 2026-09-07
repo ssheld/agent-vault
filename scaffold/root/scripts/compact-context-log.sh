@@ -439,7 +439,7 @@ write_record() {
 }
 
 incomplete_record() {
-  pending "incomplete transaction record: $journal; original archive/manifest paths are unknown. Stop the original writer and children, preserve recovery data, and inspect the ORIGINAL destinations manually. Only after confirming/reconciling those outputs may rmdir remove a confirmed-empty transaction directory."
+  pending "incomplete transaction record: $journal; original archive/manifest paths are unknown. An empty directory may be residue from a completed rollover whose final cleanup was interrupted, or from interrupted setup/a deleted record. Stop the original writer and children and preserve recovery data. Using the ORIGINAL log/archive/manifest paths, run check-context-log-rollover.sh with --archive and --manifest and confirm each intended entry appears exactly once across the live log and archive history. Only after confirming/reconciling those outputs may rmdir remove a confirmed-empty transaction directory."
 }
 
 read_record() {

@@ -303,9 +303,12 @@ cause refusal without recovery writes. Fix the underlying IO problem before
 retrying recovery. Interrupted recovery is itself retryable.
 
 A committed record permits cleanup only, never replay over later edits. An empty
-transaction directory can indicate interrupted setup/final cleanup, but can also
-mean someone deleted a ready record. Like other incomplete/corrupt records, it
-requires manual inspection; recovery does not infer that outputs are consistent.
+transaction directory may be residue from a **completed rollover** whose final
+cleanup was interrupted after the record was removed; all intended output bytes
+may already be installed. It can also indicate interrupted setup or a deleted
+ready record. The diagnostic names the completed-rollover possibility, but an
+empty directory alone cannot distinguish these causes: manual confirmation is
+still required, including the checker and exact-once entry checks described below.
 The record also carried the original archive/manifest paths: checking newly
 supplied paths cannot establish that the **original** outputs were untouched.
 For example, an archive-only partial write and a deleted record leave an empty

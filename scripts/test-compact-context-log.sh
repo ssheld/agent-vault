@@ -1056,6 +1056,56 @@ assert_no_transaction_artifacts 'repeated committed cleanup leaves no artifacts'
 # The rm wrapper is no longer needed; do not affect later fault fixtures.
 rm "$fault_bin/rm"
 
+# Final rmdir can fail AFTER the committed record has been removed. The empty
+# residue does not prove completion to a later invocation, but its diagnostic
+# should name that benign possibility and the checks needed before manual cleanup.
+real_rmdir="$(command -v rmdir)"
+cat >"$fault_bin/rmdir" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${@: -1}" == "${ROLLOVER_TEST_RMDIR_DEST:-}" ]]; then exit 73; fi
+exec "$ROLLOVER_TEST_RMDIR" "$@"
+EOF
+chmod +x "$fault_bin/rmdir"
+prepare_recovery_case completed-cleanup-residue
+PATH="$fault_bin:$PATH" ROLLOVER_TEST_RMDIR="$real_rmdir" ROLLOVER_TEST_MV="$real_mv" \
+  ROLLOVER_TEST_RMDIR_DEST="$d/.agent-vault-rollover-log.md" \
+  run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" \
+  --rollover-id frozen-id --boundary 'frozen boundary' --anchors 'older work; initial project setup' \
+  --require-top-entry 'rollover session'
+assert_rc 3 "$COMPACT_RC" 'final rmdir failure reports incomplete cleanup'
+assert_outputs "$d/expected" 'final rmdir failure leaves all intended output bytes installed'
+assert_not_exists "$d/.agent-vault-rollover-log.md/record" 'committed record was removed before final rmdir failure'
+[[ -d "$d/.agent-vault-rollover-log.md" && -z "$(find "$d/.agent-vault-rollover-log.md" -mindepth 1 -print)" ]] || fail 'final rmdir failure should leave an empty transaction directory'
+"$checker" "$d/log.md" --archive "$d/archive.md" --manifest "$d/manifest.md" --quiet
+for invocation in ordinary recovery recovery-preview; do
+  case "$invocation" in
+    ordinary) run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" ;;
+    recovery) run_compact "$d/log.md" --recover ;;
+    recovery-preview) run_compact "$d/log.md" --recover --dry-run ;;
+  esac
+  assert_rc 3 "$COMPACT_RC" "$invocation still requires confirmation of empty residue"
+  assert_contains "$COMPACT_OUT" 'completed rollover whose final cleanup was interrupted' "$invocation diagnostic names completed-rollover residue"
+  assert_contains "$COMPACT_OUT" 'check-context-log-rollover.sh' "$invocation diagnostic names the validation check"
+  assert_contains "$COMPACT_OUT" 'each intended entry appears exactly once' "$invocation diagnostic requires more than a checker pass"
+  assert_contains "$COMPACT_OUT" 'original archive/manifest paths are unknown' "$invocation does not infer the missing destination identities"
+  assert_outputs "$d/expected" "$invocation leaves complete outputs untouched"
+  [[ -d "$d/.agent-vault-rollover-log.md" ]] || fail "$invocation cleared the empty residue automatically"
+done
+# Exact-byte comparisons and the checker above confirm this fixture's originals;
+# only the fixture owner now removes its confirmed-empty directory.
+rmdir "$d/.agent-vault-rollover-log.md"
+rm "$fault_bin/rmdir"
+run_compact "$d/log.md" --recover
+assert_rc 0 "$COMPACT_RC" 'manual removal of confirmed-empty residue unblocks recovery'
+assert_no_transaction_artifacts 'confirmed-empty residue cleanup leaves no artifacts'
+awk '/^## Entries$/ { print; print ""; print "### 2026-06-01 09:00 local - codex - next rollover session"; print "- New work after cleanup."; next } { print }' \
+  "$d/log.md" >"$d/log.next" && mv "$d/log.next" "$d/log.md"
+run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" --require-top-entry 'rollover session'
+assert_rc 0 "$COMPACT_RC" 'ordinary later rollover succeeds after confirmed-empty cleanup'
+[[ "$(count_entries "$d/archive.md")" == 4 ]] || fail 'later rollover duplicated previously installed entries'
+[[ "$(grep -c '^## rollover:' "$d/manifest.md")" == 2 ]] || fail 'later rollover duplicated the committed manifest record'
+"$checker" "$d/log.md" --archive "$d/archive.md" --manifest "$d/manifest.md" --quiet
+
 for role in archive manifest log; do
   prepare_recovery_case "edited-$role" true
   fault_recovery_case after "$d/archive.md"
