@@ -150,4 +150,23 @@ AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm c9
 [[ "$HOOK_RC" -eq 0 ]] || fail "staged deletion was blocked by the rollover warning (rc=$HOOK_RC)" "$HOOK_STDERR"
 [[ "$HOOK_STDERR" != *"context-log rollover warning"* ]] || fail "warned on a staged deletion (no staged blob)" "$HOOK_STDERR"
 
+# Closure must be a checker finding, not a bare warning that grep '^- ' drops.
+# Also prove it reads the staged blob, and never changes the non-blocking policy.
+p="$(fresh_project eof-staged)"
+printf '\n## Appendix\n~~~md\nUnclosed staged example.\n' >>"$p/agent-vault/context-log.md"
+git -C "$p" add agent-vault/context-log.md
+printf '~~~\n' >>"$p/agent-vault/context-log.md"
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm eof-staged
+[[ "$HOOK_RC" -eq 0 ]] || fail "staged EOF finding blocked commit" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" == *"- unterminated fence in live "* ]] || fail "hook filtered out closure finding" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" == *"opening line"* ]] || fail "closure finding lost opening line" "$HOOK_STDERR"
+
+p="$(fresh_project eof-unstaged)"
+printf '\n## Appendix\n~~~md\nClosed staged example.\n~~~\n' >>"$p/agent-vault/context-log.md"
+git -C "$p" add agent-vault/context-log.md
+printf '\n~~~\nUnstaged example.\n' >>"$p/agent-vault/context-log.md"
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm eof-unstaged
+[[ "$HOOK_RC" -eq 0 ]] || fail "unstaged EOF example blocked commit" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" != *"context-log rollover warning"* ]] || fail "hook warned on unstaged EOF" "$HOOK_STDERR"
+
 echo "memory budget + context-log rollover pre-commit hook regression checks passed."

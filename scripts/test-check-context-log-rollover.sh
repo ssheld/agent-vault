@@ -913,4 +913,27 @@ for defect in snapshot fragment noncanonical orphan; do
   expect_result 1 "$diagnostic" "$tmp_root/good-rollover-live.md" --manifest "$path_root/metadata/manifest.md"
 done
 
+# Full-file closure diagnostics retain physical lines across CRLF and missing
+# final newlines, and ignore delimiter-like lines outside the supported grammar.
+for ending in lf crlf no-newline; do
+  cp "$tmp_root/no-handoff-live.md" "$tmp_root/eof.md"
+  opening=$(($(wc -l <"$tmp_root/eof.md") + 2))
+  printf '\n~~~md\nExample through EOF.' >>"$tmp_root/eof.md"
+  if [[ "$ending" != no-newline ]]; then printf '\n' >>"$tmp_root/eof.md"; fi
+  if [[ "$ending" == crlf ]]; then
+    awk '{ printf "%s\r\n", $0 }' "$tmp_root/eof.md" >"$tmp_root/eof.next"
+    mv "$tmp_root/eof.next" "$tmp_root/eof.md"
+  fi
+  expect_result 1 "opening line $opening" "$tmp_root/eof.md" --quiet
+  expect_result 1 '- unterminated fence in live' "$tmp_root/eof.md"
+done
+for opener in '    ```' $'\t~~~' '```bad`info'; do
+  cp "$tmp_root/no-handoff-live.md" "$tmp_root/negative-eof.md"
+  printf '\n%s\nNot a fence.\n' "$opener" >>"$tmp_root/negative-eof.md"
+  expect_result 0 '' "$tmp_root/negative-eof.md" --quiet
+done
+# The CLI cannot select the internal recovery contract.
+expect_result 2 'Unknown option' "$tmp_root/eof.md" --recover
+expect_result 2 'Unknown option' "$tmp_root/eof.md" --allow-unclosed-live
+
 echo "context-log rollover checker regression checks passed."

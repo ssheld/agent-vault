@@ -1224,13 +1224,13 @@ read_test_record() {
 # relying on a historical Git checkout being available in a shallow CI clone.
 # Only these disposable fixtures author their records; recovery must never
 # rewrite a real journal or repair payloads to make them validate.
-for legacy_case in archive-tail manifest-tail archive-hidden manifest-hidden; do
+for legacy_case in archive-tail manifest-tail log-tail archive-hidden manifest-hidden log-hidden; do
   prepare_recovery_case "legacy-fence-$legacy_case"
   fault_recovery_case before "$d/archive.md"
   assert_rc 3 "$COMPACT_RC" 'prepare legacy fence after-images'
   read_test_record
   role="${legacy_case%%-*}"
-  if [[ "$role" == archive ]]; then offset=3; else offset=8; fi
+  case "$role" in archive) offset=3 ;; manifest) offset=8 ;; log) offset=13 ;; esac
   payload="${record[$((offset + 3))]}/$role.md"
   if [[ "$legacy_case" == *-tail ]]; then
     printf '\n```md\nOld example through EOF.\n' >>"$payload"
@@ -1251,6 +1251,8 @@ for legacy_case in archive-tail manifest-tail archive-hidden manifest-hidden; do
     if [[ "$mode" == preview ]]; then run_compact "$d/log.md" --recover --dry-run; else run_compact "$d/log.md" --recover; fi
     if [[ "$legacy_case" == *-tail ]]; then
       assert_rc 0 "$COMPACT_RC" 'safe legacy tail remains recoverable'
+      assert_contains "$COMPACT_OUT" 'Warning: unterminated fence' 'recovery surfaces EOF warning on success'
+      assert_contains "$COMPACT_OUT" "$d/$role.md" 'recovery diagnostic names original destination'
       if [[ "$mode" == preview ]]; then assert_outputs "$d/before" 'legacy tail preview does not write'; else assert_outputs "$d/expected" 'legacy tail recovery preserves bytes'; fi
     else
       assert_rc 3 "$COMPACT_RC" 'hidden legacy structure refuses recovery'
@@ -1260,7 +1262,81 @@ for legacy_case in archive-tail manifest-tail archive-hidden manifest-hidden; do
       cmp -s "$d/payload.recorded" "$payload" || fail 'recovery changed legacy payload'
     fi
   done
+  if [[ "$legacy_case" == *-tail ]]; then assert_no_transaction_artifacts 'EOF recovery reaches commitment and cleanup'; fi
 done
+
+# Closure-only live after-images may recover in every partial-install state.
+# Pair with a real violation: the policy must not suppress a generic exit 1.
+for installed in 0 1 2 3; do
+  for violation in none structure; do
+    prepare_recovery_case "live-eof-$installed-$violation"
+    fault_recovery_case before "$d/archive.md"
+    assert_rc 3 "$COMPACT_RC" 'prepare recorded live EOF case'
+    read_test_record
+    payload="${record[16]}/log.md"
+    if [[ "$violation" == structure ]]; then printf '\n## Current Snapshot\nDuplicate active snapshot.\n' >>"$payload"; fi
+    printf '\n## Appendix\n~~~md\nOld recorded example through EOF.\n' >>"$payload"
+    digest="$(shasum -a 256 "$payload")"
+    record[15]="${digest%% *}"
+    printf '%s\0' "${record[@]}" >"$d/.agent-vault-rollover-log.md/record"
+    cp -p "$payload" "$d/expected/log.md"
+    for ((i = 0; i < installed; i++)); do
+      offset=$((3 + i * 5))
+      destination="${record[$offset]}"
+      cp -p "${record[$((offset + 3))]}/${destination##*/}" "$destination"
+    done
+    snapshot_outputs "$d/partial"
+    cp "$d/.agent-vault-rollover-log.md/record" "$d/record.before"
+    cp "$payload" "$d/payload.before"
+    refusal_before="$(find "$d" -type f -exec shasum -a 256 {} \; | sort)"
+    run_compact "$d/log.md" --keep 99 --archive "$d/archive.md" --manifest "$d/manifest.md"
+    assert_rc 3 "$COMPACT_RC" 'pending state retains precedence over ordinary EOF/no-op'
+    for mode in preview apply; do
+      if [[ "$mode" == preview ]]; then
+        run_compact "$d/log.md" --recover --dry-run --quiet
+      else
+        run_compact "$d/log.md" --recover --quiet
+      fi
+      assert_contains "$COMPACT_OUT" 'Warning: unterminated fence in live' 'recovery EOF warning visible under quiet'
+      assert_contains "$COMPACT_OUT" "$d/log.md" 'recovery warning uses destination path'
+      if [[ "$violation" == structure ]]; then
+        assert_rc 3 "$COMPACT_RC" 'real finding still refuses EOF recovery'
+        assert_contains "$COMPACT_OUT" 'duplicate "## Current Snapshot"' 'specific structural finding preserved'
+      else
+        assert_rc 0 "$COMPACT_RC" 'closure-only recovery succeeds'
+      fi
+      if [[ "$mode" == preview || "$violation" == structure ]]; then
+        assert_outputs "$d/partial" 'preview/refusal writes no output'
+        cmp -s "$d/record.before" "$d/.agent-vault-rollover-log.md/record" || fail 'EOF preview/refusal changed record'
+        cmp -s "$d/payload.before" "$payload" || fail 'EOF preview/refusal changed staged log'
+        [[ "$(find "$d" -type f -exec shasum -a 256 {} \; | sort)" == "$refusal_before" ]] || fail 'EOF preview/refusal changed a recorded artifact'
+      else
+        assert_outputs "$d/expected" 'recovery installs immutable after-images'
+        assert_no_transaction_artifacts 'both recovery validations allow commitment and cleanup'
+        run_compact "$d/log.md" --recover --quiet
+        assert_rc 0 "$COMPACT_RC" 'EOF recovery is idempotent'
+        assert_contains "$COMPACT_OUT" 'No pending transaction' 'recovery does not loop in ready state'
+        run_compact "$d/log.md" --keep 99 --archive "$d/archive.md" --manifest "$d/manifest.md" --quiet
+        assert_rc 1 "$COMPACT_RC" 'ordinary no-op is strict after successful recovery'
+        assert_contains "$COMPACT_OUT" 'unterminated fence in live' 'ordinary EOF refusal is actionable'
+      fi
+    done
+  done
+done
+
+# Recovery validates recorded after-images, not an unclosed original live file.
+prepare_recovery_case open-before-closed-after
+fault_recovery_case before "$d/archive.md"
+assert_rc 3 "$COMPACT_RC" 'prepare unclosed before-image case'
+printf '\n~~~\nUnclosed original, not the recorded replacement.\n' >>"$d/log.md"
+read_test_record
+digest="$(shasum -a 256 "$d/log.md")"
+record[14]="${digest%% *}"
+printf '%s\0' "${record[@]}" >"$d/.agent-vault-rollover-log.md/record"
+run_compact "$d/log.md" --recover --quiet
+assert_rc 0 "$COMPACT_RC" 'unclosed before-image does not veto a valid result'
+assert_outputs "$d/expected" 'closed after-image replaces original'
+assert_no_transaction_artifacts 'before-image recovery cleanup'
 
 for existing in false true; do
   for fault in before after; do
@@ -1349,7 +1425,7 @@ PATH="$fault_bin:$PATH" ROLLOVER_TEST_RM="$real_rm" ROLLOVER_TEST_MV="$real_mv" 
   --require-top-entry 'rollover session'
 assert_rc 3 "$COMPACT_RC" 'cleanup failure leaves committed state'
 assert_outputs "$d/expected" 'cleanup failure leaves complete outputs'
-printf '\nUser edit after successful output installation.\n' >>"$d/log.md"
+printf '\n~~~\nUser edit after successful output installation, deliberately unclosed.\n' >>"$d/log.md"
 snapshot_outputs "$d/edited"
 run_compact "$d/log.md" --recover
 assert_rc 0 "$COMPACT_RC" 'committed cleanup succeeds after user edit'

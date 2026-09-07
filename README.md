@@ -149,6 +149,12 @@ The rollover checker, compactor, and lessons checker embed the same marked awk
 fence-state block to remain standalone. When changing delimiter rules, update all
 three copies together. The fence suite checks marker integrity and equality as
 well as behavior; there is no generator or separately installed runtime library.
+Closure policy stays outside that shared primitive: ordinary rollover checks
+require explicit live closure, historical EOF tails warn even under `--quiet`,
+and explicit recovery warns for otherwise valid immutable live after-images.
+The checker exposes an internal entry point for its matched compactor in an
+isolated Bash process; its public CLI always uses strict live policy. Update
+both helpers together. See [EOF policy and recovery](docs/memory-budgets.md#fence-syntax-and-eof-behavior).
 
 CI runs these checks via `.github/workflows/scaffold-regression-checks.yml` on
 both `ubuntu-latest` and `macos-latest`, so GNU-vs-BSD userland assumptions in

@@ -83,7 +83,8 @@ Prompt sections after Entries still refuse writes; nest prompts under entries.
 
 All structural scans use the checker's delimiter-aware fence rules, including
 pointer rewriting, manifest record discovery, and default-ID sequencing.
-Unclosed blocks extend to EOF; no blanket closure warning/refusal is imposed.
+Live fences must close explicitly, including in untouched suffixes and on no-ops
+or dry-runs. Historical archive/manifest EOF tails warn even under --quiet.
 A write (or write-producing dry-run) does refuse an insertion after an unclosed
 archive/manifest header, or a moved unclosed block before existing history:
 concatenation must not hide generated records or previously visible entries.
@@ -128,6 +129,14 @@ the original process and its children before recovering. Pending data lives in
 .agent-vault-rollover-* directories beside the log and destinations; do not clean
 or move it until recovery finishes. Recovery never overwrites intervening edits.
 Exit 3 requires recovery or manual reconciliation, not a fresh rollover retry.
+
+Update both helpers together; prefer finishing/reconciling pending transactions
+before upgrading. Explicit --recover alone downgrades live EOF closure to a
+warning in otherwise valid recorded outputs, before AND after installation.
+It revalidates all structure/fingerprints and never repairs journal/staged bytes.
+After recovery completes, inspect and close the intended live fence as a separate
+edit before ordinary checking or another rollover. Committed recovery only cleans
+up recorded artifacts; it does not validate or replay later user-edited content.
 EOF
 }
 
@@ -147,6 +156,20 @@ pending() {
   echo "Recovery required: $*" >&2
   reported_status=3
   exit 3
+}
+
+# Load only the installed, repo-owned checker, never document text. A fresh Bash
+# process preserves its errexit semantics when this wrapper is used in an if/||.
+# Positional arguments carry data (including source labels), not shell code.
+# The sourceable entry point avoids a public/ambient closure-bypass switch.
+run_checker() {
+  local policy="$1" image="$2"
+  shift 2
+  bash -c '
+    source "$1"
+    shift
+    rollover_check_main "$@"
+  ' rollover-check "$checker" "$policy" "$image" "${destinations[2]}" "${destinations[0]}" "${destinations[1]}" "$@" >/dev/null
 }
 
 context_log=""
@@ -599,7 +622,8 @@ finish_transaction() {
 }
 
 apply_transaction() {
-  local i current file validation effective=() states=()
+  local i current file policy=strict effective=() states=()
+  [[ "$recover" != true ]] || policy=recovery
   # Validate the WHOLE effective result before touching any remaining output.
   for i in 0 1 2; do
     current="$(fingerprint "${destinations[$i]}")" || pending "cannot fingerprint ${destinations[$i]}"
@@ -620,9 +644,8 @@ apply_transaction() {
       [[ "$(file_mode "${destinations[$i]}")" == "${modes[$i]}" ]] || pending "destination permissions changed: ${destinations[$i]}"
     fi
   done
-  if ! validation="$("$checker" "${effective[2]}" --archive "${effective[0]}" --manifest "${effective[1]}" 2>&1)"; then
-    pending "recorded result failed validation: $validation"
-  fi
+  run_checker "$policy" "recorded after-image" "${effective[2]}" --archive "${effective[0]}" --manifest "${effective[1]}" --quiet ||
+    pending "recorded result failed validation"
   if [[ "$dry_run" == true ]]; then
     printf '[dry-run] transaction %s: archive=%s manifest=%s log=%s; no outputs changed\n' "$rollover_id" "${states[0]}" "${states[1]}" "${states[2]}"
     return
@@ -636,7 +659,8 @@ apply_transaction() {
   for i in 0 1 2; do
     [[ "$(fingerprint "${destinations[$i]}")" == "${after_hashes[$i]}" ]] || pending "installed output changed: ${destinations[$i]}"
   done
-  "$checker" "${destinations[2]}" --archive "${destinations[0]}" --manifest "${destinations[1]}" --quiet || pending "installed result failed validation"
+  run_checker "$policy" "installed after-image" "${destinations[2]}" --archive "${destinations[0]}" --manifest "${destinations[1]}" --quiet ||
+    pending "installed result failed validation"
   phase=committed
   write_record || pending "outputs installed; could not record commitment"
   finish_transaction
@@ -791,7 +815,7 @@ log_input="${inputs[2]}"
 # prose and silently reordered above the newer batch.
 checker_args=("$log_input")
 [[ -f "$archive_input" ]] && checker_args+=(--archive "$archive_input")
-if "$checker" "${checker_args[@]}" --quiet >/dev/null 2>&1; then
+if run_checker strict "input snapshot" "${checker_args[@]}" --quiet; then
   :
 else
   checker_status=$?
@@ -800,6 +824,15 @@ else
     abort "context log or existing archive fails the structural rollover check; run check-context-log-rollover.sh $context_log --archive $archive_file and normalize before rolling over"
   fi
   abort "context log fails the structural rollover check; run check-context-log-rollover.sh $context_log"
+fi
+
+# Inspect the entire existing manifest even before a no-op, without validating
+# its old record against a newly selected annual archive or changing adoption.
+if [[ -f "$manifest_input" ]]; then
+  manifest_opening="$(unclosed_fence_line "$manifest_input")" || die "cannot inspect manifest fences: $manifest_file (input snapshot)"
+  if [[ -n "$manifest_opening" ]]; then
+    printf 'Warning: unterminated fence in manifest %s (input snapshot opening line %s); historical text remains fenced through EOF, not active structure. This warning does not certify intended boundaries or safe future insertion.\n' "$manifest_file" "$manifest_opening" >&2
+  fi
 fi
 
 if [[ -f "$archive_input" ]]; then
@@ -1027,11 +1060,10 @@ require_closed_insertion "$scratch/man_header" "$manifest_file header"
 
 # --- self-validate the built result with the real checker ----------------
 
-if validation="$("$checker" "$new_log" --archive "$new_archive" --manifest "$new_manifest" 2>&1)"; then
+if run_checker strict "generated after-image" "$new_log" --archive "$new_archive" --manifest "$new_manifest" --quiet; then
   :
 else
   checker_status=$?
-  echo "$validation" >&2
   [[ "$checker_status" -eq 1 ]] || die "could not validate the rolled-over result"
   abort "the rolled-over result failed check-context-log-rollover.sh (see above); this is a bug in the rollover, not your log"
 fi
