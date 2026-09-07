@@ -257,6 +257,35 @@ are preserved; new outputs are owner-only (`0600`). Newly created directories us
 a private umask. As with the prior rename-based writer, this does not preserve
 inode identity or explicitly copy ownership, ACLs, or extended attributes.
 
+### Adopting a previously manual rollover
+
+A manually rolled-over log may have a live rollover pointer and archived entries
+but no compactor manifest. A missing, empty, or header-only manifest now receives
+a distinct diagnostic. First confirm the `--archive` and `--manifest` paths: if a
+manifest already exists elsewhere, select it; if it was accidentally deleted,
+restore it rather than treating its loss as first-time adoption.
+
+When the history really was maintained manually, ordinary `--dry-run` can preview
+the next rollover without changing any outputs. A write requires the one-time
+`--adopt-manual-rollover` acknowledgement:
+
+```bash
+scripts/compact-context-log.sh agent-vault/context-log.md --keep 20 \
+  --archive agent-vault/context/archive/context-log-2026.md \
+  --manifest agent-vault/context/archive/context-log-manifest.md \
+  --require-top-entry "rollover" --adopt-manual-rollover --dry-run
+```
+
+Inspect the preview, then remove `--dry-run` to apply it. The first automated
+rollover preserves existing archived entries, writes a new manifest record, and
+replaces the live pointer. It does not invent retrospective records for earlier
+manual rollovers; a no-op does not create a manifest or change the pointer. Remove
+`--adopt-manual-rollover` from later commands: it is only valid when a live pointer
+exists and the supplied manifest has no records. Pending transactions, entry
+overlap, mismatched **existing** manifest records, and the session-entry gate still
+refuse as before. This option cannot be combined with `--recover`, and does not
+override the separate archive-header metadata check.
+
 ### Recovery and failure handling
 
 ```bash
@@ -277,9 +306,20 @@ A committed record permits cleanup only, never replay over later edits. An empty
 transaction directory can indicate interrupted setup/final cleanup, but can also
 mean someone deleted a ready record. Like other incomplete/corrupt records, it
 requires manual inspection; recovery does not infer that outputs are consistent.
-With no record, `--recover` reports that fact; it cannot discover arbitrary old
-destination arguments. Use the original ordinary command with `--dry-run` to
-inspect those destinations instead.
+The record also carried the original archive/manifest paths: checking newly
+supplied paths cannot establish that the **original** outputs were untouched.
+For example, an archive-only partial write and a deleted record leave an empty
+journal; selecting a new, absent archive and manifest would pass the content
+floor while the old archive still duplicates live entries. Therefore neither
+ordinary invocation nor `--recover` automatically clears an empty journal.
+
+Stop the original writer and its children, preserve recovery data, identify the
+original destinations, and reconcile them as described below. Only after those
+outputs are confirmed consistent may a **confirmed-empty** transaction directory
+be removed with `rmdir` (not recursive deletion). Then preview the original command
+with `--dry-run` before any fresh write. With no transaction directory at all,
+`--recover` reports that there is no record; the ordinary command's `--dry-run`
+checks only the destinations it is given, not unknown paths from an earlier run.
 
 Recovery data lives in a reserved `.agent-vault-rollover-*` namespace:
 
@@ -319,10 +359,10 @@ is supported.
 
 | Status | Meaning | Next action |
 | --- | --- | --- |
-| `0` | Successful rollover/recovery or healthy no-op; recovery dry-run also uses `0` | Continue; a dry-run has not applied its plan. |
+| `0` | Successful rollover/recovery or healthy no-op; validated dry-run also uses `0` | Continue; a dry-run has not applied its plan. |
 | `1` | Gate or self-validation refusal; outputs unchanged | Fix the input/gate. |
 | `2` | Usage or preparation IO error before output replacement | Fix arguments/IO, then retry. |
-| `3` | Pending/partial operation, failed recovery/cleanup, or recognizable inconsistency without a record | Recover explicitly or reconcile manually; do not retry a fresh rollover. |
+| `3` | Pending/partial operation, failed recovery/cleanup, recognizable inconsistency, or manifest-adoption decision required | Follow the diagnostic: recover, reconcile, or verify manual history before opting into adoption. |
 
 Handled HUP/INT/TERM retain `129`/`130`/`143` with recovery guidance when a record
 is pending. An uncatchable kill cannot print a diagnostic; the next invocation

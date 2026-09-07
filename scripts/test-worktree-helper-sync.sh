@@ -191,6 +191,7 @@ assert_generated_rollover_recovery() {
 
 ## Current Snapshot
 - Branch: main
+- Context-log rollover: `manual-history` — boundary: through prior manual entry
 
 ## Entries
 
@@ -199,6 +200,12 @@ assert_generated_rollover_recovery() {
 
 ### 2026-05-31 09:00 local - codex - archived entry
 - Preserve this body exactly once.
+EOF
+  cat >"$fixture/archive.md" <<'EOF'
+# Context Log Archive
+
+### 2026-05-01 09:00 local - codex - prior manual entry
+- Preserve this manually archived history.
 EOF
   actual_mv="$(command -v mv)"
   cat >"$fixture/bin/mv" <<'EOF'
@@ -209,7 +216,7 @@ EOF
   chmod +x "$fixture/bin/mv"
   output="$(PATH="$fixture/bin:$PATH" ROLLOVER_FIXTURE_LOG="$fixture/log.md" ROLLOVER_FIXTURE_MV="$actual_mv" \
     "$target/scripts/compact-context-log.sh" "$fixture/log.md" --keep 1 --archive "$fixture/archive.md" \
-    --manifest "$fixture/manifest.md" --rollover-id installed-helper --require-top-entry 'rollover session' 2>&1)" || rc=$?
+    --manifest "$fixture/manifest.md" --rollover-id installed-helper --require-top-entry 'rollover session' --adopt-manual-rollover 2>&1)" || rc=$?
   assert_exit_code 3 "$rc" "$label installed helper preserves pending operation"
   assert_output_contains "$output" '--recover' "$label installed recovery guidance"
   git -C "$target" check-ignore -q rollover-fixture/.agent-vault-rollover-log.md/record ||
@@ -219,7 +226,8 @@ EOF
   output="$("$target/scripts/compact-context-log.sh" "$fixture/log.md" --recover 2>&1)" || rc=$?
   assert_exit_code 0 "$rc" "$label installed recovery succeeds"
   assert_file_contains "$fixture/log.md" installed-helper "$label recovery preserves ID"
-  assert_equal 1 "$(grep -c '^### ' "$fixture/archive.md")" "$label recovery archives once"
+  assert_equal 2 "$(grep -c '^### ' "$fixture/archive.md")" "$label recovery archives once"
+  assert_file_contains "$fixture/archive.md" 'Preserve this manually archived history.' "$label adoption preserves manual history"
   "$target/scripts/check-context-log-rollover.sh" "$fixture/log.md" --archive "$fixture/archive.md" --manifest "$fixture/manifest.md" --quiet
   assert_files_equal "$fixture/project-log-before.md" "$target/agent-vault/context-log.md" "$label leaves project-owned log unchanged"
 }

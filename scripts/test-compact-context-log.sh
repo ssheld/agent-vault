@@ -92,6 +92,53 @@ make_log() {
 EOF
 }
 
+# Manual rollovers can have a live pointer and archive but no compactor manifest.
+# Preview is safe; a write needs an explicit adoption acknowledgement.
+for manifest_kind in absent empty header; do
+  d="$tmp_root/manual-adoption-$manifest_kind"
+  mkdir -p "$d"
+  make_log "$d/log.md"
+  awk '/^## Current Snapshot$/ { print; print "- Context-log rollover: `manual-history` — boundary: through earlier work"; next } { print }' \
+    "$d/log.md" >"$d/log.next" && mv "$d/log.next" "$d/log.md"
+  printf '# Context Log Archive\n\n### 2026-05-01 09:00 local - bootstrap - earlier work\n- Previously archived by hand.\n' >"$d/archive.md"
+  case "$manifest_kind" in
+    empty) : >"$d/manifest.md" ;;
+    header) printf '# Context Log Rollover Manifest\n' >"$d/manifest.md" ;;
+  esac
+  cp "$d/log.md" "$d/log.before"
+  cp "$d/archive.md" "$d/archive.before"
+  adoption_args=("$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" --require-top-entry 'rollover session')
+  run_compact "${adoption_args[@]}"
+  assert_rc 3 "$COMPACT_RC" "$manifest_kind manual pointer requires an adoption decision"
+  assert_contains "$COMPACT_OUT" 'has no rollover records' 'adoption has a distinct diagnostic'
+  assert_contains "$COMPACT_OUT" '--adopt-manual-rollover' 'diagnostic names the adoption opt-in'
+  run_compact "${adoption_args[@]}" --dry-run
+  assert_rc 0 "$COMPACT_RC" 'manual adoption can be previewed without opting in'
+  assert_contains "$COMPACT_OUT" 'kept 2, archived 3' 'manual adoption preview produces a plan'
+  assert_contains "$COMPACT_OUT" 'Preview only' 'preview does not imply permission to write'
+  run_compact "${adoption_args[@]}" --adopt-manual-rollover --keep 99
+  assert_rc 0 "$COMPACT_RC" 'adoption no-op does not seed a fictional rollover'
+  cmp -s "$d/log.md" "$d/log.before" || fail 'manual adoption preview/no-op changed the log'
+  cmp -s "$d/archive.md" "$d/archive.before" || fail 'manual adoption preview/no-op changed the archive'
+  case "$manifest_kind" in
+    absent) assert_not_exists "$d/manifest.md" 'adoption preview/no-op must not create a manifest' ;;
+    empty) [[ ! -s "$d/manifest.md" ]] || fail 'adoption preview/no-op changed empty manifest' ;;
+    header) [[ "$(cat "$d/manifest.md")" == '# Context Log Rollover Manifest' ]] || fail 'adoption preview/no-op changed manifest header' ;;
+  esac
+  [[ -z "$(find "$d" -name '.agent-vault-rollover-*' -print)" ]] || fail 'adoption preview/no-op left recovery artifacts'
+  run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" --adopt-manual-rollover
+  assert_rc 1 "$COMPACT_RC" 'adoption does not bypass the session-entry gate'
+  run_compact "${adoption_args[@]}" --adopt-manual-rollover --rollover-id first-automated
+  assert_rc 0 "$COMPACT_RC" 'explicit manual adoption succeeds'
+  assert_file_contains "$d/log.md" first-automated 'adoption replaces the manual pointer'
+  assert_file_contains "$d/archive.md" 'Previously archived by hand.' 'adoption preserves manual history'
+  [[ "$(count_entries "$d/archive.md")" == 4 ]] || fail 'adoption lost or duplicated archive entries'
+  [[ "$(grep -c '^## rollover:' "$d/manifest.md")" == 1 ]] || fail 'adoption must create only the current rollover record'
+  "$checker" "$d/log.md" --archive "$d/archive.md" --manifest "$d/manifest.md" --quiet
+  run_compact "${adoption_args[@]}" --adopt-manual-rollover
+  assert_rc 2 "$COMPACT_RC" 'adoption opt-in is only valid for a pointer with no manifest records'
+done
+
 # --- 1. Happy path: keep 2 of 5, result passes the checker ----------------
 d="$tmp_root/happy"
 mkdir -p "$d/archive"
@@ -965,6 +1012,21 @@ run_compact "$d/log.md" --recover
 assert_rc 0 "$COMPACT_RC" "retry interrupted recovery"
 assert_outputs "$d/expected" 'interrupted recovery bytes'
 
+# Adoption is a generation decision only; recovery must retain its original
+# intent and require no adoption flag after an interrupted first automated run.
+prepare_recovery_case interrupted-manual-adoption true
+awk '/^## Current Snapshot$/ { print; print "- Context-log rollover: `manual-history` — boundary: through earlier work"; next } { print }' \
+  "$d/log.md" >"$d/log.next" && mv "$d/log.next" "$d/log.md"
+run_fault after "$d/archive.md" "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" \
+  --rollover-id frozen-id --boundary 'frozen boundary' --anchors 'older work; initial project setup' \
+  --require-top-entry 'rollover session' --adopt-manual-rollover
+assert_rc 3 "$COMPACT_RC" 'interrupted manual adoption retains a recoverable record'
+run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" --adopt-manual-rollover --dry-run
+assert_rc 3 "$COMPACT_RC" 'adoption preview cannot bypass a pending record'
+run_compact "$d/log.md" --recover
+assert_rc 0 "$COMPACT_RC" 'manual adoption recovers without generation options'
+assert_outputs "$d/expected" 'manual adoption recovery preserves original replacement bytes'
+
 # Committed-state cleanup must never replay over later user edits.
 real_rm="$(command -v rm)"
 cat >"$fault_bin/rm" <<'EOF'
@@ -987,6 +1049,10 @@ run_compact "$d/log.md" --recover
 assert_rc 0 "$COMPACT_RC" 'committed cleanup succeeds after user edit'
 assert_outputs "$d/edited" 'committed cleanup never replays output bytes'
 assert_no_transaction_artifacts 'committed cleanup removes metadata'
+run_compact "$d/log.md" --recover
+assert_rc 0 "$COMPACT_RC" 'second committed cleanup recovery is a no-op'
+assert_outputs "$d/edited" 'repeated committed cleanup preserves later edits'
+assert_no_transaction_artifacts 'repeated committed cleanup leaves no artifacts'
 # The rm wrapper is no longer needed; do not affect later fault fixtures.
 rm "$fault_bin/rm"
 
@@ -1029,6 +1095,24 @@ for damage in missing-payload altered-payload version truncated extra-field outs
 done
 assert_file_contains "$tmp_root/precious/archive.md" keep 'untrusted staging reference is never cleaned'
 
+# stat emits unpadded octal modes (0, 4, 40) for low permissions. Exercise the
+# parser without elevated privileges: a syntactically valid mode must reach the
+# independent stage-permission check, not be rejected as a malformed record.
+for recorded_mode in 0 4 40 888 00000; do
+  prepare_recovery_case "record-mode-$recorded_mode"
+  fault_recovery_case before "$d/archive.md"
+  read_test_record
+  record[7]="$recorded_mode"
+  printf '%s\0' "${record[@]}" >"$d/.agent-vault-rollover-log.md/record"
+  run_compact "$d/log.md" --recover
+  assert_rc 3 "$COMPACT_RC" 'mode fixture refuses without changing actual permissions'
+  case "$recorded_mode" in
+    0 | 4 | 40) assert_contains "$COMPACT_OUT" 'staged permissions changed' 'unpadded octal mode parses successfully' ;;
+    *) assert_contains "$COMPACT_OUT" 'invalid destination record' 'non-octal or oversized mode is rejected' ;;
+  esac
+  assert_outputs "$d/before" 'mode validation never changes output bytes'
+done
+
 # Remove just the journal to model cleanup of ignored state (or an old helper
 # with no journal). In both partial states, fallback must refuse, not resume.
 for role in archive manifest; do
@@ -1044,7 +1128,35 @@ for role in archive manifest; do
     assert_contains "$COMPACT_OUT" 'reconcile manually' 'missing-record diagnostic'
     assert_outputs "$d/partial" 'missing-record fallback writes nothing'
   done
+  run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" \
+    --require-top-entry 'rollover session' --adopt-manual-rollover --dry-run
+  assert_rc 3 "$COMPACT_RC" 'adoption preview cannot bypass partial-state overlap'
+  assert_outputs "$d/partial" 'adoption leaves partial-state outputs untouched'
 done
+
+# An empty journal still signals an unknown operation: newly supplied paths
+# cannot prove that the ORIGINAL destinations are pristine.
+prepare_recovery_case empty-journal-changed-targets
+fault_recovery_case after "$d/archive.md"
+rm "$d/.agent-vault-rollover-log.md/record"
+snapshot_outputs "$d/partial"
+run_compact "$d/log.md" --keep 2 --archive "$d/new-archive.md" --manifest "$d/new-manifest.md" \
+  --require-top-entry 'rollover session' --dry-run
+assert_rc 3 "$COMPACT_RC" 'empty journal must not trust changed destination arguments'
+assert_contains "$COMPACT_OUT" 'original archive/manifest paths are unknown' 'incomplete-record diagnostic explains the missing evidence'
+assert_outputs "$d/partial" 'empty journal preserves the original partial operation'
+# Demonstrate why checking only the supplied destinations is insufficient: with
+# the empty marker moved aside, those fresh paths pass the missing-record floor.
+mv "$d/.agent-vault-rollover-log.md" "$d/saved-empty-journal"
+run_compact "$d/log.md" --keep 2 --archive "$d/new-archive.md" --manifest "$d/new-manifest.md" \
+  --require-top-entry 'rollover session' --dry-run
+assert_rc 0 "$COMPACT_RC" 'wrong-destination floor alone cannot detect the old partial archive'
+run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" \
+  --require-top-entry 'rollover session' --dry-run
+assert_rc 3 "$COMPACT_RC" 'original destinations still expose the partial archive'
+mv "$d/saved-empty-journal" "$d/.agent-vault-rollover-log.md"
+assert_outputs "$d/partial" 'diagnostic counterexample changes no output bytes'
+assert_not_exists "$d/new-archive.md" 'counterexample preview does not create another archive'
 
 # Last/single-entry overlap exercises the EOF flush, not just heading transitions.
 d="$tmp_root/single-entry-overlap"
@@ -1124,6 +1236,9 @@ rm "$fault_bin/cp"
 # claim successful recovery or discard the remaining evidence automatically.
 prepare_recovery_case empty-journal
 mkdir "$d/.agent-vault-rollover-log.md"
+run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" --require-top-entry 'rollover session'
+assert_rc 3 "$COMPACT_RC" 'empty journal on pristine outputs still requires original-path confirmation'
+assert_contains "$COMPACT_OUT" 'original archive/manifest paths are unknown' 'normal empty-journal diagnostic is actionable, not a recover loop'
 run_compact "$d/log.md" --recover --dry-run
 assert_rc 3 "$COMPACT_RC" 'empty journal preview refuses to guess'
 [[ -d "$d/.agent-vault-rollover-log.md" ]] || fail 'dry-run removed empty journal'
@@ -1162,6 +1277,17 @@ run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manife
 rm "$d/manifest.md"
 run_compact "$d/log.md" --keep 99 --archive "$d/archive.md" --manifest "$d/manifest.md"
 assert_rc 3 "$COMPACT_RC" 'missing manifest with a live pointer refuses before no-op'
+
+# Adoption cannot discard an existing inconsistent manifest, even during preview.
+cp "$d/expected/manifest.md" "$d/manifest.md"
+for preview in false true; do
+  adoption_args=("$d/log.md" --keep 1 --archive "$d/archive.md" --manifest "$d/manifest.md" --adopt-manual-rollover --require-top-entry 'rollover session')
+  [[ "$preview" != true ]] || adoption_args+=(--dry-run)
+  run_compact "${adoption_args[@]}"
+  assert_rc 3 "$COMPACT_RC" 'adoption does not bypass mismatched existing pointer/manifest'
+done
+run_compact "$d/log.md" --recover --adopt-manual-rollover
+assert_rc 2 "$COMPACT_RC" 'recovery rejects adoption generation options'
 
 d="$tmp_root/private-dry-run"
 mkdir -p "$d"

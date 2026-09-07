@@ -60,6 +60,10 @@ Options:
                              header carries a frontmatter "covers:" field or a
                              relocation manifest this tool cannot keep in sync.
                              You must then update that header by hand.
+  --adopt-manual-rollover     Start the first manifest for a verified manual rollover
+                             pointer with no manifest records. Does not bypass
+                             overlap checks, pending recovery, or session gates.
+                             Remove this one-time option after adoption.
   --dry-run                  Build and self-validate, print a summary, write nothing.
   --recover                  Finish the recorded operation without generation options.
   --quiet                    Print only on failure / a one-line success.
@@ -101,6 +105,7 @@ anchors=""
 require_top_entry=""
 allow_missing_top_entry="false"
 allow_stale_archive_metadata="false"
+adopt_manual_rollover="false"
 dry_run="false"
 quiet="false"
 recover="false"
@@ -108,7 +113,7 @@ generation_options="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --keep | --archive | --manifest | --rollover-id | --boundary | --anchors | --require-top-entry | --allow-missing-top-entry | --allow-stale-archive-metadata)
+    --keep | --archive | --manifest | --rollover-id | --boundary | --anchors | --require-top-entry | --allow-missing-top-entry | --allow-stale-archive-metadata | --adopt-manual-rollover)
       generation_options="true"
       ;;
   esac
@@ -158,6 +163,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-stale-archive-metadata)
       allow_stale_archive_metadata="true"
+      shift
+      ;;
+    --adopt-manual-rollover)
+      adopt_manual_rollover="true"
       shift
       ;;
     --dry-run)
@@ -429,13 +438,17 @@ write_record() {
   mv -f -- "$journal/record.next" "$journal/record"
 }
 
+incomplete_record() {
+  pending "incomplete transaction record: $journal; original archive/manifest paths are unknown. Stop the original writer and children, preserve recovery data, and inspect the ORIGINAL destinations manually. Only after confirming/reconciling those outputs may rmdir remove a confirmed-empty transaction directory."
+}
+
 read_record() {
   local field="" fields=() i offset parent stage_parent stage_name count
   [[ ! -L "$journal" && -d "$journal" && -O "$journal" ]] || pending "unsafe transaction directory: $journal"
   # Empty directories can mean interrupted setup/cleanup OR a deleted record.
   # Without the destinations/fingerprints, none of these proves a safe no-op.
   if [[ ! -e "$journal/record" && ! -L "$journal/record" ]]; then
-    pending "incomplete transaction record: $journal; inspect original destinations and recovery artifacts manually"
+    incomplete_record
   fi
   [[ -f "$journal/record" && ! -L "$journal/record" && -O "$journal/record" ]] || pending "unsafe transaction record: $journal"
   validate_file "$journal/record.next" || pending "unsafe next-record path: $journal/record.next"
@@ -459,7 +472,7 @@ read_record() {
     modes[$i]="${fields[$((offset + 4))]}"
     [[ "${destinations[$i]}" == /* && "${stages[$i]}" == /* &&
       "${before_hashes[$i]}" =~ ^(absent|[0-9a-f]{64})$ &&
-      "${after_hashes[$i]}" =~ ^[0-9a-f]{64}$ && "${modes[$i]}" =~ ^[0-7]{3,4}$ ]] || pending "invalid destination record"
+      "${after_hashes[$i]}" =~ ^[0-9a-f]{64}$ && "${modes[$i]}" =~ ^[0-7]{1,4}$ ]] || pending "invalid destination record"
     parent="${destinations[$i]%/*}"
     parent="${parent:-/}"
     stage_parent="${stages[$i]%/*}"
@@ -563,7 +576,7 @@ overlapping_entry() {
 
 # Only compare the live pointer and newest record here, not the archive named
 # by that OLD record: a fresh rollover may legitimately select a new annual file.
-pointer_consistent() {
+classify_pointer() {
   awk '
     function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
     function norm(s) { gsub(/[`*]/, "", s); gsub(/[[:space:]]+/, " ", s); return trim(s) }
@@ -586,7 +599,11 @@ pointer_consistent() {
     record && /^[[:space:]]*[-*][[:space:]]*boundary[[:space:]]*:/ {
       mb = $0; sub(/^[^:]*:/, "", mb); mb = norm(mb)
     }
-    END { exit !((!pointer && !record) || (pointer && record && id != "" && pid == id && pb != "" && pb == mb)) }
+    END {
+      if (pointer && !record) print "missing-manifest"
+      else if ((!pointer && !record) || (pointer && record && id != "" && pid == id && pb != "" && pb == mb)) print "consistent"
+      else print "inconsistent"
+    }
   ' "$1" "$2"
 }
 
@@ -626,6 +643,9 @@ if [[ "$recover" == true ]]; then
   exit 0
 fi
 if [[ -e "$journal" || -L "$journal" ]]; then
+  if [[ -d "$journal" && ! -L "$journal" && -O "$journal" && ! -e "$journal/record" && ! -L "$journal/record" ]]; then
+    incomplete_record
+  fi
   printf -v recovery_command '%q %q --recover' "$0" "$context_log"
   pending "pending transaction at $journal; run $recovery_command before starting another rollover"
 fi
@@ -689,7 +709,23 @@ if [[ ! -f "$pointer_manifest" ]]; then
   pointer_manifest="$scratch/empty-manifest"
   : >"$pointer_manifest"
 fi
-pointer_consistent "$log_input" "$pointer_manifest" || pending "manifest/live pointer inconsistent; record unavailable, reconcile manually"
+pointer_state="$(classify_pointer "$log_input" "$pointer_manifest")" || die "cannot compare manifest/live pointer"
+case "$pointer_state" in
+  consistent)
+    [[ "$adopt_manual_rollover" == false ]] || die "--adopt-manual-rollover requires a live rollover pointer and no manifest records; remove this one-time option after adoption"
+    ;;
+  missing-manifest)
+    adoption_message="manifest $manifest_file has no rollover records, but $context_log has a rollover pointer. This may be manual history, a missing/rotated manifest, or the wrong --manifest path. Use the existing manifest or restore it; for verified manual history, use --adopt-manual-rollover (preview with --dry-run)."
+    if [[ "$adopt_manual_rollover" == true ]]; then
+      echo "Adopting manual history: the next write-producing rollover will create the first manifest record; previous manual records are not reconstructed." >&2
+    elif [[ "$dry_run" == true ]]; then
+      echo "Preview only: $adoption_message No adoption or output changes are performed." >&2
+    else
+      pending "$adoption_message"
+    fi
+    ;;
+  *) pending "manifest/live pointer inconsistent; record unavailable, reconcile manually" ;;
+esac
 
 mapfile -t heading_lines < <(entry_heading_lines "$log_input")
 total_entries="${#heading_lines[@]}"
