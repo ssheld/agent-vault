@@ -115,8 +115,24 @@ Any finding prevents "check passed". Usage errors, explicitly named missing
 files, and manifest/archive parser execution or read errors exit 2 in either
 mode, including --quiet. Partial parser output is never accepted as success.
 
-Rule liveness is a substring match over unfiltered rules files, including their
-comments and fenced examples (follow-up #158). Name the rule with distinctive text.
+Rule liveness is a case-sensitive literal substring match on eligible physical
+lines in rules sources. Prose, headings, bullets, and ordinary inline code count.
+Fenced examples and four-space/tab-indented lines do not. Name code-only rules
+with a descriptive prose heading outside the example, and reference that text.
+Rules fences also recognize repeated quote (>) and list (-, +, *, 1., 1)) prefixes;
+closers must retain the quote prefixes/list content indents and normal fence
+closing rules. Container ends do not implicitly close fences.
+Rules comments can start anywhere on a non-code line. Only text before the first
+<!-- is eligible; comment contents and the whole closing-line suffix are excluded.
+Comment state continues across lines, including paragraph-interrupting lists.
+This is conservative filtering, not full Markdown parsing: literal/escaped HTML
+comment markers also participate. Use entity spelling when describing a marker.
+Delimiter mentions elsewhere in prose do not invalidate a complete source.
+Every resolved rules source is scanned when a reference needs checking. An
+unterminated fence/comment discards that source's matches and is a finding even
+if another source matches. Unmatched references are unverifiable when any source
+is incomplete; otherwise they are reported as not found. Rules read/parser
+errors exit 2, even after another source matched. Unused rules need no scan.
 The archive defaults to "<manifest-dir>/lessons-archive.md", including when
 the final --archive value is "". Repeated --archive flags select the last value,
 but every nonempty supplied archive path must exist.
@@ -213,14 +229,17 @@ if [[ -f "$default_rules_file" ]]; then
   rules_files+=("$default_rules_file")
 fi
 
-# Empty explicit arguments are accepted for compatibility, but do not provide
-# a source to search. An existing empty file does provide a source.
-rules_source_available="false"
+# Resolve once and deduplicate identical paths, retaining existing empty files.
+# A later read failure must not turn an already resolved source into "missing".
+resolved_rules=()
+declare -A SEEN_SOURCE=()
 for rule_src in "${rules_files[@]:-}"; do
-  if [[ -n "$rule_src" && -f "$rule_src" ]]; then
-    rules_source_available="true"
-    break
-  fi
+  [[ -n "$rule_src" ]] || continue
+  source_dir="$(cd "$(dirname "$rule_src")" && pwd -P)" || die "could not resolve rules source: $rule_src"
+  rule_src="${source_dir%/}/$(basename "$rule_src")"
+  [[ -z "${SEEN_SOURCE[$rule_src]:-}" ]] || continue
+  SEEN_SOURCE[$rule_src]=true
+  resolved_rules+=("$rule_src")
 done
 
 findings=()
@@ -228,14 +247,21 @@ if [[ -z "$archive_file" ]]; then
   findings+=("archive checks skipped: no archive resolved (expected \"$manifest_dir/lessons-archive.md\"; supply --archive <file>)")
 fi
 
-# One standalone parser for both inputs keeps block precedence and delimiter
-# rules identical. Events distinguish headings from user-supplied field names:
+# One standalone parser shares fence rules across all inputs. Rules sources
+# additionally filter inline comments and recognize container-prefixed fences. Events distinguish headings from user-supplied field names:
 #   record <number> key <value> | field <number> <name> <value>
 #   lesson 0 heading <value> | count <number> | unclosed <opening-line>
-#   unclosed_comment <opening-line>
+#   unclosed_comment <opening-line> | matched <reference-id>
 # All fields are tab-separated. Only the final value can contain tabs.
 parse_lessons_input() {
-  awk -v input_kind="$1" "$markdown_fences"'
+  LESSONS_RULE_REFERENCES="${reference_file:-}" awk -v input_kind="$1" "$markdown_fences"'
+    BEGIN {
+      if (input_kind == "rules") {
+        path = ENVIRON["LESSONS_RULE_REFERENCES"]
+        while ((status = (getline needle < path)) > 0) needles[++needle_count] = needle
+        if (status < 0 || close(path) != 0) exit 2
+      }
+    }
     function strip(s) {
       sub(/^[[:space:]]+/, "", s)
       sub(/[[:space:]]+$/, "", s)
@@ -251,8 +277,94 @@ parse_lessons_input() {
       # HTML blocks end with the whole physical closing line, including suffixes.
       return 1
     }
+    # Only delimiter recognition expands tabs. Matching uses original bytes.
+    function expanded(line, out, i, ch) {
+      out = ""
+      for (i = 1; i <= length(line); i++) {
+        ch = substr(line, i, 1)
+        if (ch == "\t") {
+          do { out = out " " } while (length(out) % 4 != 0)
+        } else out = out ch
+      }
+      return out
+    }
+    # Bounded container syntax: repeated quote/list prefixes. Remember each
+    # list content indent, so a deeply indented or sibling fence cannot close
+    # an earlier block. Container ends never implicitly close a fence here.
+    function rules_fenced(line, candidate, i, width, prefix, marker) {
+      candidate = expanded(line)
+      if (fence_marker != "") {
+        for (i = 1; i <= container_count; i++) {
+          if (container[i] == ">") {
+            if (!match(candidate, /^ ? ? ?> ?/)) return 1
+            candidate = substr(candidate, RLENGTH + 1)
+          } else {
+            width = container[i]
+            prefix = substr(candidate, 1, width)
+            if (length(prefix) != width || prefix !~ /^ *$/) return 1
+            candidate = substr(candidate, width + 1)
+          }
+        }
+        return fenced(candidate)
+      }
+      container_count = 0
+      while (1) {
+        if (match(candidate, /^ ? ? ?> ?/)) {
+          container[++container_count] = ">"
+          candidate = substr(candidate, RLENGTH + 1)
+        } else if (match(candidate, /^ ? ? ?([-+*]|[0-9][0-9]*[.)]) /)) {
+          width = RLENGTH
+          marker = substr(candidate, 1, width)
+          sub(/^ */, "", marker)
+          if (marker ~ /^[0-9]/ && length(marker) > 11) break
+          # One to four spaces after a list marker establish its content indent.
+          prefix = substr(candidate, width + 1)
+          if (match(prefix, /^ {1,3}([^ ]|$)/)) {
+            while (substr(candidate, width + 1, 1) == " ") width++
+          }
+          container[++container_count] = width
+          candidate = substr(candidate, width + 1)
+        } else break
+      }
+      return fenced(candidate)
+    }
+    # Conservative rules-only comment filtering, including inline openers.
+    # Keep only the prefix before the first comment, never join fragments.
+    # Still inspect discarded suffixes for comments continuing onto later lines.
+    function rules_text(line, candidate, rest, pos) {
+      candidate = in_comment ? "" : line
+      rest = line
+      while (length(rest)) {
+        if (in_comment) {
+          pos = index(rest, "-->")
+          if (!pos) break
+          in_comment = 0
+          rest = substr(rest, pos + 3)
+        } else {
+          pos = index(rest, "<!--")
+          if (!pos) break
+          if (candidate == line) candidate = substr(line, 1, pos - 1)
+          in_comment = 1
+          comment_line = NR
+          rest = substr(rest, pos + 4)
+        }
+      }
+      return candidate
+    }
+    function match_rules(line, id) {
+      for (id = 1; id <= needle_count; id++) {
+        if (index(line, needles[id])) matched[id] = 1
+      }
+    }
     {
       sub(/\r$/, "")
+      if (input_kind == "rules") {
+        if (in_comment) { rules_text($0); next }
+        if (rules_fenced($0)) next
+        if ($0 ~ /^(    | *\t)/) next
+        match_rules(rules_text($0))
+        next
+      }
       # An active block owns its contents; neither parser can start the other.
       if (in_comment) {
         commented($0)
@@ -289,6 +401,11 @@ parse_lessons_input() {
       }
     }
     END {
+      if (input_kind == "rules") {
+        for (id = 1; id <= needle_count; id++) {
+          if (matched[id]) printf "matched\t%d\n", id
+        }
+      }
       if (input_kind == "manifest") printf "count\t%d\n", rec + 0
       if (fence_marker != "") printf "unclosed\t%d\n", fence_line
       if (in_comment) printf "unclosed_comment\t%d\n", comment_line
@@ -347,17 +464,23 @@ while IFS=$'\t' read -r event rec field value; do
   esac
 done <<<"$manifest_output"
 
-# A rule reference (covered_by / quick_rule) is "live" if it appears in any
-# resolved rules file.
-rule_is_live() {
-  local needle="$1" src
-  for src in "${rules_files[@]:-}"; do
-    [[ -n "$src" && -f "$src" ]] || continue
-    if grep -Fq -- "$needle" "$src"; then
-      return 0
-    fi
-  done
-  return 1
+# Defer liveness until record validation has selected the applicable references.
+declare -A REFERENCE_ID=()
+declare -A EVENT_REFERENCE=()
+declare -a REFERENCES=()
+declare -A PENDING_ID=()
+declare -A PENDING_FIELD=()
+queue_reference() {
+  local record="$1" name="$2" needle="$3" id
+  id="${REFERENCE_ID[$needle]:-}"
+  if [[ -z "$id" ]]; then
+    id="${#REFERENCES[@]}"
+    REFERENCES+=("$needle")
+    REFERENCE_ID[$needle]="$id"
+    EVENT_REFERENCE[$((id + 1))]="$id"
+  fi
+  PENDING_ID[$record]="$id"
+  PENDING_FIELD[$record]="$name"
 }
 
 declare -A SEEN_KEY=()
@@ -407,11 +530,8 @@ for ((i = 1; i <= count; i++)); do
     covered="${COVERED[$i]:-}"
     if [[ -z "$covered" ]]; then
       findings+=("lesson \"$key\" is covered-by-a-named-always-on-rule but names no \"covered_by\" rule")
-    elif [[ "$rules_source_available" == "true" ]]; then
-      rule_is_live "$covered" ||
-        findings+=("lesson \"$key\" covered_by rule \"$covered\" was not found in any live rules source")
     else
-      findings+=("lesson \"$key\" covered_by liveness check skipped: no live rules source resolved (expected \"$default_rules_file\"; supply --rules <file>)")
+      queue_reference "$i" covered_by "$covered"
     fi
   elif [[ "${HAS_COVERED[$i]:-false}" == "true" && -n "${COVERED[$i]:-}" ]]; then
     findings+=("lesson \"$key\" sets covered_by but is not covered-by-a-named-always-on-rule")
@@ -423,15 +543,72 @@ for ((i = 1; i <= count; i++)); do
   if [[ "$classification" == "retained-as-quick-rule" ]]; then
     quick="${QUICK[$i]:-}"
     if [[ -n "$quick" ]]; then
-      if [[ "$rules_source_available" == "true" ]]; then
-        rule_is_live "$quick" ||
-          findings+=("lesson \"$key\" quick_rule \"$quick\" was not found in any live rules source (its retained one-line rule should still be in lessons.md)")
-      else
-        findings+=("lesson \"$key\" quick_rule liveness check skipped: no live rules source resolved (expected \"$default_rules_file\"; supply --rules <file>)")
-      fi
+      queue_reference "$i" quick_rule "$quick"
     fi
   elif [[ "${HAS_QUICK[$i]:-false}" == "true" && -n "${QUICK[$i]:-}" ]]; then
     findings+=("lesson \"$key\" sets quick_rule but is not retained-as-quick-rule")
+  fi
+done
+
+# Scan all sources, even after every needle matches. References are file data,
+# not awk assignments (which interpret backslash escapes) or program source.
+reference_file=""
+cleanup_references() {
+  [[ -z "$reference_file" ]] || rm -f -- "$reference_file"
+}
+trap cleanup_references EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+rules_complete=true
+declare -A LIVE_ID=()
+if [[ "${#REFERENCES[@]}" -gt 0 && "${#resolved_rules[@]}" -gt 0 ]]; then
+  reference_file="$(mktemp "${TMPDIR:-/tmp}/agent-vault-rule-references.XXXXXX")" || die "could not create rule reference data"
+  printf '%s\n' "${REFERENCES[@]}" >"$reference_file" || die "could not write rule reference data"
+  for rule_src in "${resolved_rules[@]}"; do
+    rules_output="$(parse_lessons_input rules "$rule_src")" || die "could not parse rules source: $rule_src"
+    source_complete=true
+    source_matches=()
+    while IFS=$'\t' read -r event id extra; do
+      case "$event" in
+        matched)
+          # Validate producer IDs against submitted references as strings.
+          [[ "$id" =~ ^[1-9][0-9]*$ && -z "$extra" ]] || die "invalid rules parser event: $rule_src"
+          [[ -n "${EVENT_REFERENCE[$id]:-}" ]] || die "invalid rules parser reference: $rule_src"
+          source_matches+=("${EVENT_REFERENCE[$id]}")
+          ;;
+        unclosed | unclosed_comment)
+          source_complete=false
+          rules_complete=false
+          block=fence
+          [[ "$event" != unclosed_comment ]] || block='HTML comment'
+          findings+=("unterminated $block in rules source: $rule_src:$id (source matches discarded)")
+          ;;
+        '') ;;
+        *) die "invalid rules parser event: $rule_src" ;;
+      esac
+    done <<<"$rules_output"
+    if [[ "$source_complete" == true ]]; then
+      for id in "${source_matches[@]}"; do LIVE_ID[$id]=true; done
+    fi
+  done
+fi
+for ((i = 1; i <= count; i++)); do
+  [[ -n "${PENDING_FIELD[$i]:-}" ]] || continue
+  field="${PENDING_FIELD[$i]}"
+  id="${PENDING_ID[$i]}"
+  key="${KEY[$i]}"
+  needle="${REFERENCES[$id]}"
+  if [[ "${#resolved_rules[@]}" -eq 0 ]]; then
+    findings+=("lesson \"$key\" $field liveness check skipped: no live rules source resolved (expected \"$default_rules_file\"; supply --rules <file>)")
+  elif [[ -n "${LIVE_ID[$id]:-}" ]]; then
+    continue
+  elif [[ "$rules_complete" != true ]]; then
+    findings+=("lesson \"$key\" $field liveness check skipped: unverifiable because a rules source is incomplete")
+  else
+    suffix=""
+    [[ "$field" != quick_rule ]] || suffix=' (its retained one-line rule should still be in lessons.md)'
+    findings+=("lesson \"$key\" $field rule \"$needle\" was not found in any live rules source$suffix")
   fi
 done
 

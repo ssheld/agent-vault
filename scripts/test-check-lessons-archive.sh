@@ -1160,4 +1160,346 @@ injected parser read failure" "$parser_manifest" "${mode_flags[@]}"
   done
 done
 
+# --- 39. Rule eligibility applies equally to both fields and all sources ---
+parser_bin="$d/bin"
+d="$tmp_root/rules eligibility"
+mk_layout "$d"
+parser_manifest="$(manifest_path "$d")"
+parser_archive="$d/agent-vault/context/archive/lessons-archive.md"
+rules="$d/agent-vault/lessons.md"
+extra_rules="$d/additional rules.md"
+mkdir -p "$d/temps"
+printf '%s\n' '### real lesson' >"$parser_archive"
+: >"$extra_rules"
+rule_needle='Never discard the recovery marker'
+write_rule_manifest() {
+  local field="$1" needle="${2:-$rule_needle}" classification=covered-by-a-named-always-on-rule
+  [[ "$field" != quick_rule ]] || classification=retained-as-quick-rule
+  printf '%s\n' '## lesson: real lesson' "- classification: $classification" "- $field: $needle" >"$parser_manifest"
+}
+# All four modes, input preservation, and reference-data cleanup on every path.
+expect_rules_case() {
+  local findings="$1" mode expected_rc required
+  shift
+  local -a mode_flags
+  cp "$parser_manifest" "$d/manifest-before"
+  cp "$parser_archive" "$d/archive-before"
+  cp "$rules" "$d/rules-before"
+  cp "$extra_rules" "$d/extra-before"
+  for mode in advisory quiet strict strict-quiet; do
+    mode_flags=()
+    expected_rc=0
+    case "$mode" in
+      quiet) mode_flags=(--quiet) ;;
+      strict | strict-quiet)
+        mode_flags=(--strict)
+        [[ "$mode" != strict-quiet ]] || mode_flags+=(--quiet)
+        [[ -z "$findings" ]] || expected_rc=1
+        ;;
+    esac
+    TMPDIR="$d/temps" expect_result "$expected_rc" "" "$parser_manifest" "${mode_flags[@]}" "$@"
+    if [[ "$mode" == quiet || ("$mode" == strict-quiet && -z "$findings") ]]; then
+      [[ -z "$result_output" ]] || {
+        echo "FAIL: noisy quiet rules check" >&2
+        exit 1
+      }
+    elif [[ -n "$findings" ]]; then
+      while IFS= read -r required; do
+        [[ "$result_output" == *"$required"* ]] || {
+          echo "FAIL: missing rules finding: $required" >&2
+          printf '%s\n' "$result_output" >&2
+          exit 1
+        }
+      done <<<"$findings"
+      reject_output 'check passed'
+    else
+      [[ "$result_output" == *'check passed:'* ]] || {
+        echo "FAIL: rules check did not pass: $*" >&2
+        printf '%s\n' "$result_output" >&2
+        exit 1
+      }
+    fi
+    if compgen -G "$d/temps/*" >/dev/null; then
+      echo 'FAIL: leaked reference data' >&2
+      exit 1
+    fi
+  done
+  cmp "$parser_manifest" "$d/manifest-before"
+  cmp "$parser_archive" "$d/archive-before"
+  cmp "$rules" "$d/rules-before"
+  cmp "$extra_rules" "$d/extra-before"
+}
+inactive_rules=(
+  $'<!--\nNever discard the recovery marker\n-->'
+  '<!-- Never discard the recovery marker -->'
+  '- inactive <!-- Never discard the recovery marker -->'
+  $'Notes <!--\nNever discard the recovery marker\n-->'
+  $'Notes <!--\n- Never discard the recovery marker\n-->'
+  $'Notes <!-- first --> <!-- second\nNever discard the recovery marker\n-->'
+  'prefix <!-- --> Never discard the recovery marker'
+  $'```md\nNever discard the recovery marker\n```'
+  $'~~~~md\nNever discard the recovery marker\n~~~\n```\n~~~~'
+  $'    Never discard the recovery marker'
+  $'\tNever discard the recovery marker'
+  $'> ```md\n> Never discard the recovery marker\n> ```'
+  $'- ```md\n  Never discard the recovery marker\n  ```'
+  $'12. ~~~md\n    Never discard the recovery marker\n    ~~~'
+  $'> - > ```md\n>   > Never discard the recovery marker\n>   > ```'
+  $'- Example:\n  ```md\n  Never discard the recovery marker\n  ```'
+)
+for reference_field in covered_by quick_rule; do
+  write_rule_manifest "$reference_field"
+  for source_text in "${inactive_rules[@]}"; do
+    for source_kind in canonical explicit; do
+      : >"$rules"
+      : >"$extra_rules"
+      selected="$rules"
+      [[ "$source_kind" != explicit ]] || selected="$extra_rules"
+      printf '%s\n' "$source_text" >"$selected"
+      expect_rules_case 'was not found in any live rules source' --rules "$extra_rules"
+      printf '%s\n' "$rule_needle" >>"$selected"
+      expect_rules_case '' --rules "$extra_rules"
+    done
+  done
+  printf '%s\n' unrelated >"$rules"
+  expect_rules_case 'was not found in any live rules source'
+  for source_text in "$rule_needle" "### $rule_needle" "- $rule_needle" \
+    "   - $rule_needle" "- Use inline code: \`$rule_needle\`" \
+    "Mention triple \`\`\` fences: $rule_needle" "Mention ~~~ fences: $rule_needle" \
+    "$rule_needle <!-- explanation -->"; do
+    printf '%s\n' "$source_text" >"$rules"
+    expect_rules_case ''
+  done
+done
+
+# --- 40. Shared delimiter rules, precedence, and literal matching bytes ---
+write_rule_manifest covered_by
+for fence_case in "${fence_cases[@]}"; do
+  IFS='|' read -r opener false_closer closer <<<"$fence_case"
+  printf '%s\n' "$opener" '<!--' "$false_closer" "$rule_needle" "$closer" >"$rules"
+  expect_rules_case 'was not found in any live rules source'
+  printf '%s\n' '<!--' "$opener" "$false_closer" '-->' "$rule_needle" >"$rules"
+  expect_rules_case ''
+done
+for ending in lf crlf no-final-newline; do
+  for reference_field in covered_by quick_rule; do
+    literal_needle=$'Keep \\n and \\t literal; tab\tquote "single\'" [.*] $() `cmd`'
+    write_rule_manifest "$reference_field" "$literal_needle"
+    printf '%s\n' "$literal_needle" >"$rules"
+    comment_line_endings "$ending" "$parser_manifest" "$parser_archive" "$rules"
+    expect_rules_case ''
+    printf '%s\n' unrelated >"$rules"
+    expect_rules_case 'was not found in any live rules source'
+  done
+done
+write_rule_manifest covered_by
+printf '%s\n' 'Never discard' 'the recovery marker' >"$rules"
+printf '%s\n' 'Never discard the <!-- -->recovery marker' >"$extra_rules"
+expect_rules_case 'was not found in any live rules source' --rules "$extra_rules"
+printf '%s' 'Never discard the ' >"$rules"
+printf '%s' 'recovery marker' >"$extra_rules"
+expect_rules_case 'was not found in any live rules source' --rules "$extra_rules"
+
+# --- 41. Every incomplete source prevents success, regardless of match order ---
+for reference_field in covered_by quick_rule; do
+  write_rule_manifest "$reference_field"
+  for opener in '<!--' 'Notes <!--' '```' '> ~~~' '- ```'; do
+    for match_position in before after; do
+      : >"$rules"
+      [[ "$match_position" != before ]] || printf '%s\n' "$rule_needle" >>"$rules"
+      printf '%s\n' "$opener" >>"$rules"
+      [[ "$match_position" != after ]] || printf '%s\n' "$rule_needle" >>"$rules"
+      : >"$extra_rules"
+      expect_rules_case 'in rules source:
+liveness check skipped: unverifiable' --rules "$extra_rules"
+      reject_output 'was not found'
+      printf '%s\n' "$rule_needle" >"$extra_rules"
+      for order in forward reverse; do
+        source_flags=(--rules "$rules" --rules "$extra_rules")
+        [[ "$order" != reverse ]] || source_flags=(--rules "$extra_rules" --rules "$rules")
+        expect_rules_case 'in rules source:' "${source_flags[@]}" --rules "$rules" --rules ''
+        expect_occurrences 1 'in rules source:'
+        reject_output 'liveness check skipped' 'was not found'
+      done
+    done
+  done
+done
+# A four-space closer or sibling list fence cannot prematurely close a block.
+for source_text in $'```\n    ```\nNever discard the recovery marker\n```' \
+  $'- ```\n- ```\nNever discard the recovery marker\n  ```'; do
+  printf '%s\n' "$source_text" >"$rules"
+  expect_rules_case 'was not found in any live rules source'
+done
+printf '%s\n' '<!--' >"$rules"
+printf '%s\n' '### other lesson' >"$parser_archive"
+expect_rules_case 'in rules source:
+manifest classifies a lesson not present in the archive'
+expect_occurrences 1 'archived lesson is not classified in the manifest'
+printf '%s\n' '### real lesson' >"$parser_archive"
+
+# --- 42. Do not scan unused sources; empty sources and repeated needles work ---
+printf '%s\n' '<!--' '# INJECT PARSER FAILURE' >"$rules"
+for record in '- classification: archival-only' '- classification: retained-as-quick-rule'; do
+  printf '%s\n' '## lesson: real lesson' "$record" >"$parser_manifest"
+  PATH="$parser_bin:$PATH" REAL_AWK="$real_awk" PARSER_CAPTURE="$d/awk-input" PARSER_FAILURE_OUTPUT=partial \
+    expect_rules_case ''
+done
+write_rule_manifest covered_by
+: >"$rules"
+expect_rules_case 'was not found in any live rules source' --rules '' --rules "$rules"
+printf '%s\n' '## lesson: second lesson' '- classification: retained-as-quick-rule' \
+  "- quick_rule: $rule_needle" >>"$parser_manifest"
+printf '%s\n' '### second lesson' >>"$parser_archive"
+printf '%s\n' "$rule_needle" >"$rules"
+expect_rules_case '' --rules "$rules" --rules "$rules"
+printf '%s\n' '### real lesson' >"$parser_archive"
+
+# --- 43. Source execution failures discard empty/partial output and clean data ---
+write_rule_manifest covered_by
+printf '%s\n' "$rule_needle" >"$extra_rules"
+for failure_output in empty partial; do
+  printf '%s\n' "$rule_needle" '# INJECT PARSER FAILURE' >"$rules"
+  for order in forward reverse; do
+    source_flags=(--rules "$rules" --rules "$extra_rules")
+    [[ "$order" != reverse ]] || source_flags=(--rules "$extra_rules" --rules "$rules")
+    for mode in advisory quiet strict strict-quiet; do
+      mode_flags=()
+      case "$mode" in
+        quiet) mode_flags=(--quiet) ;;
+        strict) mode_flags=(--strict) ;;
+        strict-quiet) mode_flags=(--strict --quiet) ;;
+      esac
+      PATH="$parser_bin:$PATH" REAL_AWK="$real_awk" PARSER_CAPTURE="$d/awk-input" PARSER_FAILURE_OUTPUT="$failure_output" \
+        TMPDIR="$d/temps" expect_result 2 "could not parse rules source: $rules
+injected parser read failure" "$parser_manifest" "${mode_flags[@]}" "${source_flags[@]}"
+      reject_output 'check passed'
+      if compgen -G "$d/temps/*" >/dev/null; then
+        echo 'FAIL: leaked error-path reference data' >&2
+        exit 1
+      fi
+    done
+  done
+done
+
+# --- 44. Read errors after discovery and malformed producer events fail closed ---
+mkdir -p "$d/lifecycle-bin"
+cat >"$d/lifecycle-bin/awk" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${2:-}" == input_kind=manifest && "${RULE_ACTION:-}" == disappear ]]; then
+  mv -- "$RULE_TARGET" "$RULE_TARGET.hidden"
+fi
+if [[ "${2:-}" == input_kind=rules ]]; then
+  case "${RULE_ACTION:-}" in
+    event)
+      printf 'matched\t%s\n' "$RULE_EVENT"
+      exit 0
+      ;;
+    interrupt)
+      : >"$RULE_READY"
+      while [[ ! -f "$RULE_RELEASE" ]]; do sleep 0.01; done
+      ;;
+  esac
+fi
+exec "$REAL_AWK" "$@"
+EOF
+chmod +x "$d/lifecycle-bin/awk"
+for reference_field in covered_by quick_rule; do
+  write_rule_manifest "$reference_field"
+  for order in forward reverse; do
+    source_flags=(--rules "$rules" --rules "$extra_rules")
+    [[ "$order" != reverse ]] || source_flags=(--rules "$extra_rules" --rules "$rules")
+    for mode in advisory quiet strict strict-quiet; do
+      printf '%s\n' "$rule_needle" >"$rules"
+      mode_flags=()
+      case "$mode" in
+        quiet) mode_flags=(--quiet) ;;
+        strict) mode_flags=(--strict) ;;
+        strict-quiet) mode_flags=(--strict --quiet) ;;
+      esac
+      PATH="$d/lifecycle-bin:$PATH" REAL_AWK="$real_awk" RULE_ACTION=disappear RULE_TARGET="$rules" \
+        TMPDIR="$d/temps" expect_result 2 "could not parse rules source: $rules" \
+        "$parser_manifest" "${mode_flags[@]}" "${source_flags[@]}"
+      mv -- "$rules.hidden" "$rules"
+      reject_output 'check passed'
+      if compgen -G "$d/temps/*" >/dev/null; then
+        echo 'FAIL: leaked read-error reference data' >&2
+        exit 1
+      fi
+    done
+  done
+done
+for invalid_id in 0 -1 2 999999999999999999999999999999 '1 extra' $'1\textra'; do
+  PATH="$d/lifecycle-bin:$PATH" REAL_AWK="$real_awk" RULE_ACTION=event RULE_EVENT="$invalid_id" \
+    TMPDIR="$d/temps" expect_result 2 'invalid rules parser' "$parser_manifest" --strict
+  reject_output 'check passed'
+done
+
+# --- 45. Private reference data is removed on a handled interruption ---
+# Synchronize at the rules producer, then signal the checker itself. This avoids
+# racing against short scans or relying on timing-only sleeps.
+python3 - "$checker" "$parser_manifest" "$d" "$real_awk" <<'PY'
+import os
+from pathlib import Path
+import signal
+import stat
+import subprocess
+import sys
+import time
+
+checker, manifest, fixture, real_awk = sys.argv[1:]
+ready = Path(fixture) / "ready"
+release = Path(fixture) / "release"
+temp_dir = Path(fixture) / "temps"
+env = dict(os.environ, PATH=str(Path(fixture) / "lifecycle-bin") + os.pathsep + os.environ["PATH"],
+           REAL_AWK=real_awk, RULE_ACTION="interrupt", RULE_READY=str(ready),
+           RULE_RELEASE=str(release), TMPDIR=str(temp_dir))
+proc = subprocess.Popen([checker, manifest, "--strict"], env=env,
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+try:
+    deadline = time.monotonic() + 10
+    while not ready.exists():
+        assert proc.poll() is None, "checker exited before interruption fixture"
+        assert time.monotonic() < deadline, "rules producer never became ready"
+        time.sleep(0.01)
+    references = list(temp_dir.iterdir())
+    assert len(references) == 1, references
+    assert stat.S_IMODE(references[0].stat().st_mode) == 0o600
+    proc.send_signal(signal.SIGTERM)
+    release.touch()
+    stdout, stderr = proc.communicate(timeout=10)
+    assert proc.returncode == 143, (proc.returncode, stdout, stderr)
+    assert not list(temp_dir.iterdir()), "reference data survived SIGTERM"
+finally:
+    release.touch()
+    if proc.poll() is None:
+        proc.kill()
+    proc.communicate()
+PY
+
+# --- 46. Seeded always-on sources retain their ordinary heading references ---
+: >"$rules"
+for source_name in lessons shared-rules coding-standards AGENTS review-policy; do
+  source_path="$repo_root/scaffold/agent-vault/$source_name.md"
+  seeded_rule="$(grep -m 1 -E '^#+ ' "$source_path")"
+  write_rule_manifest covered_by "$seeded_rule"
+  expect_rules_case '' --rules "$source_path"
+done
+
+# --- 47. Container indentation and marker boundaries preserve fence semantics ---
+write_rule_manifest covered_by
+for prefixes in '   > |>' ' - |   ' '*   |    ' '123456789) |           ' '> 1) |>    '; do
+  IFS='|' read -r opening_prefix closing_prefix <<<"$prefixes"
+  for fence in '````' '~~~~'; do
+    printf '%s\n' "$opening_prefix$fence" "$closing_prefix${fence:0:3}" \
+      "$closing_prefix$rule_needle" "$closing_prefix$fence" >"$rules"
+    expect_rules_case 'was not found in any live rules source'
+    printf '%s\n' "$rule_needle" >>"$rules"
+    expect_rules_case ''
+  done
+done
+# A ten-digit ordered marker is ordinary prose, not a supported container.
+printf '%s\n' '1234567890) ``` literal delimiter mention' "$rule_needle" >"$rules"
+expect_rules_case ''
+
 echo "lessons-archive checker regression checks passed."
