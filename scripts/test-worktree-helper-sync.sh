@@ -52,7 +52,7 @@ assert_file_contains() {
   local expected_text="$2"
   local label="$3"
 
-  if [[ -f "$path" ]] && grep -Fq "$expected_text" "$path"; then
+  if [[ -f "$path" ]] && grep -Fq -- "$expected_text" "$path"; then
     echo "PASS: $label"
     passed=$((passed + 1))
   else
@@ -181,7 +181,7 @@ assert_generated_rollover_recovery() {
   local target="$1" label="$2" fixture rc=0 ignore_rc=0 output actual_mv
   target="$(cd "$target" && pwd -P)"
   fixture="$target/rollover-fixture"
-  mkdir -p "$fixture/bin"
+  mkdir -p "$fixture/bin" "$fixture/history" "$fixture/metadata"
   cp "$target/agent-vault/context-log.md" "$fixture/project-log-before.md"
   cat >"$fixture/log.md" <<'EOF'
 # Context Log
@@ -198,10 +198,13 @@ assert_generated_rollover_recovery() {
 ### 2026-06-01 09:00 local - codex - rollover session
 - Keep this newest entry.
 
-### 2026-05-31 09:00 local - codex - archived entry
+### 2026-05-31 09:00 local - codex - fix `foo` in **setup**
 - Preserve this body exactly once.
+
+## Appendix
+- Keep this section live.
 EOF
-  cat >"$fixture/archive.md" <<'EOF'
+  cat >"$fixture/history/archive.md" <<'EOF'
 # Context Log Archive
 
 ### 2026-05-01 09:00 local - codex - prior manual entry
@@ -215,8 +218,8 @@ exec "$ROLLOVER_FIXTURE_MV" "$@"
 EOF
   chmod +x "$fixture/bin/mv"
   output="$(PATH="$fixture/bin:$PATH" ROLLOVER_FIXTURE_LOG="$fixture/log.md" ROLLOVER_FIXTURE_MV="$actual_mv" \
-    "$target/scripts/compact-context-log.sh" "$fixture/log.md" --keep 1 --archive "$fixture/archive.md" \
-    --manifest "$fixture/manifest.md" --rollover-id installed-helper --require-top-entry 'rollover session' --adopt-manual-rollover 2>&1)" || rc=$?
+    "$target/scripts/compact-context-log.sh" "$fixture/log.md" --keep 1 --archive "$fixture/history/archive.md" \
+    --manifest "$fixture/metadata/manifest.md" --rollover-id installed-helper --require-top-entry 'rollover session' --adopt-manual-rollover 2>&1)" || rc=$?
   assert_exit_code 3 "$rc" "$label installed helper preserves pending operation"
   assert_output_contains "$output" '--recover' "$label installed recovery guidance"
   git -C "$target" check-ignore -q rollover-fixture/.agent-vault-rollover-log.md/record ||
@@ -226,9 +229,13 @@ EOF
   output="$("$target/scripts/compact-context-log.sh" "$fixture/log.md" --recover 2>&1)" || rc=$?
   assert_exit_code 0 "$rc" "$label installed recovery succeeds"
   assert_file_contains "$fixture/log.md" installed-helper "$label recovery preserves ID"
-  assert_equal 2 "$(grep -c '^### ' "$fixture/archive.md")" "$label recovery archives once"
-  assert_file_contains "$fixture/archive.md" 'Preserve this manually archived history.' "$label adoption preserves manual history"
-  "$target/scripts/check-context-log-rollover.sh" "$fixture/log.md" --archive "$fixture/archive.md" --manifest "$fixture/manifest.md" --quiet
+  assert_equal 2 "$(grep -c '^### ' "$fixture/history/archive.md")" "$label recovery archives once"
+  assert_file_contains "$fixture/history/archive.md" 'Preserve this manually archived history.' "$label adoption preserves manual history"
+  assert_file_contains "$fixture/history/archive.md" 'fix `foo` in **setup**' "$label formatted archived topic"
+  assert_file_contains "$fixture/log.md" '## Appendix' "$label suffix stays live"
+  assert_file_contains "$fixture/metadata/manifest.md" '- archive_path_base: manifest' "$label marked new record"
+  assert_file_contains "$fixture/metadata/manifest.md" '- archive_file: ../history/archive.md' "$label final-relative archive path"
+  "$target/scripts/check-context-log-rollover.sh" "$fixture/log.md" --manifest "$fixture/metadata/manifest.md" --quiet
   assert_files_equal "$fixture/project-log-before.md" "$target/agent-vault/context-log.md" "$label leaves project-owned log unchanged"
 }
 

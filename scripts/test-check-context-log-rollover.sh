@@ -772,7 +772,7 @@ cat >"$tmp_root/manifest-lonely.md" <<'EOF'
 - archived: 3
 - anchors: net-of-excepted; initial project setup
 EOF
-expect_result 1 "was not found next to the manifest" \
+expect_result 1 "was not found at recorded path" \
   "$tmp_root/good-rollover-live.md" --manifest "$tmp_root/manifest-lonely.md"
 
 # A nested date-prefixed sub-heading inside an archived entry is body text: it
@@ -822,5 +822,95 @@ sed 's/$/\r/' "$tmp_root/good-rollover-live.md" >"$tmp_root/good-rollover-crlf-l
 sed 's/$/\r/' "$tmp_root/manifest-good.md" >"$tmp_root/manifest-good-crlf.md"
 expect_result 0 "passed" "$tmp_root/good-rollover-crlf-live.md" \
   --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-good-crlf.md"
+
+# Anchor normalization is symmetric, literal, case-sensitive, and line-local.
+cp "$tmp_root/context-log-2026.md" "$tmp_root/anchors-archive.md"
+printf '\n- fix `foo` in **setup**; literal_name [a.b]*; f*oo*; path\\name\n- cross-line-first\n- cross-line-second\n' >>"$tmp_root/anchors-archive.md"
+for anchor in 'fix `foo` in *setup*' 'fix   foo in setup' 'literal_name [a.b]*' 'foo' 'path\name'; do
+  ANCHOR_FIXTURE="$anchor" awk '/^- anchors:/ { print "- anchors: " ENVIRON["ANCHOR_FIXTURE"]; next } { print }' \
+    "$tmp_root/manifest-good.md" >"$tmp_root/anchors-manifest.md"
+  # Explicit overrides retain the basename guard.
+  sed 's|^- archive_file: .*|- archive_file: anchors-archive.md|' "$tmp_root/anchors-manifest.md" >"$tmp_root/anchors-next"
+  mv "$tmp_root/anchors-next" "$tmp_root/anchors-manifest.md"
+  expect_result 0 'passed' "$tmp_root/good-rollover-live.md" --archive "$tmp_root/anchors-archive.md" --manifest "$tmp_root/anchors-manifest.md"
+done
+for anchor in 'FIX foo in setup' 'cross-line-first - cross-line-second' 'literalname' '[axb]' 'not-present'; do
+  ANCHOR_FIXTURE="$anchor" awk '/^- anchors:/ { print "- anchors: " ENVIRON["ANCHOR_FIXTURE"]; next } { print }' \
+    "$tmp_root/anchors-manifest.md" >"$tmp_root/anchors-negative.md"
+  expect_result 1 'anchor not found' "$tmp_root/good-rollover-live.md" --archive "$tmp_root/anchors-archive.md" --manifest "$tmp_root/anchors-negative.md"
+done
+sed 's/^- anchors:.*/- anchors: `**`; **; /' "$tmp_root/anchors-manifest.md" >"$tmp_root/anchors-empty.md"
+expect_result 1 'no nonempty normalized anchor' "$tmp_root/good-rollover-live.md" --archive "$tmp_root/anchors-archive.md" --manifest "$tmp_root/anchors-empty.md"
+
+# Manifest-relative paths are declared, never inferred from available files.
+path_root="$tmp_root/path cases"
+mkdir -p "$path_root/metadata" "$path_root/history/nested"
+cp "$tmp_root/context-log-2026.md" "$path_root/history/nested/context-log-2026.md"
+write_path_manifest() {
+  PATH_FIXTURE="$1" awk '/^- archive_file:/ { print "- archive_file: " ENVIRON["PATH_FIXTURE"]; next } { print }' \
+    "$tmp_root/manifest-good.md" >"$path_root/metadata/manifest.md"
+  [[ "$#" -lt 2 ]] || printf '%s\n' "- archive_path_base: $2" >>"$path_root/metadata/manifest.md"
+}
+write_path_manifest '../history/nested/context-log-2026.md' manifest
+expect_result 0 'passed' "$tmp_root/good-rollover-live.md" --manifest "$path_root/metadata/manifest.md"
+(cd / && expect_result 0 'passed' "$tmp_root/good-rollover-live.md" --manifest "$path_root/metadata/manifest.md")
+cp "$path_root/history/nested/context-log-2026.md" "$path_root/metadata/context-log-2026.md"
+write_path_manifest '../missing/context-log-2026.md' manifest
+expect_result 1 'recorded path' "$tmp_root/good-rollover-live.md" --manifest "$path_root/metadata/manifest.md"
+expect_result 0 'passed' "$tmp_root/good-rollover-live.md" --manifest "$path_root/metadata/manifest.md" --archive "$path_root/history/nested/context-log-2026.md"
+write_path_manifest "$path_root/history/nested/context-log-2026.md"
+expect_result 0 'passed' "$tmp_root/good-rollover-live.md" --manifest "$path_root/metadata/manifest.md"
+write_path_manifest "$path_root/missing/context-log-2026.md"
+expect_result 1 'recorded path' "$tmp_root/good-rollover-live.md" --manifest "$path_root/metadata/manifest.md"
+for marker in '' cwd unknown; do
+  write_path_manifest '../history/nested/context-log-2026.md' "$marker"
+  expect_result 1 'archive_path_base' "$tmp_root/good-rollover-live.md" --manifest "$path_root/metadata/manifest.md"
+  expect_result 1 'archive_path_base' "$tmp_root/good-rollover-live.md" --manifest "$path_root/metadata/manifest.md" --archive "$path_root/history/nested/context-log-2026.md"
+done
+write_path_manifest '../history/nested/context-log-2026.md' manifest
+printf '%s\n' '- archive_path_base: manifest' >>"$path_root/metadata/manifest.md"
+expect_result 1 'duplicate manifest field: archive_path_base' "$tmp_root/good-rollover-live.md" --manifest "$path_root/metadata/manifest.md"
+# Shell/awk metacharacters in recorded paths are literal data, not expressions.
+odd_parent='history/space quote" back\slash [glob] $(literal)'
+mkdir -p "$path_root/$odd_parent"
+cp "$tmp_root/context-log-2026.md" "$path_root/$odd_parent/context-log-2026.md"
+write_path_manifest "../$odd_parent/context-log-2026.md" manifest
+expect_result 0 'passed' "$tmp_root/good-rollover-live.md" --manifest "$path_root/metadata/manifest.md"
+# Even when a different manifest-relative candidate exists, unmarked records
+# consistently use the legacy interpretation and explain the verified migration.
+mkdir -p "$path_root/metadata/agent-vault/context/archive"
+printf 'decoy\n' >"$path_root/metadata/agent-vault/context/archive/context-log-2026.md"
+write_path_manifest 'agent-vault/context/archive/context-log-2026.md'
+expect_result 0 'legacy archive path' "$tmp_root/good-rollover-live.md" --manifest "$path_root/metadata/manifest.md" --quiet
+expect_result 0 'archive_path_base: manifest' "$tmp_root/good-rollover-live.md" --manifest "$path_root/metadata/manifest.md" --quiet
+expect_result 0 'archive_file: context-log-2026.md' "$tmp_root/good-rollover-live.md" --manifest "$path_root/metadata/manifest.md" --quiet
+# An older writer can prepend an unmarked record while retaining marked history.
+# Only the newest record determines resolution; do not inherit an older marker.
+printf '\n## rollover: earlier-marked-record\n- archive_file: missing.md\n- archive_path_base: manifest\n' >>"$path_root/metadata/manifest.md"
+expect_result 0 'legacy archive path' "$tmp_root/good-rollover-live.md" --manifest "$path_root/metadata/manifest.md"
+
+# Automatically selected archives receive all structural checks too.
+for defect in snapshot fragment noncanonical orphan; do
+  case "$defect" in
+    snapshot)
+      sed 's/SUPERSEDED/current/' "$tmp_root/context-log-2026.md" >"$path_root/metadata/context-log-2026.md"
+      diagnostic='not labeled superseded'
+      ;;
+    fragment)
+      cp "$tmp_root/archive-header-fragment.md" "$path_root/metadata/context-log-2026.md"
+      diagnostic='above its first entry'
+      ;;
+    noncanonical)
+      cp "$tmp_root/archive-noncanonical.md" "$path_root/metadata/context-log-2026.md"
+      diagnostic='noncanonical dated'
+      ;;
+    orphan)
+      cp "$tmp_root/context-log-orphan.md" "$path_root/metadata/context-log-2026.md"
+      diagnostic='orphaned top-level'
+      ;;
+  esac
+  write_path_manifest 'context-log-2026.md' manifest
+  expect_result 1 "$diagnostic" "$tmp_root/good-rollover-live.md" --manifest "$path_root/metadata/manifest.md"
+done
 
 echo "context-log rollover checker regression checks passed."
