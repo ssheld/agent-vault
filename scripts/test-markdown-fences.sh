@@ -54,6 +54,47 @@ rollover() {
     --rollover-id "$2" --require-top-entry 'rollover session' "${@:3}"
 }
 
+# Whole-live closure is an authoring gate, including a would-be no-op and suffix.
+for marker in '`' '~'; do
+  for location in header snapshot kept moved suffix; do
+    d="$tmp_root/strict-$location-$marker"
+    mkdir "$d"
+    make_log "$d/base"
+    case "$location" in
+      header) at='^# Context Log$' ;;
+      snapshot) at='^- Active branch:' ;;
+      kept) at='^- Bookkeeping' ;;
+      moved) at='^- Implemented' ;;
+      suffix) at='never-matches' ;;
+    esac
+    FENCE_MARKER="$marker" awk -v at="$at" '
+      { print }
+      $0 ~ at { print ENVIRON["FENCE_MARKER"] ENVIRON["FENCE_MARKER"] ENVIRON["FENCE_MARKER"] "md" }
+      END { if (at == "never-matches") print "## Appendix\n" ENVIRON["FENCE_MARKER"] ENVIRON["FENCE_MARKER"] ENVIRON["FENCE_MARKER"] "\nExample through EOF." }
+    ' "$d/base" >"$d/log.md"
+    cp "$d/log.md" "$d/before"
+    run "$checker" "$d/log.md" --quiet
+    expect_rc 1
+    check test "${output#*unterminated fence in live}" != "$output"
+    rollover 1 strict --allow-stale-archive-metadata --adopt-manual-rollover --allow-missing-top-entry
+    expect_rc 1
+    check test "${output#*unterminated fence in live}" != "$output"
+    for keep in 1 99; do
+      for mode in --quiet --dry-run; do
+        rollover "$keep" strict "$mode"
+        expect_rc 1
+        check test "${output#*unterminated fence in live}" != "$output"
+        check test "${output#*opening line}" != "$output"
+        check test "${output#*bug in the rollover}" = "$output"
+        check cmp -s "$d/before" "$d/log.md"
+        check test ! -e "$d/archive.md"
+        check test ! -e "$d/manifest.md"
+        check test -z "$(find "$d" -name '.agent-vault-rollover-*' -print)"
+      done
+    done
+  done
+done
+
 # The exact #157 regression: a shorter delimiter must not expose a quoted H2.
 d="$tmp_root/mixed"
 mkdir "$d"
@@ -83,6 +124,9 @@ for role in archive manifest; do
     fi
     cp "$d/log.md" "$d/log.before"
     cp "$d/$role.md" "$d/history.before"
+    rollover 99 header-no-op --quiet
+    expect_rc 0
+    check test "${output#*Warning: unterminated fence in $role}" != "$output"
     for mode in --dry-run --quiet --allow-stale-archive-metadata; do
       rollover 1 refused "$mode"
       expect_rc 1
@@ -278,8 +322,7 @@ for placement in header snapshot kept moved archive-header archive-body manifest
   fi
 done
 
-# Interim EOF contract: a complete scan may end inside a fence. No new warning
-# policy here; only concatenations that would hide structure must refuse.
+# Live EOF closure refuses; safe historical tails warn without being rewritten.
 for location in live archive manifest; do
   d="$tmp_root/tail-$location"
   mkdir "$d"
@@ -290,37 +333,50 @@ for location in live archive manifest; do
   printf '\n```md\nHistorical example through EOF.\n' >>"$file"
   cp "$file" "$d/tail.before"
   run "$checker" "$d/log.md" --manifest "$d/manifest.md"
-  expect_rc 0
   if [[ "$location" == live ]]; then
-    # Moving this tail before existing archive entries would swallow history.
+    expect_rc 1
     rollover 1 tail-second
     expect_rc 1
-    check test "${output#*unsafe insertion}" != "$output"
+    check test "${output#*unterminated fence in live}" != "$output"
     check cmp -s "$file" "$d/tail.before"
     rollover 99 no-op
-    expect_rc 0
+    expect_rc 1
   else
+    expect_rc 0
+    check test "$(printf '%s\n' "$output" | grep -c 'Warning: unterminated fence')" = 1
+    for mode in --quiet --dry-run; do
+      rollover 99 tail-no-op "$mode"
+      expect_rc 0
+      check test "${output#*Warning: unterminated fence in $location}" != "$output"
+      rollover 1 tail-preview --dry-run "$mode"
+      expect_rc 0
+      check test "${output#*generated after-image opening line}" != "$output"
+      check cmp -s "$file" "$d/tail.before"
+    done
     rollover 1 tail-second
     expect_rc 0
-    run "$checker" "$d/log.md" --manifest "$d/manifest.md"
+    check test "${output#*Warning: unterminated fence in $location}" != "$output"
+    run "$checker" "$d/log.md" --manifest "$d/manifest.md" --quiet
     expect_rc 0
+    check test "${output#*Warning: unterminated fence in $location}" != "$output"
     awk 'show { print; exit } /^```md$/ { print; show = 1 }' "$file" >"$d/tail.after"
     awk 'show { print; exit } /^```md$/ { print; show = 1 }' "$d/tail.before" >"$d/tail.expected"
     check cmp -s "$d/tail.expected" "$d/tail.after"
   fi
 done
-# An EOF-terminated moved entry can safely become the end of a new archive.
+# Even an EOF-terminated moved entry destined for an empty archive now refuses.
 d="$tmp_root/new-archive-tail"
 mkdir "$d"
 make_log "$d/log.md"
 printf '\n~~~\nHistorical example through EOF.\n' >>"$d/log.md"
 rollover 1 tail
-expect_rc 0
-run "$checker" "$d/log.md" --manifest "$d/manifest.md"
-expect_rc 0
+expect_rc 1
+check test ! -e "$d/archive.md"
+check test ! -e "$d/manifest.md"
 
 # Quoted body bytes participate in complete-entry overlap, and fence state must
-# reset between the live log and archive even when the live appendix is unclosed.
+# reset between the live log and archive. Keep the appendix closed so this
+# fixture still exercises overlap detection, not the earlier live-closure gate.
 for body in same different; do
   d="$tmp_root/overlap-$body"
   mkdir "$d"
@@ -331,7 +387,7 @@ for body in same different; do
     sed 's/quoted-anchor-only/different quoted body/' "$d/archive.md" >"$d/archive.next"
     mv "$d/archive.next" "$d/archive.md"
   fi
-  printf '\n## Appendix\n```\nExample through EOF.\n' >>"$d/log.md"
+  printf '\n## Appendix\n```\nExample body.\n```\n' >>"$d/log.md"
   rollover 1 overlap
   if [[ "$body" == same ]]; then
     expect_rc 3
@@ -364,7 +420,7 @@ mkdir "$d"
 make_log "$d/log.md"
 rollover 2 fixture
 expect_rc 0
-for target in 'snap + 0' 'val == ""' 'tolower(line) !~ /superseded/' 'seen_entry = 1' \
+for target in 'print fence_line' 'snap + 0' 'val == ""' 'tolower(line) !~ /superseded/' 'seen_entry = 1' \
   'if (seen) { done = 1;' 'bi = index(tolower(line)' 'newest_found + 0' 'Next Prompt[' 'function normalize(s)'; do
   PATH="$tmp_root/fault:$PATH" FENCE_REAL_AWK="$real_awk" FENCE_FAIL_MATCH="$target" \
     run "$checker" "$d/log.md" --manifest "$d/manifest.md" --quiet
@@ -399,16 +455,28 @@ make_log "$d/log.md"
 PATH="$tmp_root/fault:$PATH" FENCE_REAL_AWK="$real_awk" FENCE_FAIL_MATCH=never-match-this-program \
   FENCE_REAL_MV="$real_mv" FENCE_STOP_DEST="$d/archive.md" rollover 1 recorded
 expect_rc 3
+# Author a legacy closure-only after-image in this disposable fixture. Runtime
+# recovery must not rewrite the staged payload or its recorded fingerprint.
+record=()
+while IFS= read -r -d '' field; do record+=("$field"); done <"$d/.agent-vault-rollover-log.md/record"
+payload="${record[16]}/log.md"
+printf '\n~~~md\nRecorded live example through EOF.\n' >>"$payload"
+digest="$(shasum -a 256 "$payload")"
+record[15]="${digest%% *}"
+printf '%s\0' "${record[@]}" >"$d/.agent-vault-rollover-log.md/record"
 before="$(find "$d" -type f -exec shasum -a 256 {} \; | sort)"
-for mode in --dry-run --quiet; do
-  PATH="$tmp_root/fault:$PATH" FENCE_REAL_AWK="$real_awk" FENCE_FAIL_MATCH='if (seen) { done = 1;' \
-    run "$compactor" "$d/log.md" --recover "$mode"
-  expect_rc 3
-  check test "${output#*injected fence parser failure}" != "$output"
-  check test "$(find "$d" -type f -exec shasum -a 256 {} \; | sort)" = "$before"
+for target in 'print fence_line' 'if (seen) { done = 1;'; do
+  for mode in --dry-run --quiet; do
+    PATH="$tmp_root/fault:$PATH" FENCE_REAL_AWK="$real_awk" FENCE_FAIL_MATCH="$target" \
+      run "$compactor" "$d/log.md" --recover "$mode"
+    expect_rc 3
+    check test "${output#*injected fence parser failure}" != "$output"
+    check test "$(find "$d" -type f -exec shasum -a 256 {} \; | sort)" = "$before"
+  done
 done
 run "$compactor" "$d/log.md" --recover
 expect_rc 0
+check test "${output#*Warning: unterminated fence in live}" != "$output"
 check test -z "$(find "$d" -name '.agent-vault-rollover-*' -print)"
 
 # Dynamic field values stay data when the static awk program is composed.

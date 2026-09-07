@@ -162,12 +162,35 @@ Four-space/tab-indented markers are not fences in this subset; list/blockquote
 containers and HTML-comment parsing are not added to the context-log helpers.
 Recognition tolerates CRLF without stripping carriage returns from stored bodies.
 
-For now, an unclosed fence extends to EOF with no closure warning or blanket
-refusal, including on no-ops. This is a complete parse of an EOF-terminated
-block, not a read/parser failure. Actual read/awk failures exit 2 and partial
-results must not authorize successful checking or rollover. Stricter live-log
-closure, historical-tail warnings, and additional upgrade policy remain separate
-work under [#156](https://github.com/ssheld/agent-vault/issues/156).
+An unclosed fence deterministically extends to EOF; this is a complete parse,
+not a read/parser failure. The caller applies a separate closure policy:
+
+| Operation | Unclosed live fence | Unclosed archive/manifest fence |
+| --- | --- | --- |
+| Ordinary checker | Finding, exit 1 | Warning; other findings still fail |
+| Ordinary compactor, including no-op and dry-run | Refusal, exit 1, outputs unchanged | Warning; unsafe insertion still refuses |
+| Explicit ready recovery, including dry-run | Warning for otherwise valid recorded outputs | Warning for otherwise valid recorded outputs |
+
+The live gate covers the **whole file**, including an untouched trailing suffix.
+It runs before entry counting, session gates, and no-op success. This intentional
+authoring safeguard prevents a preserved unclosed suffix from failing generated
+output validation with a misleading “bug in the rollover” message. No metadata,
+adoption, or session-gate override bypasses closure. New rollovers cannot move
+an unclosed live entry even into a previously absent archive.
+
+Historical warnings identify the source role/path and opening line and survive
+`--quiet`, including successful validation and recovery previews. Generated or
+recorded after-image line numbers are labeled as such. Each checker invocation
+reports an EOF condition once per file, not once per structural scan; a compactor
+can report it again when validating a later image. Warnings do not certify that
+the text after an opener was intended as an example, and never excuse hidden
+required records/boundaries or inconsistent pointers. Only the supplied files and
+the effective archive selected by the existing resolution rules are inspected;
+the checker does not crawl every old record's archive.
+
+Actual read/awk failures exit 2 during checking or ordinary preparation, and
+partial results must not authorize success. Pending-transaction failures retain
+exit 3 and the existing recovery safeguards.
 
 ### Safe insertion around historical fences
 
@@ -179,6 +202,11 @@ These are structural-preservation checks, not optional lint: neither
 The diagnostic identifies the source and opening line; batch-relative lines are
 explicitly labeled. An existing unclosed historical tail can remain unchanged
 when the new batch/record is inserted outside it. No automatic closer is added.
+A read-only check or no-op can warn and succeed on a header-only historical file
+when no current requirement demands a visible record/entry; this does not promise
+that a later insertion will be safe. The compactor checks existing manifest EOF
+state even on no-ops without validating an old record against a newly selected
+annual archive, preserving rotation and manual-adoption behavior.
 
 Older helpers could write manifest records inside an unclosed header while
 reporting success. The corrected checker does not promote those fenced records
@@ -415,10 +443,26 @@ the rollover checker and compactor together. A ready transaction is checked
 using its entire effective after-image set under the corrected delimiter rules.
 If fences hide the required manifest record or cited archive boundaries, or a
 parser fails, recovery refuses with exit 3 before further writes, retaining the
-journal and stages. An otherwise valid EOF-terminated
-historical tail alone does not block recovery. Never edit staged payloads or
-their recorded fingerprints to force validation, and do not delete recovery
-data to enable a fresh rollover. Committed cleanup remains cleanup-only.
+journal and stages. An otherwise valid EOF-terminated historical tail warns
+but does not block recovery.
+
+**Recovery completes recorded bytes; it does not author a new rollover.** Explicit
+`--recover` also downgrades only the live EOF-closure finding to a warning, using
+the same policy before replacement **and after installation**. It does not trust
+an older helper's validation or infer its version: all current structural checks
+and recorded fingerprints still apply. An unclosed before-image alone does not
+invalidate a sound after-image. This works for staged/partially installed results
+and when all outputs are installed but the journal is still `ready`.
+
+A successful recovery can therefore leave a live log that ordinary checking
+rejects. After the transaction and cleanup complete, inspect and explicitly close
+the intended live fence as a separate edit, then run the ordinary checker and
+preview the next rollover. No historical-helper download/downgrade is needed.
+Committed cleanup does not validate later user edits, including new open fences;
+recovery with no record only reports that absence and does not validate documents.
+
+Never edit staged payloads or their recorded fingerprints to force validation,
+and do not delete recovery data to enable a fresh rollover.
 
 ```bash
 scripts/compact-context-log.sh agent-vault/context-log.md --recover --dry-run
@@ -429,8 +473,9 @@ Recovery takes the original destinations and validated replacement bytes from th
 record. Do not pass `--keep`, destination paths, or other generation options with
 `--recover`. Before any recovery write, every output must match its recorded
 before/after fingerprint and expected type/permissions; the complete effective
-result must pass the checker. Already-installed files are skipped, unchanged
-originals are replaced, and diverged files or damaged/missing required stages
+result must pass the checker under the recovery-only closure policy above.
+Already-installed files are skipped, unchanged originals are replaced, and
+diverged files or damaged/missing required stages
 cause refusal without recovery writes. Fix the underlying IO problem before
 retrying recovery. Interrupted recovery is itself retryable.
 
@@ -708,7 +753,7 @@ commit):
   over-budget bucket/file (silence with `AGENT_VAULT_SKIP_MEMORY_BUDGET=1`);
 - `scripts/check-context-log-rollover.sh` when `agent-vault/context-log.md` is
   staged -- surfaces a stale duplicate `## Current Snapshot`, leftover conflict
-  markers, or an empty handoff pointer (silence with
+  markers, an empty handoff pointer, or an unclosed live fence (silence with
   `AGENT_VAULT_SKIP_ROLLOVER_CHECK=1`).
 
 The budget warning materializes the staged index to measure the full `@`-chain;

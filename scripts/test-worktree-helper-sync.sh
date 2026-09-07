@@ -272,6 +272,24 @@ EOF
   assert_file_contains "$fixture/metadata/manifest.md" '- archive_path_base: manifest' "$label marked new record"
   assert_file_contains "$fixture/metadata/manifest.md" '- archive_file: ../history/archive.md' "$label final-relative archive path"
   (cd "$fixture" && "$standalone/check-context-log-rollover.sh" "$fixture/log.md" --manifest "$fixture/metadata/manifest.md" --quiet)
+  printf '\n~~~md\nHistorical example through EOF.\n' >>"$fixture/history/archive.md"
+  rc=0
+  output="$(cd "$fixture" && "$standalone/check-context-log-rollover.sh" "$fixture/log.md" --manifest "$fixture/metadata/manifest.md" --quiet 2>&1)" || rc=$?
+  assert_exit_code 0 "$rc" "$label historical EOF is advisory"
+  assert_output_contains "$output" 'Warning: unterminated fence in archive' "$label installed checker warns under quiet"
+  rc=0
+  output="$(cd "$fixture" && "$standalone/compact-context-log.sh" "$fixture/log.md" --keep 99 --archive "$fixture/history/archive.md" --manifest "$fixture/metadata/manifest.md" --quiet 2>&1)" || rc=$?
+  assert_exit_code 0 "$rc" "$label installed no-op tolerates historical tail"
+  assert_output_contains "$output" 'Warning: unterminated fence in archive' "$label installed compactor does not swallow warnings"
+  printf '\n~~~md\nUnclosed live suffix.\n' >>"$fixture/log.md"
+  rc=0
+  output="$(cd "$fixture" && "$standalone/check-context-log-rollover.sh" "$fixture/log.md" --quiet 2>&1)" || rc=$?
+  assert_exit_code 1 "$rc" "$label installed checker requires live closure"
+  assert_output_contains "$output" '- unterminated fence in live' "$label closure is a finding"
+  rc=0
+  output="$(cd "$fixture" && "$standalone/compact-context-log.sh" "$fixture/log.md" --keep 99 --archive "$fixture/history/archive.md" --manifest "$fixture/metadata/manifest.md" --dry-run --quiet 2>&1)" || rc=$?
+  assert_exit_code 1 "$rc" "$label installed no-op preview requires live closure"
+  assert_output_contains "$output" 'unterminated fence in live' "$label installed strict diagnostic"
   cat >"$fixture/lessons-archive.md" <<'EOF'
 # Lessons Archive
 ````md
