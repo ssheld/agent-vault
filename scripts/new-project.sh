@@ -135,6 +135,7 @@ MANAGED_GITIGNORE_BLOCKS=(
   $'# Plugin data (can contain API keys or large caches)\n.obsidian/plugins/*/data.json'
   $'# Agent Vault -- local sync and migration backups (ignore these)\n/agent-vault/context/updates/'
   $'# Agent Vault -- local worktrees (ignore these)\n/.worktrees/'
+  $'# Agent Vault -- rollover recovery data (recover before cleaning)\n.agent-vault-rollover-*/'
 )
 
 ROOT_AGENTS_MARKER="<!-- agent-vault-managed: root-wrapper; file=AGENTS.md -->"
