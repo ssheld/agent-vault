@@ -37,6 +37,7 @@ Validates per-lesson classifications in a lessons-archive manifest. Checks:
   - every "## lesson:" record declares a classification, and it is one of:
       retained-as-quick-rule | covered-by-a-named-always-on-rule | archival-only
   - no duplicate lesson keys; only the "## lesson:" heading supplies the key
+  - classification, covered_by, and quick_rule each appear at most once per record
   - a covered-by-a-named-always-on-rule record names a non-empty "covered_by"
     rule that still appears in a live always-on file
   - an optional "quick_rule" on a retained-as-quick-rule record likewise still
@@ -48,9 +49,14 @@ With --strict (completeness):
   - every archived lesson (a "###" heading in the archive) has a record with an
     exactly valid classification; combined class names are invalid
 
-The flat format uses headings at the start of a line. Other level-1/level-2
-headings end a manifest record; deeper headings stay inside it. Unknown fields
-(including "key") are ignored. Both inputs ignore fenced examples before
+Manifest record and section headings use # prefixes at the start of a line.
+Other #/## sections end a record; deeper headings stay inside it. Underlined
+(setext) section headings are not supported; use #/## sections instead.
+Archive ### headings and manifest field bullets allow up to three leading
+spaces; four-space or tab-indented code cannot supply headings or fields.
+Unknown fields (including "key") are ignored. Repeated recognized fields are
+findings, and a repeated classification cannot satisfy completeness.
+Both inputs ignore fenced examples before
 interpreting headings or fields. HTML comments are not filtered; their contents
 can still affect validation. Put reference examples in fenced code blocks.
 Fences use at least three backticks or tildes, with up to three leading spaces.
@@ -58,7 +64,9 @@ A closing fence uses the same marker, at least the opening length, and only
 spaces/tabs afterward. Backtick opening info strings cannot contain backticks.
 CRLF and a missing final newline are accepted.
 The checker requires every fence to close: an unterminated fence is a finding
-with its source/opening line, and cross-file completeness checks are skipped.
+with its source/opening line. Manifest-to-archive presence checks need a complete
+archive; strict archive-to-manifest classification checks need a complete
+manifest. Known keys from the other input still support checks if it is incomplete.
 
 Missing implicit sources warn with skipped checks (exit 0) by default; a run
 with skipped checks does not report "check passed". Strict mode requires an
@@ -221,6 +229,7 @@ parse_lessons_input() {
       if (fenced($0)) next
       if (input_kind == "archive") {
         line = $0
+        sub(/^ ? ? ?/, "", line)
         sub(/[[:space:]]+$/, "", line)
         if (line ~ /^###[[:space:]]/) {
           sub(/^###[[:space:]]+/, "", line)
@@ -239,8 +248,8 @@ parse_lessons_input() {
       if ($0 ~ /^##?([[:space:]]|$)/) inrec = 0
       if (inrec) {
         line = $0
-        if (match(line, /^[[:space:]]*[-*][[:space:]]*[A-Za-z_]+[[:space:]]*:/)) {
-          sub(/^[[:space:]]*[-*][[:space:]]*/, "", line)
+        if (match(line, /^ ? ? ?[-*][[:space:]]*[A-Za-z_]+[[:space:]]*:/)) {
+          sub(/^ ? ? ?[-*][[:space:]]*/, "", line)
           ci = index(line, ":")
           printf "field\t%d\t%s\t%s\n", rec, strip(substr(line, 1, ci - 1)), strip(substr(line, ci + 1))
         }
@@ -263,6 +272,8 @@ declare -A COVERED=()
 declare -A HAS_COVERED=()
 declare -A QUICK=()
 declare -A HAS_QUICK=()
+declare -A SEEN_FIELD=()
+declare -A DUPLICATE_FIELD=()
 count=0
 while IFS=$'\t' read -r event rec field value; do
   case "$event" in
@@ -270,9 +281,19 @@ while IFS=$'\t' read -r event rec field value; do
     record) KEY[$rec]="$value" ;;
     unclosed)
       manifest_complete="false"
-      findings+=("unterminated fence in manifest: $manifest:$rec (completeness checks skipped)")
+      findings+=("unterminated fence in manifest: $manifest:$rec (archive classification completeness check skipped)")
       ;;
     field)
+      case "$field" in
+        classification | covered_by | quick_rule) ;;
+        *) continue ;;
+      esac
+      field_key="$rec:$field"
+      if [[ -n "${SEEN_FIELD[$field_key]:-}" ]]; then
+        DUPLICATE_FIELD[$field_key]="true"
+        continue
+      fi
+      SEEN_FIELD[$field_key]="true"
       case "$field" in
         classification) CLASS[$rec]="$value" ;;
         covered_by)
@@ -304,11 +325,9 @@ rule_is_live() {
 declare -A SEEN_KEY=()
 declare -A CLASSIFIED_KEY=()
 classified_count=0
-manifest_keys=()
 for ((i = 1; i <= count; i++)); do
   key="${KEY[$i]:-}"
   classification="${CLASS[$i]:-}"
-  manifest_keys+=("$key")
 
   if [[ -z "$key" ]]; then
     findings+=("manifest record $i has an empty lesson key")
@@ -319,8 +338,18 @@ for ((i = 1; i <= count; i++)); do
   fi
   SEEN_KEY[$key]="true"
 
+  duplicate_class="false"
+  for record_field in classification covered_by quick_rule; do
+    field_key="$i:$record_field"
+    if [[ -n "${DUPLICATE_FIELD[$field_key]:-}" ]]; then
+      findings+=("lesson \"$key\" repeats \"$record_field\" field")
+      [[ "$record_field" != classification ]] || duplicate_class="true"
+    fi
+  done
+
   case "$classification" in
     retained-as-quick-rule | covered-by-a-named-always-on-rule | archival-only)
+      [[ "$duplicate_class" == "false" ]] || continue
       if [[ -z "${CLASSIFIED_KEY[$key]:-}" ]]; then
         CLASSIFIED_KEY[$key]="true"
         classified_count=$((classified_count + 1))
@@ -368,8 +397,9 @@ for ((i = 1; i <= count; i++)); do
   fi
 done
 
-# Cross-file absence checks require complete parses. Keep local record findings,
-# but do not infer missing lessons from an input truncated by an open fence.
+# An absence claim requires a complete parse of the file being searched. Keys
+# already seen in the other input still support findings when that input is
+# incomplete; only its unseen suffix is unavailable.
 if [[ -n "$archive_file" ]]; then
   archive_output="$(parse_lessons_input archive "$archive_file")" || die "could not parse archive: $archive_file"
   archive_complete="true"
@@ -381,24 +411,23 @@ if [[ -n "$archive_file" ]]; then
         ;;
       unclosed)
         archive_complete="false"
-        findings+=("unterminated fence in archive: $archive_file:$rec (completeness checks skipped)")
+        findings+=("unterminated fence in archive: $archive_file:$rec (manifest lesson presence checks skipped)")
         ;;
     esac
   done <<<"$archive_output"
 
-  if [[ "$manifest_complete" == "true" && "$archive_complete" == "true" ]]; then
-    for key in "${manifest_keys[@]}"; do
-      [[ -n "$key" ]] || continue
+  if [[ "$archive_complete" == "true" ]]; then
+    for key in "${!SEEN_KEY[@]}"; do
       [[ -n "${ARCHIVE_LESSON[$key]:-}" ]] ||
         findings+=("manifest classifies a lesson not present in the archive: \"$key\"")
     done
+  fi
 
-    if [[ "$strict" == "true" ]]; then
-      for heading in "${!ARCHIVE_LESSON[@]}"; do
-        [[ -n "${CLASSIFIED_KEY[$heading]:-}" ]] ||
-          findings+=("archived lesson is not classified in the manifest: \"$heading\"")
-      done
-    fi
+  if [[ "$strict" == "true" && "$manifest_complete" == "true" ]]; then
+    for heading in "${!ARCHIVE_LESSON[@]}"; do
+      [[ -n "${CLASSIFIED_KEY[$heading]:-}" ]] ||
+        findings+=("archived lesson is not classified in the manifest: \"$heading\"")
+    done
   fi
 fi
 

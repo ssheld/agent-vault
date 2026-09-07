@@ -401,11 +401,20 @@ scripts/check-lessons-archive.sh <manifest> --rules <file> # add a live-rule sou
 scripts/check-lessons-archive.sh <manifest> --strict --archive <archive> --rules <rules>
 ```
 
-The flat manifest format uses headings at the start of a line. Only a
-`## lesson:` heading supplies a record's key; a body `- key:` field cannot change
-it. Unrecognized fields are ignored. Other level-1 and level-2 headings end the
-record, including bare `#` and `##` headings. Deeper headings stay within the
-record, and the next `## lesson:` starts a new one.
+The flat manifest format uses ATX headings (the `#` prefix) at the start of a
+line. Only a `## lesson:` heading supplies a record's key; a body `- key:` field
+cannot change it. Unrecognized fields are ignored. Other level-1 and level-2
+ATX headings end the record, including bare `#` and `##` headings. Deeper
+headings stay within the record, and the next `## lesson:` starts a new one.
+Underlined (setext) section headings are not supported; use `#`/`##` sections.
+Archive `###` headings and manifest field bullets may have zero to three
+leading spaces. Four-space or tab-indented code does not supply headings or
+fields.
+
+Each recognized field (`classification`, `covered_by`, `quick_rule`) may appear
+only once per record. Repeated fields produce a finding, with the first value
+retained for diagnostics. A repeated classification cannot count toward the
+classified total or satisfy strict completeness.
 
 Both inputs ignore fenced content before interpreting headings or fields, so
 sample records inside those fences cannot classify lessons or change a real
@@ -420,8 +429,11 @@ it. Opening info strings are allowed, but a backtick fence's info string cannot
 contain backticks. CRLF and files without a final newline are accepted.
 **The checker additionally requires closure**, although CommonMark allows a
 fence to continue to EOF. An unterminated fence produces a finding with its
-source path and opening line. Cross-file completeness checks are then skipped;
-local record validation still runs.
+source path and opening line. Only absence checks that search the incomplete
+input are skipped: manifest lesson presence needs a complete archive, while
+strict classification completeness needs a complete manifest. Known keys from
+the other input still support checks even if that input ends in an open fence.
+Local record validation also continues.
 
 The checker validates that every record declares exactly one of the three classes
 (`retained-as-quick-rule`, `covered-by-a-named-always-on-rule`, `archival-only`),
@@ -458,10 +470,11 @@ A live rules source is required for a non-empty `covered_by` or `quick_rule`
 reference on its matching classification. `archival-only` records and retained
 records with an omitted or empty `quick_rule` need no rules source. Missing
 required sources are findings, so other validation problems are still reported.
-Whenever an archive resolves and both inputs parse completely, both modes check
-that every manifest record names a lesson present in it; strict mode additionally
-checks that every archived lesson is classified. Usage errors, explicitly named
-missing files, and manifest/archive parser execution or read failures exit 2
+When the archive parses completely, both modes check that each distinct
+manifest key names a lesson present in it. When the manifest parses completely,
+strict mode additionally checks that each recognized archive heading is
+classified. Usage errors, explicitly named missing files, and manifest/archive
+parser execution or read failures exit 2
 in either mode, even with `--quiet` or another valid source available. A failed
 parser's empty or partial output cannot produce success.
 
