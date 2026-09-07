@@ -92,6 +92,200 @@ make_log() {
 EOF
 }
 
+# Formatted default anchors must validate without changing the archived bytes.
+d="$tmp_root/formatted-topics"
+mkdir -p "$d"
+make_log "$d/log.md"
+sed 's/older work/fix `foo` in **setup**/' "$d/log.md" >"$d/log.next"
+mv "$d/log.next" "$d/log.md"
+cp "$d/log.md" "$d/before"
+run_compact "$d/log.md" --keep 2 --archive "$d/history/archive.md" --manifest "$d/metadata/manifest.md" \
+  --rollover-id formatted --require-top-entry 'rollover session' --dry-run
+assert_rc 0 "$COMPACT_RC" 'formatted default anchors preview'
+cmp -s "$d/log.md" "$d/before" || fail 'formatted preview changed the log'
+assert_not_exists "$d/history" 'formatted preview creates no output parents'
+run_compact "$d/log.md" --keep 2 --archive "$d/history/archive.md" --manifest "$d/metadata/manifest.md" \
+  --rollover-id formatted --require-top-entry 'rollover session'
+assert_rc 0 "$COMPACT_RC" 'formatted default anchors'
+assert_file_contains "$d/history/archive.md" 'fix `foo` in **setup**' 'archive retains formatting'
+assert_file_contains "$d/metadata/manifest.md" '- archive_path_base: manifest' 'new record declares path base'
+assert_file_contains "$d/metadata/manifest.md" '- archive_file: ../history/archive.md' 'record is relative to final manifest'
+"$checker" "$d/log.md" --manifest "$d/metadata/manifest.md" --quiet
+# Resolution must not depend on the invocation directory or the original root.
+mv "$d" "$tmp_root/relocated project"
+d="$tmp_root/relocated project"
+(cd / && "$checker" "$d/log.md" --manifest "$d/metadata/manifest.md" --quiet)
+
+# Legacy-format records remain untouched on a no-op; a real rollover marks only
+# the new record, without rewriting retained historical records.
+d="$tmp_root/legacy-path-record"
+mkdir -p "$d"
+make_log "$d/log.md"
+run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" \
+  --rollover-id legacy --require-top-entry 'rollover session'
+assert_rc 0 "$COMPACT_RC" 'legacy record setup'
+sed -e '/^- archive_path_base:/d' -e 's|^- archive_file: .*|- archive_file: agent-vault/context/archive/archive.md|' \
+  "$d/manifest.md" >"$d/manifest.next"
+mv "$d/manifest.next" "$d/manifest.md"
+cp "$d/manifest.md" "$d/legacy-manifest"
+run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md"
+assert_rc 0 "$COMPACT_RC" 'unmarked record no-op'
+cmp -s "$d/manifest.md" "$d/legacy-manifest" || fail 'no-op migrated a legacy record'
+"$checker" "$d/log.md" --manifest "$d/manifest.md" --quiet 2>"$d/warning"
+assert_file_contains "$d/warning" 'legacy archive path' 'legacy no-op remains checkable with warning'
+run_compact "$d/log.md" --keep 1 --archive "$d/archive.md" --manifest "$d/manifest.md" \
+  --rollover-id migrated --require-top-entry 'rollover session'
+assert_rc 0 "$COMPACT_RC" 'rollover on legacy record'
+sed -n '/^## rollover: legacy$/,$p' "$d/legacy-manifest" >"$d/legacy-record"
+sed -n '/^## rollover: legacy$/,$p' "$d/manifest.md" >"$d/retained-record"
+cmp -s "$d/legacy-record" "$d/retained-record" || fail 'rollover rewrote legacy history'
+[[ "$(grep -c '^- archive_path_base: manifest$' "$d/manifest.md")" == 1 ]] || fail 'only newest record should be marked'
+"$checker" "$d/log.md" --manifest "$d/manifest.md" --quiet 2>"$d/warning"
+[[ ! -s "$d/warning" ]] || fail 'marked newest record emitted legacy warning'
+
+# Bound both selection and counting, then append the untouched suffix after
+# pointer rewriting. Exercise LF/CRLF and an unterminated final suffix line.
+for ending in lf crlf unterminated; do
+  d="$tmp_root/suffix-$ending"
+  mkdir -p "$d"
+  make_log "$d/log.md"
+  cat >"$d/suffix" <<'EOF'
+## Appendix
+- Keep this non-entry section.
+### 2026-05-01 09:00 local - example - historical sample
+- This is not a live entry.
+# Further Notes
+~~~md
+## Entries
+### 2026-05-02 09:00 local - example - fenced sample
+## Current Snapshot
+- Context-log rollover: preserve this literal example.
+~~~
+EOF
+  case "$ending" in
+    crlf)
+      sed 's/$/\r/' "$d/log.md" >"$d/log.next" && mv "$d/log.next" "$d/log.md"
+      sed 's/$/\r/' "$d/suffix" >"$d/suffix.next" && mv "$d/suffix.next" "$d/suffix"
+      ;;
+    unterminated) printf '%s' '- Final line without newline.' >>"$d/suffix" ;;
+  esac
+  cat "$d/suffix" >>"$d/log.md"
+  cp "$d/log.md" "$d/before"
+  for mode in noop preview write; do
+    suffix_args=("$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" --rollover-id suffix --require-top-entry 'rollover session' --quiet)
+    [[ "$mode" != noop ]] || suffix_args+=(--keep 5)
+    [[ "$mode" != preview ]] || suffix_args+=(--dry-run)
+    run_compact "${suffix_args[@]}"
+    assert_rc 0 "$COMPACT_RC" "$ending $mode succeeds"
+    assert_contains "$COMPACT_OUT" '1 canonical entry heading(s) outside the Entries section' "$ending $mode warns even in quiet mode"
+    assert_contains "$COMPACT_OUT" 'line(s)' "$ending $mode locates excluded headings"
+    if [[ "$mode" != write ]]; then
+      cmp -s "$d/log.md" "$d/before" || fail 'preview/no-op changed suffix'
+      assert_not_exists "$d/archive.md" 'preview/no-op created archive'
+    fi
+  done
+  suffix_line="$(awk '/^## Appendix/ { print NR; exit }' "$d/log.md")"
+  tail -n "+$suffix_line" "$d/log.md" >"$d/actual-suffix"
+  cmp -s "$d/suffix" "$d/actual-suffix" || fail "$ending suffix bytes changed"
+  assert_file_contains "$d/manifest.md" '- archived: 3' 'suffix headings do not inflate counts'
+  if grep -Fq '## Appendix' "$d/archive.md"; then fail 'appendix moved to archive'; fi
+  "$checker" "$d/log.md" --manifest "$d/manifest.md" --quiet
+done
+
+# A mid-log section used to make later entries silently invisible after bounding.
+d="$tmp_root/mid-log-notes"
+mkdir -p "$d"
+make_log "$d/log.md"
+awk '/^### 2026-05-28/ { print "## Notes"; print "" } { print }' "$d/log.md" >"$d/log.next"
+mv "$d/log.next" "$d/log.md"
+cp "$d/log.md" "$d/before"
+run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" --quiet
+assert_rc 0 "$COMPACT_RC" 'mid-log notes is a bounded no-op'
+assert_contains "$COMPACT_OUT" '3 canonical entry heading(s) outside the Entries section' 'mid-log notes warning'
+cmp -s "$d/log.md" "$d/before" || fail 'mid-log no-op rewrote excluded entries'
+assert_not_exists "$d/archive.md" 'mid-log no-op archive'
+
+# Fenced H1/H2 examples inside kept AND moved entries are not terminators.
+# The real H1 terminator and its canonical-looking sample survive repeated runs.
+d="$tmp_root/fenced-sections"
+mkdir -p "$d"
+make_log "$d/base"
+awk '
+  { print }
+  /^### 2026-05-29/ { print "```md\n# Fenced title\n## Fenced section\n```" }
+  /^### 2026-05-28/ { print "~~~md\n## Fenced section\n# Fenced title\n~~~" }
+' "$d/base" >"$d/log.md"
+printf '# Appendix\n' >"$d/suffix"
+# The suffix contains the exact oldest archived entry; #138 overlap detection
+# must stop at the same live Entries boundary, even on a later no-op.
+sed -n '/^### 2026-05-26/,$p' "$d/base" >>"$d/suffix"
+cat "$d/suffix" >>"$d/log.md"
+for keep_window in 2 2 1; do
+  run_compact "$d/log.md" --keep "$keep_window" --archive "$d/archive.md" --manifest "$d/manifest.md" \
+    --rollover-id "fenced-$keep_window" --require-top-entry 'rollover session'
+  assert_rc 0 "$COMPACT_RC" 'fenced sections and excluded overlap allow rollover/no-op'
+  assert_contains "$COMPACT_OUT" '1 canonical entry heading(s) outside the Entries section' 'only real suffix entry excluded'
+  suffix_line="$(awk '/^# Appendix$/ { print NR; exit }' "$d/log.md")"
+  tail -n "+$suffix_line" "$d/log.md" >"$d/actual-suffix"
+  cmp -s "$d/suffix" "$d/actual-suffix" || fail 'repeated rollover rewrote H1 suffix'
+  "$checker" "$d/log.md" --manifest "$d/manifest.md" --quiet
+done
+assert_file_contains "$d/archive.md" '## Fenced section' 'fenced archive body preserved'
+[[ "$(count_entries "$d/archive.md")" == 4 ]] || fail 'repeated bounded rollover lost or duplicated entries'
+
+# Even empty H1/H2 headings terminate Entries and its overlap scan.
+for empty_heading in '#' '##'; do
+  d="$tmp_root/empty-heading-$empty_heading"
+  mkdir -p "$d"
+  make_log "$d/log.md"
+  printf '%s\n' "$empty_heading" >"$d/suffix"
+  sed -n '/^### 2026-05-26/,$p' "$d/log.md" >>"$d/suffix"
+  cat "$d/suffix" >>"$d/log.md"
+  for mode in write noop; do
+    run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" \
+      --rollover-id empty-heading --require-top-entry 'rollover session'
+    assert_rc 0 "$COMPACT_RC" "$mode with empty H1/H2 heading"
+    assert_contains "$COMPACT_OUT" '1 canonical entry heading(s) outside the Entries section' 'empty section boundary warning'
+    suffix_line="$(awk -v heading="$empty_heading" '$0 == heading { print NR; exit }' "$d/log.md")"
+    tail -n "+$suffix_line" "$d/log.md" >"$d/actual-suffix"
+    cmp -s "$d/suffix" "$d/actual-suffix" || fail 'empty-heading suffix changed'
+  done
+done
+
+# Relative-path computation uses directory components, not string prefixes, and
+# keeps quotes, backslashes, spaces and shell/glob syntax literal.
+d="$tmp_root/path-generation"
+odd_dir='history with "quotes" \slashes [glob] $(literal)'
+for layout in nested sibling ancestor; do
+  project="$d/$layout"
+  mkdir -p "$project"
+  make_log "$project/log.md"
+  case "$layout" in
+    nested)
+      archive_rel="metadata/$odd_dir/archive.md"
+      manifest_rel=metadata/manifest.md
+      expected_path="$odd_dir/archive.md"
+      ;;
+    sibling)
+      archive_rel=metadata-extra/archive.md
+      manifest_rel=metadata/deep/manifest.md
+      expected_path=../../metadata-extra/archive.md
+      ;;
+    ancestor)
+      archive_rel=archive.md
+      manifest_rel=metadata/deep/manifest.md
+      expected_path=../../archive.md
+      ;;
+  esac
+  (
+    cd "$project" && run_compact log.md --keep 2 --archive "$archive_rel" --manifest "$manifest_rel" \
+      --rollover-id literal-path --require-top-entry 'rollover session'
+    assert_rc 0 "$COMPACT_RC" "$layout path generation"
+  )
+  assert_file_contains "$project/$manifest_rel" "- archive_file: $expected_path" "$layout relative record"
+  (cd / && "$checker" "$project/log.md" --manifest "$project/$manifest_rel" --quiet)
+done
+
 # Manual rollovers can have a live pointer and archive but no compactor manifest.
 # Preview is safe; a write needs an explicit adoption acknowledgement.
 for manifest_kind in absent empty header; do
@@ -225,9 +419,8 @@ assert_contains "$COMPACT_OUT" "structural rollover check" "invalid structure me
 [[ "$(cksum "$d/log.md")" == "$before" ]] || fail "invalid: live log must be unchanged"
 pass=$((pass + 1))
 
-# --- 7. Self-validation failure aborts with zero writes -------------------
-# An archived entry carrying a top-level "## Next Prompt" would orphan in the
-# archive; the checker rejects it, so the compactor must abort and write nothing.
+# --- 7. Orphan and candidate-validation refusals leave outputs unchanged ---
+# Bounding Entries must not turn the old orphan-prompt refusal into success.
 d="$tmp_root/selfval"
 mkdir -p "$d/archive"
 cat >"$d/log.md" <<'EOF'
@@ -248,16 +441,42 @@ cat >"$d/log.md" <<'EOF'
 - Body.
 
 ## Next Prompt
-- This orphan top-level heading rides along into the archive.
+- This orphan top-level heading must be nested under its entry.
 EOF
 before="$(cksum "$d/log.md")"
 run_compact "$d/log.md" --keep 1 --archive "$d/archive/context-log-2026.md" \
   --manifest "$d/archive/manifest.md" --rollover-id x --require-top-entry "kept entry"
-assert_rc 1 "$COMPACT_RC" "self-validation failure aborts"
-assert_contains "$COMPACT_OUT" "failed check-context-log-rollover.sh" "self-validation message"
+assert_rc 1 "$COMPACT_RC" "orphan prompt aborts"
+assert_contains "$COMPACT_OUT" "orphaned top-level Next Prompt" "orphan diagnostic"
 [[ "$(cksum "$d/log.md")" == "$before" ]] || fail "selfval: live log must be unchanged on abort"
 pass=$((pass + 1))
 assert_not_exists "$d/archive/context-log-2026.md" "selfval: no archive written on abort"
+
+# The bounded parser rejects an orphan before building output candidates. Keep
+# separate coverage for candidate self-validation failure (bad custom anchors).
+make_log "$d/log.md"
+cp "$d/log.md" "$d/before"
+run_compact "$d/log.md" --keep 2 --archive "$d/archive/context-log-2026.md" \
+  --manifest "$d/archive/manifest.md" --rollover-id invalid-anchors \
+  --require-top-entry "rollover session" --anchors 'not present in this archive'
+assert_rc 1 "$COMPACT_RC" 'candidate self-validation aborts'
+assert_contains "$COMPACT_OUT" 'failed check-context-log-rollover.sh' 'candidate validation diagnostic'
+cmp -s "$d/log.md" "$d/before" || fail 'candidate validation changed live bytes'
+assert_not_exists "$d/archive/context-log-2026.md" 'candidate validation creates no archive'
+assert_not_exists "$d/archive/manifest.md" 'candidate validation creates no manifest'
+
+# Both H1/H2 and the Suggested variant remain explicit no-write refusals.
+for prompt_heading in '# Next Prompt' '## Suggested Next Prompt'; do
+  make_log "$d/log.md"
+  printf '\n%s\n- Must be nested.\n' "$prompt_heading" >>"$d/log.md"
+  cp "$d/log.md" "$d/before"
+  run_compact "$d/log.md" --keep 2 --archive "$d/archive/context-log-2026.md" \
+    --manifest "$d/archive/manifest.md" --rollover-id orphan --require-top-entry 'rollover session'
+  assert_rc 1 "$COMPACT_RC" 'orphan variants refuse'
+  assert_contains "$COMPACT_OUT" 'orphaned top-level Next Prompt' 'orphan variant diagnostic'
+  cmp -s "$d/log.md" "$d/before" || fail 'orphan variant changed live bytes'
+  assert_not_exists "$d/archive/context-log-2026.md" 'orphan variant creates no archive'
+done
 
 # --- 8. Second rollover prepends to the manifest and archive --------------
 d="$tmp_root/second"
@@ -863,6 +1082,38 @@ run_fault() {
   PATH="$fault_bin:$PATH" ROLLOVER_TEST_MV="$real_mv" \
     ROLLOVER_TEST_DEST="$destination" ROLLOVER_TEST_FAULT="$fault" run_compact "$@"
 }
+
+# Combine #139 formatting, strict paths and a byte-sensitive suffix with #138
+# interruption recovery. Compare with an uninterrupted run at identical paths.
+d="$tmp_root/combined-recovery"
+mkdir -p "$d"
+make_log "$d/log.md"
+sed 's/older work/fix `foo` in **setup**/' "$d/log.md" >"$d/log.next"
+mv "$d/log.next" "$d/log.md"
+printf '\n## Appendix\r\n- Keep exactly, without final newline.' >>"$d/log.md"
+cp "$d/log.md" "$d/before"
+combined_args=("$d/log.md" --keep 2 --archive "$d/history/archive.md" --manifest "$d/metadata/manifest.md"
+  --rollover-id combined --require-top-entry 'rollover session')
+run_compact "${combined_args[@]}"
+assert_rc 0 "$COMPACT_RC" 'combined uninterrupted oracle'
+cp "$d/log.md" "$d/expected-log"
+cp "$d/history/archive.md" "$d/expected-archive"
+cp "$d/metadata/manifest.md" "$d/expected-manifest"
+for destination in "$d/history/archive.md" "$d/metadata/manifest.md"; do
+  cp "$d/before" "$d/log.md"
+  rm "$d/history/archive.md" "$d/metadata/manifest.md"
+  run_fault after "$destination" "${combined_args[@]}"
+  assert_rc 3 "$COMPACT_RC" 'combined interrupted replacement'
+  run_compact "$d/log.md" --recover --dry-run
+  assert_rc 0 "$COMPACT_RC" 'combined recovery preview'
+  cmp -s "$d/log.md" "$d/before" || fail 'combined recovery preview wrote live log'
+  run_compact "$d/log.md" --recover
+  assert_rc 0 "$COMPACT_RC" 'combined recovery'
+  cmp -s "$d/log.md" "$d/expected-log" || fail 'combined live bytes differ'
+  cmp -s "$d/history/archive.md" "$d/expected-archive" || fail 'combined archive bytes differ'
+  cmp -s "$d/metadata/manifest.md" "$d/expected-manifest" || fail 'combined manifest bytes differ'
+  "$checker" "$d/log.md" --manifest "$d/metadata/manifest.md" --quiet
+done
 
 # Named regression: a live replacement failure used to permit a silent-success
 # retry that duplicated history, issued another ID, and still passed the checker.

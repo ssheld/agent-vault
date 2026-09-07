@@ -42,6 +42,18 @@ prepends a record to <manifest>; the result must pass:
 
   check-context-log-rollover.sh <log> --archive <archive> --manifest <manifest>
 
+Only canonical entries under "## Entries" count. The next real H1/H2 heading
+ends that section (headings inside backtick/tilde fences do not). The trailing
+section remains live byte-for-byte. Canonical headings outside Entries warn
+with count/line numbers, including on no-op/dry-run and under --quiet; fix
+unintentionally stranded entries before rollover. Top-level (Suggested) Next
+Prompt sections after Entries still refuse writes; nest prompts under entries.
+
+New records include archive_path_base: manifest and an archive_file relative to
+the FINAL manifest directory, so nested paths resolve without --archive. Update
+both helpers together; see check-context-log-rollover.sh --help for legacy
+path migration without requiring another rollover.
+
 Options:
   --keep <N>                 Entries to keep live (>=1; the newest, snapshot aside).
   --archive <file>           Dated archive to grow (created if missing).
@@ -49,7 +61,9 @@ Options:
   --rollover-id <id>         Manifest/pointer id (default: <YYYY-MM-DD>-<seq>).
   --boundary <text>          Boundary description (default: "through <topic>").
   --anchors "<a>; <b>"       Representative anchors (default: derived from the
-                             moved entries; each must appear in the archive).
+                             moved entries). Matching strips backticks/asterisks
+                             and collapses whitespace on both sides; literal,
+                             case-sensitive, within one line; no Markdown parser.
   --require-top-entry <str>  Abort unless the newest entry heading contains <str>
                              (assert the gate-required rollover entry is present).
                              Required for any write unless --allow-missing-top-entry.
@@ -66,7 +80,7 @@ Options:
                              Remove this one-time option after adoption.
   --dry-run                  Build and self-validate, print a summary, write nothing.
   --recover                  Finish the recorded operation without generation options.
-  --quiet                    Print only on failure / a one-line success.
+  --quiet                    Suppress summaries, not warnings/failures.
   -h, --help                 Show this help.
 
 Use only one writer for the log, archive, and manifest, including recovery. Stop
@@ -207,21 +221,24 @@ strip_trailing_blanks() {
   ' "$1"
 }
 
-# Entry-heading line numbers inside the "## Entries" section (fence-aware).
+# Entry layout inside the "## Entries" section (fence-aware).
 # Only canonical entry headings ("### YYYY-MM-DD HH:MM local - <agent> - <topic>",
 # the shape the pre-commit hook enforces) count: a nested sub-heading that merely
 # starts with a date must never become a split boundary or inflate the entry count.
-entry_heading_lines() {
+inspect_entries() {
   awk '
     /^(```|~~~)/ { in_fence = !in_fence; next }
     {
       if (in_fence) next
       line = $0; sub(/\r$/, "", line)
-      if (line ~ /^## Entries[[:space:]]*$/) { in_entries = 1; next }
-      if (!in_entries) next
+      if (line ~ /^## Entries[[:space:]]*$/ && !started) { started = 1; next }
+      if (!started) next
+      if (!end && line ~ /^##?([[:space:]]|$)/) end = NR
+      if (line ~ /^##?[[:space:]]+(Suggested[[:space:]]+)?Next Prompt[[:space:]]*$/) print "orphan", NR
       if (line !~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] local - /) next
-      print NR
+      print (end ? "excluded" : "entry"), NR
     }
+    END { print "end", (end ? end : NR + 1); if (end) print "suffix", end }
   ' "$1"
 }
 
@@ -320,6 +337,20 @@ canonical_path() {
     fi
   done
   printf '%s\n' "$physical"
+}
+
+# Both inputs are canonical absolute destinations, including absent parents.
+# Walk the manifest parent to their common directory; no filesystem writes or
+# platform-specific realpath flags are needed, and path bytes stay literal.
+manifest_relative_path() {
+  local parent="${1%/*}" target="$2" prefix=""
+  parent="${parent:-/}"
+  while [[ "$parent" != / && "$target" != "$parent/"* ]]; do
+    parent="${parent%/*}"
+    parent="${parent:-/}"
+    prefix+="../"
+  done
+  printf '%s%s\n' "$prefix" "${target#"${parent%/}/"}"
 }
 
 validate_file() {
@@ -562,7 +593,7 @@ overlapping_entry() {
     FNR == 1 { flush(); live = (FILENAME == ARGV[1]); active = !live; fence = 0 }
     {
       line = $0; sub(/\r$/, "", line)
-      if (!fence && line ~ /^##[[:space:]]/) {
+      if (!fence && (line ~ /^##[[:space:]]/ || (live && line ~ /^##?([[:space:]]|$)/))) {
         flush(); active = (!live || line ~ /^## Entries[[:space:]]*$/)
       }
       if (!fence && active && line ~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] local - /) {
@@ -581,6 +612,9 @@ classify_pointer() {
     function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
     function norm(s) { gsub(/[`*]/, "", s); gsub(/[[:space:]]+/, " ", s); return trim(s) }
     FILENAME == ARGV[1] {
+      # A preserved appendix may quote a snapshot/pointer; it is not live state.
+      if ($0 ~ /^(```|~~~)/) { fence = !fence; next }
+      if (fence) next
       if ($0 ~ /^##[[:space:]]+Current Snapshot[[:space:]]*$/) { snapshot = 1; next }
       if ($0 ~ /^##[[:space:]]/) snapshot = 0
       if (snapshot && tolower($0) ~ /context-log rollover[[:space:]]*:/) {
@@ -727,9 +761,26 @@ case "$pointer_state" in
   *) pending "manifest/live pointer inconsistent; record unavailable, reconcile manually" ;;
 esac
 
-mapfile -t heading_lines < <(entry_heading_lines "$log_input")
+layout="$(inspect_entries "$log_input")" || die "cannot inspect Entries section"
+heading_lines=()
+excluded_lines=()
+orphan_lines=()
+suffix_line=""
+while read -r kind line; do
+  case "$kind" in
+    entry) heading_lines+=("$line") ;;
+    excluded) excluded_lines+=("$line") ;;
+    orphan) orphan_lines+=("$line") ;;
+    end) entries_end="$line" ;;
+    suffix) suffix_line="$line" ;;
+  esac
+done <<<"$layout"
 total_entries="${#heading_lines[@]}"
 
+if [[ "${#excluded_lines[@]}" -gt 0 ]]; then
+  printf 'Warning: %s canonical entry heading(s) outside the Entries section at line(s) %s; preserved but excluded from rollover counts. If these are live entries, restore the section structure before rolling over.\n' \
+    "${#excluded_lines[@]}" "${excluded_lines[*]}" >&2
+fi
 [[ "$total_entries" -ge 1 ]] || abort "no dated entries found under \"## Entries\""
 
 if [[ "$total_entries" -le "$keep" ]]; then
@@ -751,6 +802,9 @@ elif [[ "$allow_missing_top_entry" != "true" ]]; then
   abort "refusing to roll over without asserting the gate-required session entry; pass --require-top-entry <marker> (recommended) or --allow-missing-top-entry to override. Newest entry is: $top_heading"
 fi
 
+[[ "${#orphan_lines[@]}" -eq 0 ]] ||
+  abort "orphaned top-level Next Prompt at line(s) ${orphan_lines[*]}; keep prompts nested under their entry before rolling over"
+
 # --- build everything in a scratch dir (still no writes to real files) ---
 
 archive_base="$(basename "$archive_file")"
@@ -766,7 +820,7 @@ sed -n "1,$((split_line - 1))p" "$log_input" >"$scratch/live_body_raw"
 strip_trailing_blanks "$scratch/live_body_raw" >"$scratch/live_body"
 
 # Archived batch = the remaining (older) entries, newest-first as they appeared.
-sed -n "${split_line},\$p" "$log_input" >"$scratch/batch_raw"
+sed -n "${split_line},$((entries_end - 1))p" "$log_input" >"$scratch/batch_raw"
 strip_trailing_blanks "$scratch/batch_raw" >"$scratch/batch"
 
 archived_count=$((total_entries - keep))
@@ -845,12 +899,18 @@ fi
 
 pointer_line="- Context-log rollover: \`${rollover_id}\` — boundary: ${boundary}"
 inject_pointer "$pointer_line" "$scratch/live_body" >"$new_log"
+if [[ -n "$suffix_line" ]]; then
+  printf '\n' >>"$new_log"
+  # Do not run the suffix through awk: preserve even an unterminated final line.
+  tail -n "+$suffix_line" "$log_input" >>"$new_log"
+fi
 
 # Build the new manifest: header + this (newest) record + existing records.
 new_record="$scratch/record"
 {
   printf '## rollover: %s\n' "$rollover_id"
-  printf -- '- archive_file: %s\n' "$archive_file"
+  printf -- '- archive_file: %s\n' "$(manifest_relative_path "$manifest_canon" "$archive_canon")"
+  printf -- '- archive_path_base: manifest\n'
   printf -- '- boundary: %s\n' "$boundary"
   printf -- '- newest_archived: %s\n' "$newest_archived"
   printf -- '- oldest_archived: %s\n' "$oldest_archived"

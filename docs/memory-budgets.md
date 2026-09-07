@@ -118,6 +118,7 @@ never edits, moves, or rewrites the log.
 ```bash
 scripts/check-context-log-rollover.sh <context-log-file>
 scripts/check-context-log-rollover.sh <context-log-file> --archive <archive-file>
+scripts/check-context-log-rollover.sh <context-log-file> --manifest <manifest-file>
 scripts/check-context-log-rollover.sh <context-log-file> --archive <archive-file> --manifest <manifest-file>
 ```
 
@@ -132,8 +133,11 @@ Live-file checks:
 - if the snapshot declares a latest-handoff pointer, it is non-empty
   (conditional — a project that does not use handoff pointers is fine).
 
-Archive checks (`--archive`): every archived `## Current Snapshot` must be
-labeled superseded, so it cannot read as active.
+Archive checks (explicit `--archive` or resolved through `--manifest`): every
+archived `## Current Snapshot` must be labeled superseded, so it cannot read as
+active. Dated headings above the first canonical entry and noncanonical dated
+headings of depth 1–3 are rejected; nested dated subheadings inside entries are
+allowed.
 
 The checker keys on the named section headings, so it tolerates mixed entry
 heading styles (`### YYYY-MM-DD ...`, compact `## YYYY-MM-DD ...`, em-dash
@@ -155,7 +159,8 @@ newest first, at `agent-vault/context/archive/context-log-manifest.md`:
 
 ```md
 ## rollover: 2026-05-29-1
-- archive_file: agent-vault/context/archive/context-log-2026.md
+- archive_file: context-log-2026.md
+- archive_path_base: manifest
 - boundary: through PR-A net-of-excepted (recent-window top before rollover)
 - newest_archived: 2026-05-29 17:00 local - claude - PR-A net-of-excepted shipped
 - oldest_archived: 2026-01-04 09:00 local - bootstrap - initial project setup
@@ -171,12 +176,13 @@ stable link (`rollover_id` + the boundary text) back to that record:
 - Context-log rollover: `2026-05-29-1` — boundary: through PR-A net-of-excepted (recent-window top before rollover)
 ```
 
-All fields are **required** (`kept` / `archived` must be non-negative integers);
-the `*_archived` values are the entry heading text with the leading `#`s
-removed. With `--manifest`, the checker parses the newest manifest record and
-asserts:
+All fields except the compatibility marker `archive_path_base` are **required**
+(`kept` / `archived` must be non-negative integers). New records always include
+the marker; when supplied it must appear once and equal `manifest`. The
+`*_archived` values are the entry heading text with the leading `#`s removed.
+With `--manifest`, the checker parses the newest manifest record and asserts:
 
-- the record carries every field, so it matches the contract PR-B1 will emit
+- the record carries every required field, so it matches the compactor's contract
   (a manifest missing `kept`/`archived`/`anchors` is rejected, not silently
   accepted);
 - the live pointer references that record's id and repeats its `boundary`
@@ -187,18 +193,72 @@ asserts:
   order breaks the tie (top-most is newest, bottom-most is oldest), so naming a
   wrong same-minute heading is caught — not just an older timestamp (the
   cite-then-mutate catch);
-- every `anchor` appears in the archive (the moved content really landed —
-  prefer distinctive anchor phrases, since the match is a literal substring);
+- every nonempty normalized `anchor` appears on an archive line, with at least
+  one such anchor required. Both sides remove backticks/asterisks and collapse
+  and trim whitespace; matching remains case-sensitive, literal, and line-local.
+  Underscores, links, and other punctuation stay literal. This is lightweight
+  normalization, not Markdown rendering (`foo` can match `f*oo*`); prefer
+  distinctive anchors. Raw archived text and exact boundary comparisons do not
+  change;
 - no orphaned top-level `Next Prompt` heading survives in the archive (it must
   stay nested under its archived entry, never read as an active instruction).
 
-`--manifest` is opt-in and back-compatible: without it, only the structural and
-`--archive` checks run. The archive is located from `--archive` when given, else
-resolved next to the manifest by the record's `archive_file` basename. The
-counts are validated as integers but **not** reconciled against live/archive
-entry totals — a single archive accumulates many rollovers, so `archived` is a
-per-rollover figure, not the archive's row count; count self-consistency is
+`--manifest` is opt-in: without it, only the structural and explicit archive
+checks run. The counts are validated as integers but **not** reconciled against
+live/archive entry totals — a single archive accumulates many rollovers, so
+`archived` is a per-rollover figure, not the archive's row count; count self-consistency is
 left to the `compact-context-log.sh` compactor that emits them.
+
+### Archive paths and legacy migration
+
+The newest record selects the path convention; older records are preserved.
+All resolved archives receive the same structural and Layer-2 checks.
+
+| Input | Archive selection |
+| --- | --- |
+| Explicit `--archive` | Use that file; its basename must match the record. |
+| Absolute `archive_file` | Use that exact path; no basename fallback. |
+| Relative path with `archive_path_base: manifest` | Resolve from the manifest's directory; no fallback, even if a same-named file exists beside it. |
+| Relative path without the marker | Deprecated legacy behavior: use its basename beside the manifest, with a warning even under `--quiet`. Never try manifest-relative semantics first. |
+
+An empty, duplicate, or unsupported marker is an error, even with `--archive`.
+The explicit override is useful for staging/recovery, but a matching basename
+and passing content checks do **not** establish original destination identity.
+Legacy lookup provides compatibility, not identity validation either.
+
+New compactor records use paths relative to the **final manifest directory**,
+computed from canonical destinations, not temporary stages or the invocation
+directory. For separate `metadata/manifest.md` and `history/archive.md` outputs:
+
+```md
+- archive_file: ../history/archive.md
+- archive_path_base: manifest
+```
+
+These paths survive moving the whole directory tree with its relative layout
+intact. Do not relocate destinations while a recovery transaction is pending.
+
+Update **both** installed rollover helpers together using `update-project.sh`;
+inspect its output for locally customized/unmanaged helpers that were skipped.
+Older checkers tolerate the new field but do not implement manifest-relative
+lookup: nested paths still require explicit `--archive`. An older writer can
+prepend a new unmarked record while retaining older marked records.
+
+To migrate without waiting for another write-producing rollover:
+
+1. Back up the manifest and identify the intended archive from version control,
+   prior commands, or backups. Do not infer identity from a matching basename.
+2. In the newest record only, replace `archive_file` with the verified path
+   relative to that manifest's directory and add `archive_path_base: manifest`.
+   For a verified adjacent archive, the warning prints the exact replacement
+   fields. Do not merely add the marker to an old repo-relative path.
+3. Run the checker with `--manifest` and **without** `--archive` to verify strict
+   lookup, then review the diff. Historical records need not be rewritten.
+
+Legacy lookup is deprecated but remains supported in this release. Its removal
+requires a separately approved breaking change with migration guidance, not a
+calendar deadline or an assumption that every project has rolled over again.
+No-ops and dormant projects do not acquire a new record automatically.
 
 ## `compact-context-log.sh`
 
@@ -208,6 +268,25 @@ the dated archive (newest-at-top), writes the live `Context-log rollover`
 pointer, and prepends a record to the manifest. Prose memory files
 (`project-context.md`, `lessons.md`, …) deliberately stay agent-driven and are
 out of scope.
+
+Only canonical entries inside `## Entries` participate in counting, the newest
+entry gate, selection, and the live-side overlap safety check. That section ends
+at the next real H1/H2 heading (`#` or `##`) or EOF; headings inside the supported
+backtick/tilde fences do not terminate it. The suffix from the terminating
+heading onward stays live byte-for-byte, including CRLF and a missing final
+newline. Pointer rewriting happens before this untouched suffix is appended.
+
+Canonical-looking headings beyond that boundary produce a count-and-line-number
+warning, including on no-op/dry-run and with `--quiet`. They are not silently
+reclassified as live entries. If a mid-log `## Notes` unintentionally stranded
+later entries, fix the section structure before rolling over. A top-level
+`Next Prompt` (or `Suggested Next Prompt`) after Entries still blocks a
+write-producing rollover; keep prompts nested under their entries.
+
+For logs compacted by an older helper, inspect prior archives and version-control
+history for non-entry sections accidentally moved out of the live log. Preserve
+backups and restore intended sections manually after verifying their original
+placement. This fix does not automatically relocate historical content.
 
 ```bash
 scripts/compact-context-log.sh agent-vault/context-log.md --keep 20 \

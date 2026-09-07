@@ -24,7 +24,7 @@ Checks (live context log; headings matched outside fenced code blocks):
   - exactly one "## Entries"
   - no leftover Git conflict markers (<<<<<<<, =======, |||||||, >>>>>>>)
   - if the snapshot declares a latest-handoff pointer, it has an inline value
-Checks (when --archive is given):
+Checks (archive given explicitly or resolved from --manifest):
   - every archived "## Current Snapshot" is labeled superseded
   - no dated heading sits above the archive's first canonical entry heading
     (a torn entry fragment), and every dated heading of depth 1-3 is a
@@ -36,7 +36,9 @@ Checks (when --manifest is given -- Layer-2 rollover assertions):
     newest manifest record's id and repeats its boundary text verbatim
   - the manifest's newest_archived / oldest_archived headings are the actual
     newest / oldest entries in the named archive (the cite-then-mutate catch)
-  - every manifest anchor appears in the archive
+  - anchors match literal, case-sensitive substrings within single archive lines;
+    both sides strip backticks/asterisks and collapse/trim whitespace (not full
+    Markdown rendering); at least one nonempty normalized anchor is required
   - no orphaned top-level "Next Prompt" heading survives in the archive
 
 Section headings are matched exactly (a distinct heading such as
@@ -46,12 +48,14 @@ here; archive boundary verification counts only canonical
 "### YYYY-MM-DD HH:MM local - <agent> - <topic>" entry headings.
 
 The rollover manifest (parsed source of truth) holds one record per rollover,
-newest first. All fields are required; the *_archived headings are the entry
+newest first. All fields except archive_path_base are required for legacy records;
+new records include archive_path_base: manifest. The *_archived headings are the entry
 heading text with the leading "#"s removed, and the archive is newest-at-top so
 a same-minute tie resolves to the top-most (newest) / bottom-most (oldest) entry:
 
   ## rollover: <id>
-  - archive_file: agent-vault/context/archive/context-log-YYYY.md
+  - archive_file: context-log-YYYY.md
+  - archive_path_base: manifest
   - boundary: <topic / recent-window boundary text>
   - newest_archived: <newest archived entry heading, no leading "#">
   - oldest_archived: <oldest archived entry heading, no leading "#">
@@ -63,12 +67,26 @@ The live pointer carries the stable link back to that record:
 
   - Context-log rollover: \`<id>\` — boundary: <same boundary text>
 
+Archive lookup: --archive overrides content selection (basename must match).
+Otherwise absolute archive_file paths are exact; marked relative paths resolve
+from the manifest directory, with no fallback. Unmarked relative paths retain
+deprecated basename-beside-manifest lookup and warn even under --quiet.
+An empty, duplicate, or unsupported archive_path_base is an error.
+
+Update both helpers together. To migrate a legacy record without another rollover,
+verify the original archive using history/backups, replace archive_file with its
+manifest-relative path AND add archive_path_base: manifest, then check without
+--archive. Do not just mark an old repo-relative path. A passing explicit override
+or legacy lookup does not prove original destination identity. Older checkers
+need --archive for nested paths; older writers emit unmarked newest records.
+Legacy lookup removal requires a separately approved breaking change.
+
 Exit status: 0 = clean, 1 = violations found, 2 = usage or IO error.
 
 Options:
   --archive <file>   Also validate an archive file for superseded labeling.
   --manifest <file>  Run Layer-2 assertions against a rollover manifest.
-  --quiet            Print only on failure.
+  --quiet            Suppress success output, not failures or migration warnings.
   -h, --help         Show this help.
 EOF
 }
@@ -266,6 +284,35 @@ norm() {
   printf '%s' "$s"
 }
 
+# Stream once; normalize BOTH the anchors and each line, without joining lines.
+# ENVIRON preserves backslashes as data (unlike awk -v assignment processing).
+verify_anchors() {
+  ROLLOVER_ANCHORS="$1" awk '
+    function normalize(s) {
+      gsub(/[`*]/, "", s)
+      gsub(/[[:space:]]+/, " ", s)
+      sub(/^ /, "", s); sub(/ $/, "", s)
+      return s
+    }
+    BEGIN {
+      count = split(ENVIRON["ROLLOVER_ANCHORS"], raw, ";")
+      for (i = 1; i <= count; i++) {
+        anchor = normalize(raw[i])
+        if (anchor != "") anchors[++n] = anchor
+      }
+    }
+    {
+      line = normalize($0)
+      for (i = 1; i <= n; i++) if (!found[i] && index(line, anchors[i])) found[i] = 1
+    }
+    END {
+      if (!n) print "manifest anchors contain no nonempty normalized anchor"
+      for (i = 1; i <= n; i++) if (!found[i])
+        printf "manifest anchor not found in the archive: \"%s\"\n", anchors[i]
+    }
+  ' <"$2"
+}
+
 # Newest manifest record (first "## rollover:" block) as "key<TAB>value" lines.
 parse_manifest_newest() {
   awk '
@@ -401,11 +448,12 @@ if [[ "$handoff_state" == *EMPTY* ]]; then
   findings+=("Current Snapshot declares a latest-handoff pointer but it has no inline value")
 fi
 
-if [[ -n "$archive_file" ]]; then
+check_archive_structure() {
+  local archive="$1" row row_line row_kind row_heading
   while IFS= read -r row; do
     [[ -n "$row" ]] || continue
     findings+=("archived snapshot is not labeled superseded (archive line ${row%%$'\t'*}) -- archived snapshots must be marked superseded so they cannot read as active")
-  done < <(inspect_archive_superseded "$archive_file")
+  done < <(inspect_archive_superseded "$archive")
 
   while IFS=$'\t' read -r row_line row_kind row_heading; do
     [[ -n "$row_line" ]] || continue
@@ -417,14 +465,18 @@ if [[ -n "$archive_file" ]]; then
         findings+=("archive has a noncanonical dated entry heading (archive line $row_line): \"$row_heading\" -- normalize it to \"### YYYY-MM-DD HH:MM local - <agent> - <topic>\" so boundary validation can see it")
         ;;
     esac
-  done < <(inspect_archive_dated_headings "$archive_file")
-fi
+  done < <(inspect_archive_dated_headings "$archive")
+}
 
+resolved_archive="$archive_file"
 if [[ -n "$manifest_file" ]]; then
   declare -A manifest=()
   manifest_has_record="false"
   while IFS=$'\t' read -r key value; do
     [[ -n "$key" ]] || continue
+    if [[ "$key" == archive_path_base && -n "${manifest[archive_path_base]+present}" ]]; then
+      findings+=("duplicate manifest field: archive_path_base")
+    fi
     manifest["$key"]="$value"
     manifest_has_record="true"
   done < <(parse_manifest_newest "$manifest_file")
@@ -476,19 +528,34 @@ if [[ -n "$manifest_file" ]]; then
     fi
 
     # Resolve the archive named by the manifest, to verify claims against reality.
-    resolved_archive=""
     manifest_archive="${manifest[archive_file]:-}"
+    path_base_valid=true
+    if [[ -n "${manifest[archive_path_base]+present}" && "${manifest[archive_path_base]}" != manifest ]]; then
+      findings+=("unsupported or empty manifest archive_path_base: \"${manifest[archive_path_base]}\"")
+      path_base_valid=false
+    fi
     if [[ -n "$archive_file" ]]; then
       resolved_archive="$archive_file"
       if [[ -n "$manifest_archive" && "$(basename "$manifest_archive")" != "$(basename "$archive_file")" ]]; then
         findings+=("manifest archive_file \"$(basename "$manifest_archive")\" does not match --archive \"$(basename "$archive_file")\"")
       fi
-    elif [[ -n "$manifest_archive" ]]; then
-      candidate="$(dirname "$manifest_file")/$(basename "$manifest_archive")"
+    elif [[ -n "$manifest_archive" && "$path_base_valid" == true ]]; then
+      manifest_dir="${manifest_file%/*}"
+      [[ "$manifest_dir" != "$manifest_file" ]] || manifest_dir=.
+      manifest_dir="${manifest_dir:-/}"
+      if [[ "$manifest_archive" == /* ]]; then
+        candidate="$manifest_archive"
+      elif [[ "${manifest[archive_path_base]:-}" == manifest ]]; then
+        candidate="$manifest_dir/$manifest_archive"
+      else
+        candidate="$manifest_dir/${manifest_archive##*/}"
+        printf 'Warning: legacy archive path in record %s uses deprecated basename lookup: %s. This does not prove original destination identity. After verifying the original archive, replace the path fields with:\n  - archive_file: %s\n  - archive_path_base: manifest\n' \
+          "${manifest[id]:-?}" "$candidate" "${manifest_archive##*/}" >&2
+      fi
       if [[ -f "$candidate" ]]; then
         resolved_archive="$candidate"
       else
-        findings+=("manifest names archive \"$manifest_archive\" but it was not found next to the manifest (pass --archive to locate it)")
+        findings+=("manifest archive was not found at recorded path \"$candidate\" (record \"${manifest[id]:-?}\"; pass --archive to explicitly locate it)")
       fi
     fi
 
@@ -522,12 +589,10 @@ if [[ -n "$manifest_file" ]]; then
       fi
 
       if [[ -n "${manifest[anchors]:-}" ]]; then
-        IFS=';' read -ra anchor_list <<<"${manifest[anchors]}"
-        for anchor in "${anchor_list[@]}"; do
-          anchor="$(norm "$anchor")"
-          [[ -n "$anchor" ]] || continue
-          grep -Fq -- "$anchor" "$resolved_archive" || findings+=("manifest anchor not found in the archive: \"$anchor\"")
-        done
+        anchor_findings="$(verify_anchors "${manifest[anchors]}" "$resolved_archive")" || die "cannot check archive anchors: $resolved_archive"
+        while IFS= read -r finding; do
+          [[ -z "$finding" ]] || findings+=("$finding")
+        done <<<"$anchor_findings"
       fi
 
       orphans="$(find_orphan_next_prompts "$resolved_archive")"
@@ -538,6 +603,8 @@ if [[ -n "$manifest_file" ]]; then
     fi
   fi
 fi
+
+[[ -z "$resolved_archive" ]] || check_archive_structure "$resolved_archive"
 
 if [[ "${#findings[@]}" -eq 0 ]]; then
   [[ "$quiet" == "true" ]] || echo "context-log rollover check passed: $context_log"
