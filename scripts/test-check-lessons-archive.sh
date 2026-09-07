@@ -753,6 +753,7 @@ expect_result 0 '(1 classified)' "$parser_manifest" --strict --archive "$d/other
 expect_result 0 '(1 classified)' "$parser_manifest" --strict --archive '' --archive ''
 
 # --- 25. Parser errors cannot become empty/partial success, even as root ---
+# Mode representatives: empty/partial parser failures; retain all existing mode combinations.
 # Intercept awk only for a marked input. Run its real parser on a prefix for the
 # partial-output case, then fail. Other awk calls retain normal behavior. This
 # exercises status propagation rather than relying on chmod, which root bypasses.
@@ -906,16 +907,27 @@ expect_occurrences 1 'duplicate lesson key'
 expect_occurrences 1 'not present in the archive'
 expect_result 0 '2 warning(s)' "$parser_manifest"
 
-# Comment fixtures exercise the mode contract and preserve all three inputs.
-# Empty finding text means a clean run in that mode.
+# Content cases run once in strict mode unless explicitly named with
+# --all-modes=<representative>. Empty finding text means a clean run in that mode.
+# Strict runs last so reject_output/expect_occurrences always inspect its output.
+# Preserve all three inputs for every case, including strict-only variants.
 expect_comment_case() {
+  local case_name='strict content'
+  local -a modes=(strict)
+  case "${1:-}" in
+    --all-modes=*)
+      case_name="${1#*=}"
+      modes=(advisory quiet strict-quiet strict)
+      shift
+      ;;
+  esac
   local advisory_findings="$1" strict_findings="$2" clean_text="${3:-(1 classified)}"
   local mode required expected_rc finding
   local -a mode_flags
   cp "$parser_manifest" "$d/manifest-before.md"
   cp "$parser_archive" "$d/archive-before.md"
   cp "$d/agent-vault/lessons.md" "$d/rules-before.md"
-  for mode in advisory quiet strict strict-quiet; do
+  for mode in "${modes[@]}"; do
     mode_flags=()
     required="$advisory_findings"
     expected_rc=0
@@ -931,13 +943,13 @@ expect_comment_case() {
     expect_result "$expected_rc" "" "$parser_manifest" "${mode_flags[@]}"
     if [[ "$mode" == quiet || ("$mode" == strict-quiet && -z "$required") ]]; then
       [[ -z "$result_output" ]] || {
-        echo "FAIL: successful quiet comment check must be silent" >&2
+        echo "FAIL ($case_name): successful quiet comment check must be silent" >&2
         exit 1
       }
     elif [[ -n "$required" ]]; then
       while IFS= read -r finding; do
         [[ "$result_output" == *"$finding"* ]] || {
-          echo "FAIL: comment check missing '$finding'" >&2
+          echo "FAIL ($case_name): comment check missing '$finding'" >&2
           printf '%s\n' "$result_output" >&2
           exit 1
         }
@@ -945,7 +957,7 @@ expect_comment_case() {
       reject_output 'check passed'
     else
       [[ "$result_output" == *"check passed:"* && "$result_output" == *"$clean_text"* ]] || {
-        echo "FAIL: expected clean comment check with $clean_text" >&2
+        echo "FAIL ($case_name): expected clean comment check with $clean_text" >&2
         printf '%s\n' "$result_output" >&2
         exit 1
       }
@@ -972,12 +984,16 @@ comment_line_endings() {
 # --- 31. Commented records cannot classify; commented headings need no record ---
 for indent in '' ' ' '  ' '   '; do
   for ending in lf crlf no-final-newline; do
+    comment_case_options=()
+    if [[ -z "$indent" && "$ending" == lf ]]; then
+      comment_case_options=(--all-modes=31-hidden-record-and-heading)
+    fi
     printf '%s\n' '## lesson: real lesson' '- classification: archival-only' \
       "$indent<!--" '## lesson: hidden lesson' '- classification: archival-only' \
       "$indent-->" >"$parser_manifest"
     printf '%s\n' '### real lesson' '### hidden lesson' >"$parser_archive"
     comment_line_endings "$ending" "$parser_manifest" "$parser_archive"
-    expect_comment_case '' 'archived lesson is not classified in the manifest: "hidden lesson"'
+    expect_comment_case "${comment_case_options[@]}" '' 'archived lesson is not classified in the manifest: "hidden lesson"'
     expect_occurrences 1 'not classified in the manifest'
     reject_output 'not present in the archive'
 
@@ -985,7 +1001,7 @@ for indent in '' ' ' '  ' '   '; do
     printf '%s\n' '### real lesson' "$indent<!--" '### hidden lesson' \
       "$indent-->" >"$parser_archive"
     comment_line_endings "$ending" "$parser_archive"
-    expect_comment_case '' ''
+    expect_comment_case "${comment_case_options[@]}" '' ''
   done
 done
 
@@ -996,7 +1012,7 @@ printf '%s\n' '## lesson: real lesson' '- classification: covered-by-a-named-alw
   '- quick_rule: hidden rule' '- key: hijacked' '#' '##' \
   '## lesson: real lesson' '- classification: archival-only' '-->' \
   '- covered_by: a live rule' >"$parser_manifest"
-expect_comment_case '' ''
+expect_comment_case --all-modes=32-hidden-record-boundaries '' ''
 for reference_field in classification covered_by quick_rule; do
   reference_class=covered-by-a-named-always-on-rule
   [[ "$reference_field" != quick_rule ]] || reference_class=retained-as-quick-rule
@@ -1006,11 +1022,11 @@ for reference_field in classification covered_by quick_rule; do
   printf '%s\n' '<!--' "- $reference_field: archival-only" '-->' >>"$parser_manifest"
   case "$reference_field" in
     classification)
-      expect_comment_case 'has no classification' 'has no classification
+      expect_comment_case --all-modes=32-hidden-classification 'has no classification' 'has no classification
 archived lesson is not classified in the manifest: "real lesson"'
       ;;
-    covered_by) expect_comment_case 'names no "covered_by" rule' 'names no "covered_by" rule' ;;
-    quick_rule) expect_comment_case '' '' ;;
+    covered_by) expect_comment_case --all-modes=32-hidden-covered-by 'names no "covered_by" rule' 'names no "covered_by" rule' ;;
+    quick_rule) expect_comment_case --all-modes=32-optional-hidden-quick-rule '' '' ;;
   esac
 done
 
@@ -1025,7 +1041,11 @@ for fence_case in "${fence_cases[@]}"; do
   printf '%s\n' '### real lesson' '<!--' "$opener" "$false_closer" \
     '### ghost lesson' '-->' "$opener" '<!--' "$false_closer" '-->' \
     '<!--' '### ghost lesson' "$closer" '### later lesson' >"$parser_archive"
-  expect_comment_case '' '' '(2 classified)'
+  comment_case_options=()
+  if [[ "$fence_case" == '```|~~~|```' ]]; then
+    comment_case_options=(--all-modes=33-comment-fence-precedence)
+  fi
+  expect_comment_case "${comment_case_options[@]}" '' '' '(2 classified)'
 done
 
 # --- 34. Consume the closing physical line, including any second comment ---
@@ -1044,7 +1064,11 @@ for opening_line in '<!-- first -->' '<!-- first'; do
         printf '%s\n' "$opening_line $suffix" >>"$source_path"
       fi
     done
-    expect_comment_case '' ''
+    comment_case_options=()
+    if [[ "$suffix" == '## lesson: ghost lesson' ]]; then
+      comment_case_options=(--all-modes=34-closing-line-suffix)
+    fi
+    expect_comment_case "${comment_case_options[@]}" '' ''
   done
 done
 # Empty, nested-looking, and overlapping delimiters still use the first -->.
@@ -1053,6 +1077,23 @@ for comment in '<!---->' '<!-->' '<!--->' '<!-- <!-- nested -->'; do
   printf '%s\n' "$comment" '### real lesson' >"$parser_archive"
   expect_comment_case '' ''
 done
+# Intentional CommonMark behavior: comments do not nest. The example's first
+# --> ends the block, so the following classification is active.
+printf '%s\n' '## lesson: real lesson' '<!--' 'Reference example: <!-- hidden note -->' \
+  '- classification: archival-only' '-->' >"$parser_manifest"
+printf '%s\n' '### real lesson' >"$parser_archive"
+expect_comment_case --all-modes=34-nested-terminator '' ''
+# The helper must leave strict output, including on a clean all-mode run.
+expect_occurrences 1 '(1 classified)'
+# Controls: an ordinary comment hides the field; a fence safely wraps the
+# entire nested-looking sample, including its terminator.
+printf '%s\n' '## lesson: real lesson' '<!--' '- classification: archival-only' '-->' >"$parser_manifest"
+expect_comment_case --all-modes=34-ordinary-comment 'has no classification' 'has no classification
+archived lesson is not classified in the manifest: "real lesson"'
+printf '%s\n' '## lesson: real lesson' '```md' '<!--' 'Reference example: <!-- hidden note -->' \
+  '- classification: archival-only' '-->' '```' >"$parser_manifest"
+expect_comment_case --all-modes=34-fenced-example 'has no classification' 'has no classification
+archived lesson is not classified in the manifest: "real lesson"'
 
 # --- 35. Only block openers are interpreted; inline markers stay literal ---
 for non_opener in '    <!--' '        <!--' $'\t<!--' 'text <!--' '\<!--' \
@@ -1061,14 +1102,19 @@ for non_opener in '    <!--' '        <!--' $'\t<!--' 'text <!--' '\<!--' \
   printf '%s\n' "$non_opener" '### real lesson' >"$parser_archive"
   expect_comment_case '' ''
 done
+# Intentional CommonMark behavior: this list interrupts the paragraph, so its
+# inline opener is literal text and the following classification stays active.
+printf '%s\n' '## lesson: real lesson' 'Note <!--' '- classification: archival-only' '-->' >"$parser_manifest"
+printf '%s\n' '### real lesson' >"$parser_archive"
+expect_comment_case --all-modes=35-inline-opener-before-field '' ''
 printf '%s\n' '## lesson: real lesson <!-- same note -->' '- classification: archival-only' >"$parser_manifest"
 printf '%s\n' '### real lesson <!-- same note -->' >"$parser_archive"
-expect_comment_case '' ''
+expect_comment_case --all-modes=35-matching-literal-headings '' ''
 printf '%s\n' '### real lesson' >"$parser_archive"
-expect_comment_case 'not present in the archive' 'not present in the archive
+expect_comment_case --all-modes=35-mismatched-literal-headings 'not present in the archive' 'not present in the archive
 archived lesson is not classified in the manifest: "real lesson"'
 printf '%s\n' '## lesson: real lesson' '- classification: archival-only <!-- note -->' >"$parser_manifest"
-expect_comment_case 'has an invalid classification' 'has an invalid classification
+expect_comment_case --all-modes=35-literal-classification 'has an invalid classification' 'has an invalid classification
 archived lesson is not classified in the manifest: "real lesson"'
 
 # --- 36. Unclosed comments are findings and incomplete inputs in every mode ---
@@ -1094,7 +1140,11 @@ for input_kind in manifest archive; do
           '## lesson: hidden lesson' '- classification: archival-only' >>"$source_path"
         comment_line_endings "$ending" "$parser_manifest" "$parser_archive"
         required="unterminated HTML comment in $input_kind: $source_path:$opening_line"
-        expect_comment_case "$required" "$required"
+        comment_case_options=()
+        if [[ "$ending" == lf && "$opener" == '<!--' ]]; then
+          comment_case_options=("--all-modes=36-incomplete-$input_kind-$prefix")
+        fi
+        expect_comment_case "${comment_case_options[@]}" "$required" "$required"
         expect_occurrences 1 'unterminated HTML comment'
         reject_output 'unterminated fence' 'not present in the archive' 'not classified in the manifest'
       done
@@ -1105,7 +1155,7 @@ done
 # --- 37. Incomplete comments retain independent validation and absence checks ---
 printf '%s\n' '# Empty manifest' >"$parser_manifest"
 printf '%s\n' '### visible lesson' '<!--' '### hidden lesson' >"$parser_archive"
-expect_comment_case 'unterminated HTML comment in archive' 'unterminated HTML comment in archive
+expect_comment_case --all-modes=37-archive-with-visible-lesson 'unterminated HTML comment in archive' 'unterminated HTML comment in archive
 archived lesson is not classified in the manifest: "visible lesson"'
 reject_output 'hidden lesson'
 printf '%s\n' '# Empty archive' >"$parser_archive"
@@ -1113,7 +1163,7 @@ printf '%s\n' '## lesson: visible lesson' '- classification: archival-only' '<!-
   '## lesson: hidden lesson' >"$parser_manifest"
 required='unterminated HTML comment in manifest
 manifest classifies a lesson not present in the archive: "visible lesson"'
-expect_comment_case "$required" "$required"
+expect_comment_case --all-modes=37-manifest-with-visible-record "$required" "$required"
 reject_output 'hidden lesson'
 # Local record errors survive incomplete parses of both inputs.
 printf '%s\n' '## lesson: visible lesson' '- classification: bogus' '<!--' >"$parser_manifest"
@@ -1121,7 +1171,7 @@ printf '%s\n' '### other lesson' '<!--' >"$parser_archive"
 required='unterminated HTML comment in manifest
 unterminated HTML comment in archive
 has an invalid classification "bogus"'
-expect_comment_case "$required" "$required"
+expect_comment_case --all-modes=37-both-inputs-with-local-error "$required" "$required"
 reject_output 'not present in the archive' 'not classified in the manifest'
 expect_occurrences 2 'unterminated HTML comment'
 # An unclosed fence in one file and comment in the other report independently.
@@ -1129,10 +1179,11 @@ printf '%s\n' '~~~' >"$parser_archive"
 required='unterminated HTML comment in manifest
 unterminated fence in archive
 has an invalid classification "bogus"'
-expect_comment_case "$required" "$required"
+expect_comment_case --all-modes=37-mixed-blocks-with-local-error "$required" "$required"
 reject_output 'not present in the archive' 'not classified in the manifest'
 
 # --- 38. Comment scanning preserves empty/partial producer failure semantics ---
+# Mode representatives: manifest/archive producer failures; retain all existing mode combinations.
 for input_kind in manifest archive; do
   for failure_output in empty partial; do
     printf '%s\n' '# Manifest' '## lesson: real lesson' '- classification: archival-only' \
@@ -1177,8 +1228,19 @@ write_rule_manifest() {
   [[ "$field" != quick_rule ]] || classification=retained-as-quick-rule
   printf '%s\n' '## lesson: real lesson' "- classification: $classification" "- $field: $needle" >"$parser_manifest"
 }
-# All four modes, input preservation, and reference-data cleanup on every path.
+# Strict-only content cases and explicitly named all-mode representatives.
+# As above, strict runs last for callers' diagnostic assertions.
+# Every case preserves inputs; every invocation checks reference-data cleanup.
 expect_rules_case() {
+  local case_name='strict content'
+  local -a modes=(strict)
+  case "${1:-}" in
+    --all-modes=*)
+      case_name="${1#*=}"
+      modes=(advisory quiet strict-quiet strict)
+      shift
+      ;;
+  esac
   local findings="$1" mode expected_rc required
   shift
   local -a mode_flags
@@ -1186,7 +1248,7 @@ expect_rules_case() {
   cp "$parser_archive" "$d/archive-before"
   cp "$rules" "$d/rules-before"
   cp "$extra_rules" "$d/extra-before"
-  for mode in advisory quiet strict strict-quiet; do
+  for mode in "${modes[@]}"; do
     mode_flags=()
     expected_rc=0
     case "$mode" in
@@ -1200,13 +1262,13 @@ expect_rules_case() {
     TMPDIR="$d/temps" expect_result "$expected_rc" "" "$parser_manifest" "${mode_flags[@]}" "$@"
     if [[ "$mode" == quiet || ("$mode" == strict-quiet && -z "$findings") ]]; then
       [[ -z "$result_output" ]] || {
-        echo "FAIL: noisy quiet rules check" >&2
+        echo "FAIL ($case_name): noisy quiet rules check" >&2
         exit 1
       }
     elif [[ -n "$findings" ]]; then
       while IFS= read -r required; do
         [[ "$result_output" == *"$required"* ]] || {
-          echo "FAIL: missing rules finding: $required" >&2
+          echo "FAIL ($case_name): missing rules finding: $required" >&2
           printf '%s\n' "$result_output" >&2
           exit 1
         }
@@ -1214,7 +1276,7 @@ expect_rules_case() {
       reject_output 'check passed'
     else
       [[ "$result_output" == *'check passed:'* ]] || {
-        echo "FAIL: rules check did not pass: $*" >&2
+        echo "FAIL ($case_name): rules check did not pass: $*" >&2
         printf '%s\n' "$result_output" >&2
         exit 1
       }
@@ -1256,9 +1318,13 @@ for reference_field in covered_by quick_rule; do
       selected="$rules"
       [[ "$source_kind" != explicit ]] || selected="$extra_rules"
       printf '%s\n' "$source_text" >"$selected"
-      expect_rules_case 'was not found in any live rules source' --rules "$extra_rules"
+      rules_case_options=()
+      if [[ "$source_text" == '<!-- Never discard the recovery marker -->' ]]; then
+        rules_case_options=("--all-modes=39-visibility-$reference_field-$source_kind")
+      fi
+      expect_rules_case "${rules_case_options[@]}" 'was not found in any live rules source' --rules "$extra_rules"
       printf '%s\n' "$rule_needle" >>"$selected"
-      expect_rules_case '' --rules "$extra_rules"
+      expect_rules_case "${rules_case_options[@]}" '' --rules "$extra_rules"
     done
   done
   printf '%s\n' unrelated >"$rules"
@@ -1310,14 +1376,18 @@ for reference_field in covered_by quick_rule; do
       printf '%s\n' "$opener" >>"$rules"
       [[ "$match_position" != after ]] || printf '%s\n' "$rule_needle" >>"$rules"
       : >"$extra_rules"
-      expect_rules_case 'in rules source:
+      rules_case_options=()
+      if [[ "$match_position" == before && ("$opener" == '<!--' || "$opener" == '```') ]]; then
+        rules_case_options=("--all-modes=41-incomplete-$reference_field-$opener")
+      fi
+      expect_rules_case "${rules_case_options[@]}" 'in rules source:
 liveness check skipped: unverifiable' --rules "$extra_rules"
       reject_output 'was not found'
       printf '%s\n' "$rule_needle" >"$extra_rules"
       for order in forward reverse; do
         source_flags=(--rules "$rules" --rules "$extra_rules")
         [[ "$order" != reverse ]] || source_flags=(--rules "$extra_rules" --rules "$rules")
-        expect_rules_case 'in rules source:' "${source_flags[@]}" --rules "$rules" --rules ''
+        expect_rules_case "${rules_case_options[@]}" 'in rules source:' "${source_flags[@]}" --rules "$rules" --rules ''
         expect_occurrences 1 'in rules source:'
         reject_output 'liveness check skipped' 'was not found'
       done
@@ -1332,7 +1402,7 @@ for source_text in $'```\n    ```\nNever discard the recovery marker\n```' \
 done
 printf '%s\n' '<!--' >"$rules"
 printf '%s\n' '### other lesson' >"$parser_archive"
-expect_rules_case 'in rules source:
+expect_rules_case --all-modes=41-independent-manifest-findings 'in rules source:
 manifest classifies a lesson not present in the archive'
 expect_occurrences 1 'archived lesson is not classified in the manifest'
 printf '%s\n' '### real lesson' >"$parser_archive"
@@ -1342,7 +1412,8 @@ printf '%s\n' '<!--' '# INJECT PARSER FAILURE' >"$rules"
 for record in '- classification: archival-only' '- classification: retained-as-quick-rule'; do
   printf '%s\n' '## lesson: real lesson' "$record" >"$parser_manifest"
   PATH="$parser_bin:$PATH" REAL_AWK="$real_awk" PARSER_CAPTURE="$d/awk-input" PARSER_FAILURE_OUTPUT=partial \
-    expect_rules_case ''
+    expect_rules_case "--all-modes=42-unused-source-$record" ''
+  expect_occurrences 1 'check passed:'
 done
 write_rule_manifest covered_by
 : >"$rules"
@@ -1355,6 +1426,7 @@ expect_rules_case '' --rules "$rules" --rules "$rules"
 printf '%s\n' '### real lesson' >"$parser_archive"
 
 # --- 43. Source execution failures discard empty/partial output and clean data ---
+# Mode representatives: rules producer failures; retain all existing mode combinations.
 write_rule_manifest covered_by
 printf '%s\n' "$rule_needle" >"$extra_rules"
 for failure_output in empty partial; do
@@ -1382,6 +1454,7 @@ injected parser read failure" "$parser_manifest" "${mode_flags[@]}" "${source_fl
 done
 
 # --- 44. Read errors after discovery and malformed producer events fail closed ---
+# Mode representatives: disappearing sources; retain all existing mode combinations.
 mkdir -p "$d/lifecycle-bin"
 cat >"$d/lifecycle-bin/awk" <<'EOF'
 #!/usr/bin/env bash
@@ -1500,6 +1573,18 @@ for prefixes in '   > |>' ' - |   ' '*   |    ' '123456789) |           ' '> 1) 
 done
 # A ten-digit ordered marker is ordinary prose, not a supported container.
 printf '%s\n' '1234567890) ``` literal delimiter mention' "$rule_needle" >"$rules"
+expect_rules_case ''
+
+# --- 48. Fence mentions after prose differ from delimiters leading a bullet ---
+write_rule_manifest covered_by
+printf '%s\n' "$rule_needle" '- Wrap examples in ``` fences' >"$rules"
+expect_rules_case ''
+printf '%s\n' "$rule_needle" '- ``` opens a fenced block' >"$rules"
+expect_rules_case "unterminated fence in rules source: $rules:2
+liveness check skipped: unverifiable"
+expect_occurrences 1 'unterminated fence'
+reject_output 'was not found'
+printf '%s\n' '  ```' >>"$rules"
 expect_rules_case ''
 
 echo "lessons-archive checker regression checks passed."
