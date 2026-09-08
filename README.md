@@ -128,8 +128,16 @@ and verifies both downloads with pinned SHA-256 digests.
 
 CI runs the same command via `.github/workflows/style-check.yml`.
 
+Tracked Markdown under `scaffold/` must have no trailing spaces or tabs. Use a
+backslash at the end of a line for an intentional Markdown hard break. Check
+the source templates with `bash scripts/check-scaffold-markdown-whitespace.sh`.
+The scaffold regression workflow enforces this for all scaffold changes,
+including Markdown under hidden directories such as `scaffold/root/.github/`.
+This source convention does not rewrite project-owned notes or update backups.
+
 ## Scaffold Regression Checks
 Run the scaffold regression scripts locally when changing bootstrap, sync, or tracked hook behavior:
+- `bash scripts/test-scaffold-markdown-whitespace.sh`
 - `bash scripts/test-gitignore-management.sh`
 - `bash scripts/test-coding-standards-sync.sh`
 - `bash scripts/test-decision-template-sync.sh`

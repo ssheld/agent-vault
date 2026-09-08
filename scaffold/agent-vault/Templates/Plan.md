@@ -27,6 +27,6 @@ last_updated:
   - Mitigation:
 
 ## Next 3 Tasks
-1. 
-2. 
-3. 
+1.
+2.
+3.
