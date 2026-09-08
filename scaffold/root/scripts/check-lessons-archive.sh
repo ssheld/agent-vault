@@ -95,7 +95,8 @@ Commented headings/fields and closing-line suffixes never become records or fiel
 Fences inside comments and comment markers inside fences are inert.
 Inline comments are unsupported and remain literal heading/field text; they are
 not guaranteed to produce a finding. Four-space or tab-indented comment markers
-do not open a block. Use comment blocks or fenced code for reference examples.
+do not open a block. Use fenced code for reference examples. HTML comments do
+not nest: a comment cannot wrap example content containing -->.
 Fences use at least three backticks or tildes, with up to three leading spaces.
 A closing fence uses the same marker, at least the opening length, and only
 spaces/tabs afterward. Backtick opening info strings cannot contain backticks.
@@ -127,7 +128,8 @@ Rules comments can start anywhere on a non-code line. Only text before the first
 Comment state continues across lines, including paragraph-interrupting lists.
 This is conservative filtering, not full Markdown parsing: literal/escaped HTML
 comment markers also participate. Use entity spelling when describing a marker.
-Delimiter mentions elsewhere in prose do not invalidate a complete source.
+Fence markers after ordinary prose are literal; at the start of a line or after
+recognized quote/list prefixes they can open a fence and require a matching closer.
 Every resolved rules source is scanned when a reference needs checking. An
 unterminated fence/comment discards that source's matches and is a finding even
 if another source matches. Unmatched references are unverifiable when any source

@@ -607,9 +607,10 @@ markers inside a comment and comment markers inside a fence are inert.
 Four-space or tab-indented comment markers do not open a block. Inline comments
 are unsupported and remain literal text in headings and field values; they are
 not guaranteed to produce a finding. Identical inline comments in a manifest key
-and archive heading still match as raw text. Use comment blocks or fenced code
-blocks for reference examples. Setext section boundaries remain a separate
-follow-up in [#155](https://github.com/ssheld/agent-vault/issues/155).
+and archive heading still match as raw text. Use fenced code blocks for reference
+examples. A comment block cannot wrap example content containing `-->`: that
+first terminator closes it even inside a nested-looking example. Setext section
+boundaries remain a separate follow-up in [#155](https://github.com/ssheld/agent-vault/issues/155).
 Fence delimiter rules follow
 [CommonMark](https://spec.commonmark.org/0.31.2/#fenced-code-blocks):
 at least three backticks or tildes, with zero to three leading spaces; a closer
@@ -653,8 +654,11 @@ Tabs are expanded to four-column stops for delimiter recognition only. Closing
 fences must retain each quote prefix and each list's content indentation, followed
 by the normal zero-to-three-space closing fence. A sibling list item or container
 end does not implicitly close a fence: an explicit closing fence is required.
-This bounds recognition without treating arbitrary delimiter mentions in prose
-as errors.
+Fence markers after ordinary prose are literal. At the start of a line or after
+recognized quote/list prefixes, they can open a fence and require a matching
+closer. For example, ````- Wrap examples in ``` fences```` is ordinary prose.
+The text ````- ``` opens a fenced block```` starts a fence. Put descriptive prose
+before delimiter mentions when explaining fence syntax.
 
 HTML comments in rules sources can start anywhere outside excluded code, unlike
 the manifest/archive block-only contract. Only the prefix before the first
