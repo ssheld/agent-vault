@@ -82,8 +82,20 @@ With --strict (completeness):
     exactly valid classification; combined class names are invalid
 
 Manifest record and section headings use # prefixes at the start of a line.
-Other #/## sections end a record; deeper headings stay inside it. Underlined
-(setext) section headings are not supported; use #/## sections instead.
+Other #/## sections end a record; deeper headings stay inside it. Supported
+underlined (setext) sections also end a record, but never create one.
+Setext titles and underlines start at column zero. Every title line begins
+with an ASCII letter/digit and is not an ordered list marker. A title starts
+after a blank line, a column-zero ATX heading/thematic break, a fence/comment
+block, or at file start. Multiline titles have no intervening blank lines.
+The next line is one or more identical = or - characters, optionally followed
+by spaces/tabs. Indented, punctuation-led, and non-ASCII-led titles are outside
+this flat grammar; use a column-zero #/## heading for those sections.
+Outside fences/comments, a line beginning with < after zero to three spaces
+is unsupported HTML-like content (including autolinks and literal < text).
+The first such line produces a finding with its source/line and disables
+setext boundaries for the rest of that manifest. ATX records, fields, and
+other checks continue. Use fenced code or supported comments for examples.
 Archive ### headings and manifest field bullets allow up to three leading
 spaces; four-space or tab-indented code cannot supply headings or fields.
 Unknown fields (including "key") are ignored. Repeated recognized fields are
@@ -253,11 +265,13 @@ fi
 # additionally filter inline comments and recognize container-prefixed fences. Events distinguish headings from user-supplied field names:
 #   record <number> key <value> | field <number> <name> <value>
 #   lesson 0 heading <value> | count <number> | unclosed <opening-line>
-#   unclosed_comment <opening-line> | matched <reference-id>
+#   unclosed_comment <opening-line> | unsupported_html <first-line>
+#   matched <reference-id>
 # All fields are tab-separated. Only the final value can contain tabs.
 parse_lessons_input() {
   LESSONS_RULE_REFERENCES="${reference_file:-}" awk -v input_kind="$1" "$markdown_fences"'
     BEGIN {
+      reset_manifest_paragraph()
       if (input_kind == "rules") {
         path = ENVIRON["LESSONS_RULE_REFERENCES"]
         while ((status = (getline needle < path)) > 0) needles[++needle_count] = needle
@@ -278,6 +292,38 @@ parse_lessons_input() {
       if (index(line, "-->") != 0) in_comment = 0
       # HTML blocks end with the whole physical closing line, including suffixes.
       return 1
+    }
+    function reset_manifest_paragraph() {
+      manifest_paragraph = 0
+      manifest_block_start = 1
+    }
+    # A bounded flat grammar: only ASCII prose starts can seed a title.
+    # Block starts must be precise, or lazy quote/list text can become a title.
+    # Raw HTML can contain blanks; diagnose it and disable setext for this file.
+    function setext_boundary(line) {
+      if (!unsupported_html_line && line ~ /^ ? ? ?</) {
+        unsupported_html_line = NR
+        printf "unsupported_html\t%d\n", NR
+      }
+      if (!unsupported_html_line && manifest_paragraph && line ~ /^(=+|-+)[ \t]*$/) {
+        manifest_paragraph = 0
+        manifest_block_start = 0
+        return 1
+      }
+      if (line ~ /^[ \t]*$/) {
+        reset_manifest_paragraph()
+      } else {
+        # List bytes explicitly so locale collation cannot broaden ASCII ranges.
+        manifest_paragraph = (line ~ /^[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789]/ &&
+          line !~ /^[0-9]+[.)]([ \t]|$)/ &&
+          (manifest_block_start || manifest_paragraph))
+        # POSIX awk EREs have no backreferences. Each break uses one marker,
+        # repeated at least three times; mixed/short runs do not end a block.
+        manifest_block_start = (line ~ /^#{1,6}([ \t]|$)/ ||
+          line ~ /^(-[ \t]*){3,}$/ || line ~ /^(\*[ \t]*){3,}$/ ||
+          line ~ /^(_[ \t]*){3,}$/)
+      }
+      return 0
     }
     # Only delimiter recognition expands tabs. Matching uses original bytes.
     function expanded(line, out, i, ch) {
@@ -370,10 +416,11 @@ parse_lessons_input() {
       # An active block owns its contents; neither parser can start the other.
       if (in_comment) {
         commented($0)
+        reset_manifest_paragraph()
         next
       }
-      if (fenced($0)) next
-      if (commented($0)) next
+      if (fenced($0)) { reset_manifest_paragraph(); next }
+      if (commented($0)) { reset_manifest_paragraph(); next }
       if (input_kind == "archive") {
         line = $0
         sub(/^ ? ? ?/, "", line)
@@ -384,6 +431,7 @@ parse_lessons_input() {
         }
         next
       }
+      if (setext_boundary($0)) { inrec = 0; next }
       if ($0 ~ /^##[[:space:]]+lesson:/) {
         rec++
         key = $0
@@ -439,6 +487,9 @@ while IFS=$'\t' read -r event rec field value; do
     unclosed_comment)
       manifest_complete="false"
       findings+=("unterminated HTML comment in manifest: $manifest:$rec (archive classification completeness check skipped)")
+      ;;
+    unsupported_html)
+      findings+=("unsupported HTML-like content in manifest: $manifest:$rec (setext boundaries disabled; use fenced code or HTML comments for examples)")
       ;;
     field)
       case "$field" in

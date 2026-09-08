@@ -1141,7 +1141,14 @@ for non_opener in '    <!--' '        <!--' $'\t<!--' 'text <!--' '\<!--' \
   '`<!--`' '``<!--``' '<! --'; do
   printf '%s\n' "$non_opener" '## lesson: real lesson' '- classification: archival-only' >"$parser_manifest"
   printf '%s\n' "$non_opener" '### real lesson' >"$parser_archive"
-  expect_comment_case '' ''
+  # A malformed comment opener remains non-comment text, but its leading <
+  # is now diagnosed by the manifest's conservative unsupported-HTML check.
+  non_opener_finding=''
+  if [[ "$non_opener" == '<! --' ]]; then
+    non_opener_finding="unsupported HTML-like content in manifest: $parser_manifest:1"
+  fi
+  expect_comment_case "$non_opener_finding" "$non_opener_finding"
+  reject_output 'unterminated HTML comment' 'has no classification'
 done
 # Intentional CommonMark behavior: this list interrupts the paragraph, so its
 # inline opener is literal text and the following classification stays active.
@@ -1668,5 +1675,185 @@ printf '%s\n' '> ```' >>"$rules"
 expect_rules_case ''
 
 expect_mode_representatives 48 1
+
+# --- 49. Supported setext sections close records and parsing resumes ---
+d="$tmp_root/setext"
+mk_layout "$d"
+parser_manifest="$(manifest_path "$d")"
+parser_archive="$d/agent-vault/context/archive/lessons-archive.md"
+printf '%s\n' '### real lesson' '### another lesson' >"$parser_archive"
+# Reuse the input-preserving parser mode helper; syntax variants stay strict-only.
+for underline in '-' '=' '---' $'====== \t'; do
+  for ending in lf crlf no-final-newline; do
+    printf '%s\n' '## lesson: real lesson' '- classification: archival-only' '' \
+      'Other Section' "$underline" '- classification: invalid-outside-record' \
+      '- covered_by: invalid-outside-record' '- quick_rule: invalid-outside-record' \
+      '## lesson: another lesson' '### Details' '- classification: archival-only' >"$parser_manifest"
+    comment_line_endings "$ending" "$parser_manifest"
+    setext_case_options=()
+    if [[ "$underline" == '-' && "$ending" == lf ]]; then
+      setext_case_options=(--all-modes=49-supported-boundary)
+    fi
+    expect_comment_case "${setext_case_options[@]}" '' '' '(2 classified)'
+  done
+done
+for title in $'Other\nSection' '2026 notes' 'Other *section*' 'lesson: not a record'; do
+  printf '%s\n' '## lesson: real lesson' '- classification: archival-only' '' \
+    "$title" '===' '- classification: outside' 'Further section' '---' \
+    '## lesson: another lesson' '- classification: archival-only' >"$parser_manifest"
+  expect_comment_case '' '' '(2 classified)'
+done
+# A new paragraph may start after a real leaf block without an intervening blank.
+for preceding in '### Details' $'***' $'_ _ _\t' $'- - -' \
+  $'~~~\nexample\n~~~' $'```md\nexample\n```' '<!-- example -->'; do
+  printf '%s\n' '## lesson: real lesson' '- classification: archival-only' '' \
+    "$preceding" 'Other Section' '---' '- classification: outside' \
+    '## lesson: another lesson' '- classification: archival-only' >"$parser_manifest"
+  expect_comment_case '' '' '(2 classified)'
+done
+expect_mode_representatives 49 1
+
+# --- 50. Non-boundaries preserve both required fields and duplicate findings ---
+printf '%s\n' '### real lesson' >"$parser_archive"
+duplicate_finding='lesson "real lesson" repeats "classification" field'
+completeness_finding='archived lesson is not classified in the manifest: "real lesson"'
+non_boundaries=(
+  '---'
+  $'Other Section\n\n---'
+  $'Other Section\n- - -'
+  $'Other Section\n=-='
+  $'Other Section\n\\---'
+  $' Other Section\n---'
+  $'  Other Section\n==='
+  $'   Other Section\n---'
+  $'Other Section\n ---'
+  $'Other Section\n  ==='
+  $'Other Section\n   ---'
+  $'    Other Section\n    ---'
+  $'    Other Section\n---'
+  $'Other Section\n    ---'
+  $'\tOther Section\n\t---'
+  $'*Other Section*\n---'
+  $'#OtherSection\n---'
+  $'Écologie\n---'
+  $'- note: other text\n---'
+  $'- item\nLazy continuation\n==='
+  $'1. item\nLazy continuation\n==='
+  $'2) item\nLazy continuation\n==='
+  $'- item\n\n  Nested title\n  ---'
+  $'>Quoted text\n---'
+  $'> quoted paragraph\nLazy continuation\n==='
+  $'> quoted paragraph\n_*_\nLazy continuation\n==='
+  $'> quoted paragraph\n**\nLazy continuation\n==='
+  $'***\n---'
+  $'___\n---'
+  $'[reference]: /destination\n---'
+  $'Other Section\n~~~\nexample\n~~~\n---'
+  $'Other Section\n<!-- comment -->\n---'
+  $'```md\nOther Section\n---\n```'
+  $'~~~\nOther Section\n===\n~~~'
+  $'<!--\nOther Section\n---\n-->'
+)
+for candidate in "${non_boundaries[@]}"; do
+  for first_class in '' '- classification: archival-only'; do
+    printf '%s\n' '## lesson: real lesson' "$first_class" '' "$candidate" \
+      '- classification: archival-only' >"$parser_manifest"
+    setext_case_options=()
+    if [[ "$candidate" == '---' ]]; then
+      setext_case_options=("--all-modes=50-non-boundary-$first_class")
+    fi
+    if [[ -n "$first_class" ]]; then
+      expect_comment_case "${setext_case_options[@]}" "$duplicate_finding" "$duplicate_finding
+$completeness_finding"
+      expect_occurrences 1 "$duplicate_finding"
+    else
+      expect_comment_case "${setext_case_options[@]}" '' ''
+    fi
+  done
+done
+expect_mode_representatives 50 2
+
+# --- 51. HTML-like content is visible and disables later setext boundaries ---
+for indent in '' ' ' '  ' '   '; do
+  for ending in lf crlf no-final-newline; do
+    printf '%s\n' '## lesson: real lesson' '- classification: archival-only' '' \
+      "${indent}<pre>" '' 'Other Section' '---' "${indent}</pre>" '' \
+      '- classification: archival-only' >"$parser_manifest"
+    comment_line_endings "$ending" "$parser_manifest"
+    html_finding="unsupported HTML-like content in manifest: $parser_manifest:4"
+    setext_case_options=()
+    if [[ -z "$indent" && "$ending" == lf ]]; then
+      setext_case_options=(--all-modes=51-html-with-duplicate)
+    fi
+    expect_comment_case "${setext_case_options[@]}" "$html_finding
+$duplicate_finding" "$html_finding
+$duplicate_finding
+$completeness_finding"
+    expect_occurrences 1 'unsupported HTML-like content'
+    reject_output 'unterminated fence' 'unterminated HTML comment'
+  done
+done
+# The unsupported-input finding alone prevents success, even outside a record.
+printf '%s\n' '<div>' '' '## lesson: real lesson' '- classification: archival-only' >"$parser_manifest"
+html_finding="unsupported HTML-like content in manifest: $parser_manifest:1"
+expect_comment_case --all-modes=51-html-alone "$html_finding" "$html_finding"
+reject_output 'repeats' 'not classified in the manifest'
+# Raw HTML is deliberately not parsed: after the first finding, even a closed
+# block, a blank, or a new record cannot re-enable setext boundaries in this file.
+printf '%s\n' '<div></div>' '' '## lesson: real lesson' '- classification: archival-only' '' \
+  'Other Section' '---' '- classification: archival-only' >"$parser_manifest"
+expect_comment_case "$html_finding
+$duplicate_finding" "$html_finding
+$duplicate_finding
+$completeness_finding"
+# The exclusion is deliberately conservative, including closing tags/autolinks.
+for html_line in '</div>' '<https://example.com>' '< less-than text'; do
+  printf '%s\n' '## lesson: real lesson' '- classification: archival-only' "$html_line" >"$parser_manifest"
+  html_finding="unsupported HTML-like content in manifest: $parser_manifest:3"
+  expect_comment_case "$html_finding" "$html_finding"
+done
+# Fences/comments own their contents; code indentation and inline text stay literal.
+for inert in $'```md\n<pre>\n\nOther Section\n---\n```' \
+  $'<!--\n<pre>\n\nOther Section\n---\n-->' \
+  $'<!-- --> <pre>' $'    <pre>' $'\t<pre>' 'Prose <pre>' '- note: <pre>'; do
+  printf '%s\n' '## lesson: real lesson' '- classification: archival-only' '' "$inert" '' \
+    'Other Section' '===' '- classification: outside' >"$parser_manifest"
+  expect_comment_case '' ''
+  reject_output 'unsupported HTML-like content'
+done
+# The archive branch remains unchanged even when it contains raw HTML.
+printf '%s\n' '<pre>' '' '### real lesson' '</pre>' >"$parser_archive"
+printf '%s\n' '## lesson: real lesson' '- classification: archival-only' >"$parser_manifest"
+expect_comment_case '' ''
+expect_mode_representatives 51 2
+
+# --- 52. Boundaries preserve local findings, completeness, and block diagnostics ---
+printf '%s\n' '### real lesson' '### another lesson' >"$parser_archive"
+for fields in '' '- classification: bogus' \
+  $'- classification: archival-only\n- classification: archival-only'; do
+  printf '%s\n' '## lesson: real lesson' "$fields" '' 'Other Section' '---' \
+    '- classification: archival-only' '## lesson: another lesson' '- classification: archival-only' >"$parser_manifest"
+  case "$fields" in
+    '') local_finding='lesson "real lesson" has no classification' ;;
+    *bogus*) local_finding='lesson "real lesson" has an invalid classification "bogus"' ;;
+    *) local_finding="$duplicate_finding" ;;
+  esac
+  expect_comment_case "$local_finding" "$local_finding
+$completeness_finding"
+done
+printf '%s\n' '## lesson: real lesson' '- classification: archival-only' '' 'Other Section' '===' \
+  '## lesson: another lesson' '- classification: covered-by-a-named-always-on-rule' >"$parser_manifest"
+expect_comment_case 'names no "covered_by" rule' 'names no "covered_by" rule'
+# Scanning continues past a boundary even while no record is active.
+printf '%s\n' '### real lesson' '### unclassified lesson' >"$parser_archive"
+for opener in '~~~' '<!--'; do
+  printf '%s\n' '## lesson: real lesson' '- classification: archival-only' '' 'Other Section' '---' \
+    "$opener" 'unclosed example' >"$parser_manifest"
+  block_finding="unterminated fence in manifest: $parser_manifest:6"
+  [[ "$opener" != '<!--' ]] || block_finding="unterminated HTML comment in manifest: $parser_manifest:6"
+  expect_comment_case "--all-modes=52-unclosed-$opener" "$block_finding" "$block_finding"
+  reject_output 'not classified in the manifest' 'unsupported HTML-like content'
+done
+expect_mode_representatives 52 2
 
 echo "lessons-archive checker regression checks passed."

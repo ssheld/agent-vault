@@ -160,6 +160,36 @@ assert_generated_rule_eligibility() {
   assert_output_contains "$output" '(2 classified)' "$label copied checker resolves both reference types"
 }
 
+assert_setext_boundaries() {
+  local installed_checker="$1" label="$2" fixture="$tmp_root/setext-$2" output rc
+  mkdir -p "$fixture"
+  printf '%s\n' '### real lesson' '### another lesson' >"$fixture/archive.md"
+  printf '%s\n' '## lesson: real lesson' '- classification: archival-only' '' \
+    'Other Section' '---' '- classification: outside' '## lesson: another lesson' \
+    '- classification: archival-only' >"$fixture/manifest.md"
+  cp "$fixture/manifest.md" "$fixture/before.md"
+  rc=0
+  output="$(cd "$fixture" && "$installed_checker" manifest.md --archive archive.md --strict 2>&1)" || rc=$?
+  assert_exit_code 0 "$rc" "$label accepts setext and resumes at the next record"
+  assert_output_contains "$output" '(2 classified)' "$label preserves both records"
+  assert_files_equal "$fixture/before.md" "$fixture/manifest.md" "$label checker does not edit the manifest"
+
+  printf '%s\n' '## lesson: real lesson' '- classification: archival-only' '' \
+    '> quoted paragraph' '_*_' 'Lazy continuation' '===' '- classification: archival-only' \
+    '## lesson: another lesson' '- classification: archival-only' >"$fixture/manifest.md"
+  rc=0
+  output="$(cd "$fixture" && "$installed_checker" manifest.md --archive archive.md --strict 2>&1)" || rc=$?
+  assert_exit_code 1 "$rc" "$label rejects false setext boundaries in quote content"
+  assert_output_contains "$output" 'repeats "classification" field' "$label preserves duplicate-field findings"
+
+  printf '%s\n' '## lesson: real lesson' '- classification: archival-only' '  <pre>' '' \
+    'Other Section' '---' '  </pre>' '## lesson: another lesson' '- classification: archival-only' >"$fixture/manifest.md"
+  rc=0
+  output="$(cd "$fixture" && "$installed_checker" manifest.md --archive archive.md --strict 2>&1)" || rc=$?
+  assert_exit_code 1 "$rc" "$label reports unsupported indented HTML"
+  assert_output_contains "$output" 'unsupported HTML-like content in manifest: manifest.md:3' "$label preserves source line diagnostics"
+}
+
 assert_generated_safety() {
   local target="$1" label="$2" outer inner stale helper output rc=0
   # Commit only the synthetic helper fixture; runtime metadata hooks are tested
@@ -323,6 +353,7 @@ EOF
   rc=0
   output="$(cd "$fixture" && "$standalone/check-lessons-archive.sh" "$fixture/lessons-manifest.md" --archive "$fixture/lessons-archive.md" --strict 2>&1)" || rc=$?
   assert_exit_code 0 "$rc" "$label standalone lessons parser preserves fence/comment precedence"
+  assert_setext_boundaries "$standalone/check-lessons-archive.sh" "$label-standalone"
   assert_files_equal "$fixture/project-log-before.md" "$target/agent-vault/context-log.md" "$label leaves project-owned log unchanged"
 }
 
@@ -373,6 +404,7 @@ assert_executable "$target/scripts/check-lessons-archive.sh" "new-project makes 
 assert_file_contains "$target/scripts/check-lessons-archive.sh" "# agent-vault-managed: helper-script; file=check-lessons-archive.sh" "new-project seeds lessons-archive checker marker"
 assert_files_equal "$repo_root/scaffold/root/scripts/check-lessons-archive.sh" "$target/scripts/check-lessons-archive.sh" "new-project seeds complete lessons-archive checker"
 assert_generated_rule_eligibility "$target" fresh-bootstrap
+assert_setext_boundaries "$target/scripts/check-lessons-archive.sh" fresh-bootstrap
 assert_generated_import_discovery "$target" fresh-bootstrap
 assert_generated_context_budget "$target" fresh-bootstrap
 assert_generated_safety "$target" fresh-bootstrap
@@ -513,6 +545,7 @@ assert_file_contains "$target/scripts/check-context-log-rollover.sh" "stale dupl
 assert_file_contains "$target/scripts/compact-context-log.sh" "Keeps the Current Snapshot plus the newest" "update-project refreshes stale rollover compactor content"
 assert_files_equal "$repo_root/scaffold/root/scripts/check-lessons-archive.sh" "$target/scripts/check-lessons-archive.sh" "update-project refreshes complete lessons-archive checker"
 assert_generated_rule_eligibility "$target" managed-update
+assert_setext_boundaries "$target/scripts/check-lessons-archive.sh" managed-update
 assert_generated_import_discovery "$target" managed-update
 assert_generated_context_budget "$target" managed-update
 for name in context-log.md memory-budget.config memory-budget.exceptions.tsv; do
