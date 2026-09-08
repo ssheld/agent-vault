@@ -11,6 +11,13 @@ tmp_root="$(cd "$tmp_root" && pwd -P)"
 cleanup() { rm -rf "$tmp_root"; }
 trap cleanup EXIT
 
+# Share one clock with child compactors, including those behind fault-injection PATHs.
+# shellcheck source=scripts/lib/fixed-test-clock.sh
+source "$repo_root/scripts/lib/fixed-test-clock.sh"
+clock_bin="$tmp_root/clock-bin"
+install_fixed_test_clock "$clock_bin"
+assert_fixed_test_clock "$clock_bin"
+
 pass=0
 fail() {
   echo "FAIL: $*" >&2
@@ -619,6 +626,7 @@ assert_not_exists "$d/archive/a.md" "collide: no archive written on collision"
 d="$tmp_root/seq"
 mkdir -p "$d/archive"
 make_log "$d/log.md"
+# Keep this date call: fixture seeding and the default-ID path must share the clock.
 today="$(date +%Y-%m-%d)"
 # Existing records now require their matching live pointer; keep this sequence
 # fixture internally consistent rather than bypassing partial-state detection.
