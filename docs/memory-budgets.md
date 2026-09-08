@@ -656,9 +656,9 @@ by the normal zero-to-three-space closing fence. A sibling list item or containe
 end does not implicitly close a fence: an explicit closing fence is required.
 Fence markers after ordinary prose are literal. At the start of a line or after
 recognized quote/list prefixes, they can open a fence and require a matching
-closer. For example, ````- Wrap examples in ``` fences```` is ordinary prose, while
-````- ``` opens a fenced block```` starts a fence. Put descriptive prose before
-delimiter mentions when explaining fence syntax.
+closer. For example, ````- Wrap examples in ``` fences```` is ordinary prose.
+The text ````- ``` opens a fenced block```` starts a fence. Put descriptive prose
+before delimiter mentions when explaining fence syntax.
 
 HTML comments in rules sources can start anywhere outside excluded code, unlike
 the manifest/archive block-only contract. Only the prefix before the first

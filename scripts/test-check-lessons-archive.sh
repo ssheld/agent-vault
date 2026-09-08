@@ -907,6 +907,32 @@ expect_occurrences 1 'duplicate lesson key'
 expect_occurrences 1 'not present in the archive'
 expect_result 0 '2 warning(s)' "$parser_manifest"
 
+# Check each content group's representative count separately: a selector that
+# stops matching must fail here, even if another group gains a representative.
+mode_representative_count=0
+expect_mode_representatives() {
+  local group="$1" expected="$2"
+  if [[ "$mode_representative_count" -ne "$expected" ]]; then
+    echo "FAIL: group $group expected $expected mode representatives, got $mode_representative_count" >&2
+    exit 1
+  fi
+  mode_representative_count=0
+}
+
+# Invalid helper options must fail before touching fixtures or running a checker.
+expect_case_option_error() {
+  local helper="$1" option="$2" required="$3" output rc
+  set +e
+  output="$("$helper" "$option" '' '' 2>&1)"
+  rc=$?
+  set -e
+  if [[ "$rc" -ne 2 || "$output" != *"$required"* ]]; then
+    echo "FAIL: $helper must reject '$option' with exit 2 and '$required'" >&2
+    printf '%s\n' "$output" >&2
+    exit 1
+  fi
+}
+
 # Content cases run once in strict mode unless explicitly named with
 # --all-modes=<representative>. Empty finding text means a clean run in that mode.
 # Strict runs last so reject_output/expect_occurrences always inspect its output.
@@ -915,10 +941,19 @@ expect_comment_case() {
   local case_name='strict content'
   local -a modes=(strict)
   case "${1:-}" in
+    --all-modes=)
+      echo 'FAIL: --all-modes requires a representative name' >&2
+      exit 2
+      ;;
     --all-modes=*)
       case_name="${1#*=}"
       modes=(advisory quiet strict-quiet strict)
+      mode_representative_count=$((mode_representative_count + 1))
       shift
+      ;;
+    --*)
+      echo "FAIL: unknown case option: $1" >&2
+      exit 2
       ;;
   esac
   local advisory_findings="$1" strict_findings="$2" clean_text="${3:-(1 classified)}"
@@ -967,6 +1002,8 @@ expect_comment_case() {
   cmp "$d/archive-before.md" "$parser_archive"
   cmp "$d/rules-before.md" "$d/agent-vault/lessons.md"
 }
+expect_case_option_error expect_comment_case --all-mode=typo 'unknown case option'
+expect_case_option_error expect_comment_case --all-modes= 'requires a representative name'
 
 comment_line_endings() {
   local ending="$1" source_path
@@ -1004,6 +1041,7 @@ for indent in '' ' ' '  ' '   '; do
     expect_comment_case "${comment_case_options[@]}" '' ''
   done
 done
+expect_mode_representatives 31 2
 
 # --- 32. Comments cannot create/end records or supply/replace any field ---
 printf '%s\n' '### real lesson' >"$parser_archive"
@@ -1029,6 +1067,7 @@ archived lesson is not classified in the manifest: "real lesson"'
     quick_rule) expect_comment_case --all-modes=32-optional-hidden-quick-rule '' '' ;;
   esac
 done
+expect_mode_representatives 32 4
 
 # --- 33. Comments and fences cannot change each other's state ---
 for fence_case in "${fence_cases[@]}"; do
@@ -1047,6 +1086,7 @@ for fence_case in "${fence_cases[@]}"; do
   fi
   expect_comment_case "${comment_case_options[@]}" '' '' '(2 classified)'
 done
+expect_mode_representatives 33 1
 
 # --- 34. Consume the closing physical line, including any second comment ---
 # Exercise single-line and multiline blocks. Even an unclosed second opener
@@ -1094,6 +1134,7 @@ printf '%s\n' '## lesson: real lesson' '```md' '<!--' 'Reference example: <!-- h
   '- classification: archival-only' '-->' '```' >"$parser_manifest"
 expect_comment_case --all-modes=34-fenced-example 'has no classification' 'has no classification
 archived lesson is not classified in the manifest: "real lesson"'
+expect_mode_representatives 34 5
 
 # --- 35. Only block openers are interpreted; inline markers stay literal ---
 for non_opener in '    <!--' '        <!--' $'\t<!--' 'text <!--' '\<!--' \
@@ -1116,6 +1157,7 @@ archived lesson is not classified in the manifest: "real lesson"'
 printf '%s\n' '## lesson: real lesson' '- classification: archival-only <!-- note -->' >"$parser_manifest"
 expect_comment_case --all-modes=35-literal-classification 'has an invalid classification' 'has an invalid classification
 archived lesson is not classified in the manifest: "real lesson"'
+expect_mode_representatives 35 4
 
 # --- 36. Unclosed comments are findings and incomplete inputs in every mode ---
 for input_kind in manifest archive; do
@@ -1151,6 +1193,7 @@ for input_kind in manifest archive; do
     done
   done
 done
+expect_mode_representatives 36 4
 
 # --- 37. Incomplete comments retain independent validation and absence checks ---
 printf '%s\n' '# Empty manifest' >"$parser_manifest"
@@ -1181,6 +1224,7 @@ unterminated fence in archive
 has an invalid classification "bogus"'
 expect_comment_case --all-modes=37-mixed-blocks-with-local-error "$required" "$required"
 reject_output 'not present in the archive' 'not classified in the manifest'
+expect_mode_representatives 37 4
 
 # --- 38. Comment scanning preserves empty/partial producer failure semantics ---
 # Mode representatives: manifest/archive producer failures; retain all existing mode combinations.
@@ -1235,10 +1279,19 @@ expect_rules_case() {
   local case_name='strict content'
   local -a modes=(strict)
   case "${1:-}" in
+    --all-modes=)
+      echo 'FAIL: --all-modes requires a representative name' >&2
+      exit 2
+      ;;
     --all-modes=*)
       case_name="${1#*=}"
       modes=(advisory quiet strict-quiet strict)
+      mode_representative_count=$((mode_representative_count + 1))
       shift
+      ;;
+    --*)
+      echo "FAIL: unknown case option: $1" >&2
+      exit 2
       ;;
   esac
   local findings="$1" mode expected_rc required
@@ -1291,6 +1344,8 @@ expect_rules_case() {
   cmp "$rules" "$d/rules-before"
   cmp "$extra_rules" "$d/extra-before"
 }
+expect_case_option_error expect_rules_case --all-mode=typo 'unknown case option'
+expect_case_option_error expect_rules_case --all-modes= 'requires a representative name'
 inactive_rules=(
   $'<!--\nNever discard the recovery marker\n-->'
   '<!-- Never discard the recovery marker -->'
@@ -1337,6 +1392,7 @@ for reference_field in covered_by quick_rule; do
     expect_rules_case ''
   done
 done
+expect_mode_representatives 39 8
 
 # --- 40. Shared delimiter rules, precedence, and literal matching bytes ---
 write_rule_manifest covered_by
@@ -1353,7 +1409,11 @@ for ending in lf crlf no-final-newline; do
     write_rule_manifest "$reference_field" "$literal_needle"
     printf '%s\n' "$literal_needle" >"$rules"
     comment_line_endings "$ending" "$parser_manifest" "$parser_archive" "$rules"
-    expect_rules_case ''
+    rules_case_options=()
+    if [[ "$ending" == lf && "$reference_field" == covered_by ]]; then
+      rules_case_options=(--all-modes=40-literal-reference-data)
+    fi
+    expect_rules_case "${rules_case_options[@]}" ''
     printf '%s\n' unrelated >"$rules"
     expect_rules_case 'was not found in any live rules source'
   done
@@ -1365,6 +1425,7 @@ expect_rules_case 'was not found in any live rules source' --rules "$extra_rules
 printf '%s' 'Never discard the ' >"$rules"
 printf '%s' 'recovery marker' >"$extra_rules"
 expect_rules_case 'was not found in any live rules source' --rules "$extra_rules"
+expect_mode_representatives 40 1
 
 # --- 41. Every incomplete source prevents success, regardless of match order ---
 for reference_field in covered_by quick_rule; do
@@ -1406,6 +1467,7 @@ expect_rules_case --all-modes=41-independent-manifest-findings 'in rules source:
 manifest classifies a lesson not present in the archive'
 expect_occurrences 1 'archived lesson is not classified in the manifest'
 printf '%s\n' '### real lesson' >"$parser_archive"
+expect_mode_representatives 41 13
 
 # --- 42. Do not scan unused sources; empty sources and repeated needles work ---
 printf '%s\n' '<!--' '# INJECT PARSER FAILURE' >"$rules"
@@ -1424,6 +1486,7 @@ printf '%s\n' '### second lesson' >>"$parser_archive"
 printf '%s\n' "$rule_needle" >"$rules"
 expect_rules_case '' --rules "$rules" --rules "$rules"
 printf '%s\n' '### real lesson' >"$parser_archive"
+expect_mode_representatives 42 2
 
 # --- 43. Source execution failures discard empty/partial output and clean data ---
 # Mode representatives: rules producer failures; retain all existing mode combinations.
@@ -1556,8 +1619,13 @@ for source_name in lessons shared-rules coding-standards AGENTS review-policy; d
   source_path="$repo_root/scaffold/agent-vault/$source_name.md"
   seeded_rule="$(grep -m 1 -E '^#+ ' "$source_path")"
   write_rule_manifest covered_by "$seeded_rule"
-  expect_rules_case '' --rules "$source_path"
+  rules_case_options=()
+  if [[ "$source_name" == lessons ]]; then
+    rules_case_options=(--all-modes=46-seeded-heading)
+  fi
+  expect_rules_case "${rules_case_options[@]}" '' --rules "$source_path"
 done
+expect_mode_representatives 46 1
 
 # --- 47. Container indentation and marker boundaries preserve fence semantics ---
 write_rule_manifest covered_by
@@ -1573,12 +1641,13 @@ for prefixes in '   > |>' ' - |   ' '*   |    ' '123456789) |           ' '> 1) 
 done
 # A ten-digit ordered marker is ordinary prose, not a supported container.
 printf '%s\n' '1234567890) ``` literal delimiter mention' "$rule_needle" >"$rules"
-expect_rules_case ''
+expect_rules_case --all-modes=47-literal-ordered-marker ''
+expect_mode_representatives 47 1
 
-# --- 48. Fence mentions after prose differ from delimiters leading a bullet ---
+# --- 48. Fence mentions after prose differ from delimiters leading a container ---
 write_rule_manifest covered_by
 printf '%s\n' "$rule_needle" '- Wrap examples in ``` fences' >"$rules"
-expect_rules_case ''
+expect_rules_case --all-modes=48-prose-fence-mention ''
 printf '%s\n' "$rule_needle" '- ``` opens a fenced block' >"$rules"
 expect_rules_case "unterminated fence in rules source: $rules:2
 liveness check skipped: unverifiable"
@@ -1586,5 +1655,18 @@ expect_occurrences 1 'unterminated fence'
 reject_output 'was not found'
 printf '%s\n' '  ```' >>"$rules"
 expect_rules_case ''
+
+# Quote containers follow the same prose/opener distinction as list containers.
+printf '%s\n' "$rule_needle" '> Notes ```' >"$rules"
+expect_rules_case ''
+printf '%s\n' "$rule_needle" '> ``` opens a block' >"$rules"
+expect_rules_case "unterminated fence in rules source: $rules:2
+liveness check skipped: unverifiable"
+expect_occurrences 1 'unterminated fence'
+reject_output 'was not found'
+printf '%s\n' '> ```' >>"$rules"
+expect_rules_case ''
+
+expect_mode_representatives 48 1
 
 echo "lessons-archive checker regression checks passed."
