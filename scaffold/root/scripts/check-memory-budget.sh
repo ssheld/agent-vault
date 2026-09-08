@@ -85,6 +85,7 @@ Options:
   --chain-budget <bytes>   Per @-chain total budget in bytes (default: 120000).
   --context-log-budget N  Protocol-read context-log budget (default: 60000 bytes).
   --context-log-target N  Reserved retention target (default: 30000 bytes).
+  --context-log-path PATH Designated repo-relative path (default: agent-vault/context-log.md).
   --gemini-import-depth N  Modeled Gemini tree depth, 0-64 (default: 5).
   --protocol-read "<list>" Space-separated protocol-read files (default: the
                            canonical session-start set).
@@ -97,7 +98,7 @@ Options:
   --format text|tsv        Output format (default: text).
   -h, --help               Show this help.
 
-Precedence for budgets/lists: CLI flag > config file > built-in default.
+Precedence for budgets/lists/designation: CLI flag > config file > built-in default.
 Byte budgets use decimal integers up to 2147483647; leading zeroes are decimal.
 General file/chain budgets allow zero; context budgets must be positive and
 context_log_target must be less than context_log_budget. The target is validated
@@ -106,7 +107,8 @@ context_log_path defaults to agent-vault/context-log.md, relative to --repo.
 It designates a path in protocol_read; it does not add a file to that set.
 Designations allow ./ and repeated /, not whitespace, absolute paths, or ..
 components. No physical-alias matching: imported/aliased logs retain the general
-limit. Reports note an excluded designation without failing, even under --strict.
+limit. An explicit designation outside effective protocol_read is a config error
+(exit 2). Excluding the built-in default alone is informational, even under --strict.
 Import scope: repo-local source bytes from CLAUDE.md and GEMINI.md, not the full
 client memory hierarchy or expanded prompt. Physical files count once per chain;
 every reached logical alias must be excepted before its source is subtracted.
@@ -200,7 +202,9 @@ read_memory_budget_config() {
 resolve_context_log_budget() {
   context_log_budget="${context_log_budget:-${config_context_log_budget:-60000}}"
   context_log_target="${context_log_target:-${config_context_log_target:-30000}}"
-  context_log_path="${config_context_log_path:-agent-vault/context-log.md}"
+  context_log_path_explicit=false
+  [[ -z "${context_log_path:-$config_context_log_path}" ]] || context_log_path_explicit=true
+  context_log_path="${context_log_path:-${config_context_log_path:-agent-vault/context-log.md}}"
   [[ "$context_log_target" -lt "$context_log_budget" ]] || die "context_log_target must be less than context_log_budget"
 }
 # END memory budget config
@@ -211,6 +215,7 @@ file_budget=""
 chain_budget=""
 context_log_budget=""
 context_log_target=""
+context_log_path=""
 protocol_read_cli=""
 agents_cli=""
 exceptions_cli=""
@@ -249,6 +254,11 @@ while [[ $# -gt 0 ]]; do
     --context-log-target)
       [[ $# -ge 2 ]] || die "--context-log-target requires a number"
       context_log_target="$(normalize_budget context_log_target "$2")" || exit 2
+      shift 2
+      ;;
+    --context-log-path)
+      [[ $# -ge 2 ]] || die "--context-log-path requires a path"
+      context_log_path="$(normalize_context_log_path "$2")" || exit 2
       shift 2
       ;;
     --gemini-import-depth)
@@ -881,6 +891,11 @@ for protocol_path in "${protocol_read_files[@]}"; do
 done
 context_coverage_note=""
 if [[ "$context_log_covered" == false ]]; then
+  # Explicit designations assert coverage, including when a CLI file-set
+  # override narrows it. Only the implicit default may be excluded benignly.
+  if [[ "$context_log_path_explicit" == true ]]; then
+    die "context_log_path '$context_log_path' is not in effective protocol_read; include it in protocol_read (or --protocol-read), or change context_log_path (--context-log-path)"
+  fi
   context_coverage_note="$context_log_path is not in effective protocol_read; its protocol size is not checked (designation does not add a file)"
 fi
 

@@ -113,16 +113,55 @@ printf 'context_log_path=./custom//context-log.md\nprotocol_read=custom/context-
 run 0 --strict --format tsv
 check row protocol custom/context-log.md ok 50000
 check absent 'not in effective protocol_read'
-run 0 --strict --protocol-read agent-vault/plan.md
+run 2 --strict --protocol-read agent-vault/plan.md
 check contains 'not in effective protocol_read'
 check absent "$(printf 'protocol\tcustom/context-log.md\t')"
+
+# An explicit uncovered designation is a config error before any misleading
+# overage on the canonical log. Pin both 50 KB files from the review repro.
+mkdir -p "$project/docs"
+size_file "$project/docs/log.md" 50000
+size_file "$log" 50000
+printf 'context_log_path=docs/log.md\n' >"$config"
+for format in text tsv; do
+  run 2 --format "$format"
+  check contains "context_log_path 'docs/log.md' is not in effective protocol_read"
+  check contains 'include it in protocol_read'
+  check absent 'over file budget'
+  run 2 --strict --format "$format"
+  check contains "context_log_path 'docs/log.md' is not in effective protocol_read"
+  check absent 'over file budget'
+done
+# Explicitly choosing the default path is still an assertion of coverage.
+printf 'context_log_path=agent-vault/context-log.md\nprotocol_read=agent-vault/plan.md\n' >"$config"
+run 2 --strict
+check contains 'not in effective protocol_read'
+# Narrowed sets remain supported when the designation comes from defaults.
 printf 'protocol_read=agent-vault/plan.md\n' >"$config"
 run 0 --strict
 check contains 'not in effective protocol_read'
+run 0 --strict --format tsv
+check contains 'not in effective protocol_read'
+run 2 --strict --context-log-path agent-vault/context-log.md
+check contains 'not in effective protocol_read'
 printf 'protocol_read=./agent-vault//context-log.md\n' >"$config"
+size_file "$log" 55000
 run 0 --strict --format tsv
 check row protocol ./agent-vault//context-log.md ok 55000
 check absent 'not in effective protocol_read'
+
+# The designation has the same CLI > selected config > default precedence.
+run 0 --strict --context-log-path ./custom//context-log.md --protocol-read custom/context-log.md --format tsv
+check row protocol custom/context-log.md ok 50000
+check contains 'context_log_path=custom/context-log.md'
+run 2 --context-log-path custom/context-log.md
+check contains 'not in effective protocol_read'
+printf 'context_log_path=docs/log.md\n' >"$project/path.config"
+run 0 --strict --config "$project/path.config" --context-log-path agent-vault/context-log.md --format tsv
+check row protocol agent-vault/context-log.md ok 55000
+check contains 'context_log_path=agent-vault/context-log.md'
+run 0 --strict --context-log-path docs/log.md --context-log-path agent-vault/context-log.md
+run 2 --context-log-path agent-vault/context-log.md --context-log-path docs/log.md
 
 # A generic override is independent and gets an informational migration note.
 printf 'file_budget=20000\n' >"$config"
@@ -192,6 +231,12 @@ for path in '' /absolute ../log.md custom/../log.md 'has space.md' . $'bad\033pa
   printf 'context_log_path=%s\n' "$path" >"$config"
   run 2
   check contains context_log_path
+  # Invalid supplied paths cannot be hidden by a later valid override.
+  run 2 --context-log-path agent-vault/context-log.md
+  printf '' >"$config"
+  run 2 --context-log-path "$path"
+  check contains context_log_path
+  run 2 --context-log-path "$path" --context-log-path agent-vault/context-log.md
 done
 printf 'file_budget=$(touch %s/executed)\n' "$tmp_root" >"$config"
 run 2
@@ -202,7 +247,7 @@ check contains 'unknown config key'
 run 2 --config "$project/missing.config"
 run 2 --config "$project/custom"
 run 2 --config ''
-for flag in --file-budget --chain-budget --context-log-budget --context-log-target; do
+for flag in --file-budget --chain-budget --context-log-budget --context-log-target --context-log-path; do
   run 2 "$flag"
 done
 
@@ -229,11 +274,17 @@ REAL_CAT="$(command -v cat)" FAIL_CONFIG="$config" PATH="$tmp_root/bin:$PATH" ru
 check contains 'cannot read config file'
 mv "$config" "$project/saved.config"
 ln -s missing-config "$config"
+# These default-location entries used to be ignored; both report modes now
+# reject them instead of silently falling back to built-in defaults.
 run 2
+check contains 'readable regular file'
+run 2 --strict
 check contains 'readable regular file'
 rm "$config"
 mkdir "$config"
 run 2
+check contains 'readable regular file'
+run 2 --strict
 check contains 'readable regular file'
 rmdir "$config"
 mv "$project/saved.config" "$config"

@@ -169,7 +169,10 @@ The designated context log now has a 60,000-byte allowance in the protocol-read
 bucket only; imported logs and other files retain the 40,000-byte general default.
 The checker accepts a 30,000-byte retention target, but byte-based compaction is
 not implemented yet: the compactor still requires `--keep N` and reads no budget
-config. Update managed helpers before adding the new config keys. See
+config. Designations support `--context-log-path`; explicitly selected paths
+must be in the effective `protocol_read` set or the checker exits 2. Excluding
+the built-in default alone remains informational. Update managed helpers before
+adding the new config keys. See
 [context-log configuration and upgrade behavior](docs/memory-budgets.md#context-log-allowance-and-current-implementation-stage).
 
 CI runs these checks via `.github/workflows/scaffold-regression-checks.yml` on

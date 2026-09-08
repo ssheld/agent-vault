@@ -263,7 +263,9 @@ even though its protocol row is now within 60 KB. Protocol-only exceptions use
 the context-log threshold. Exceptions remain keyed by the displayed path.
 
 `context_log_path` is a literal repo-relative designation in `protocol_read`,
-not an extra discovery source. `./` and repeated `/` normalize for designation
+not an extra discovery source. It resolves independently as
+`--context-log-path` > selected config > built-in default, just like the byte
+settings. `./` and repeated `/` normalize for designation
 matching; absolute paths, `..` components, whitespace/control characters, and
 empty/dot-only designations are rejected. Physical aliases are not matched.
 The existing protocol list is whitespace-separated, so paths containing
@@ -274,11 +276,25 @@ context_log_path=memory/live-log.md
 protocol_read=memory/live-log.md agent-vault/plan.md
 ```
 
-If an effective protocol override excludes the designated log, the report says
-its protocol size is not checked. This is informational, even under `--strict`:
-intentionally narrowed file sets remain supported. A designated path included
-in the set but absent on disk receives the existing `MISSING` row instead.
+An explicit designation from config or `--context-log-path` must belong to the
+effective `protocol_read` set. Otherwise the checker exits 2 in both ordinary
+and strict modes, naming the designation and explaining how to include or change
+it, before producing unrelated file overages. This also applies when explicitly
+choosing the canonical path, or when a CLI `--protocol-read` override excludes
+the configured designation. For a one-off narrowed check, supply a matching
+`--context-log-path` or use a config without an explicit designation.
+
+If only the **built-in default** designation is excluded by a narrowed protocol
+set, the report notes that its protocol size is not checked. This remains
+informational, even under `--strict`, preserving existing narrowed file sets.
+A designated path included in the set but absent on disk receives the existing
+`MISSING` row instead.
 No file is automatically imported or added to session-start reads.
+
+```bash
+scripts/check-memory-budget.sh --repo . --context-log-path memory/live-log.md \
+  --protocol-read 'memory/live-log.md agent-vault/plan.md' --strict
+```
 
 The checker reports the selected config source (or `built-in defaults`),
 effective budgets, and the designation. TSV keeps its existing five columns
@@ -313,6 +329,12 @@ defaults. The checker automatically looks only at
 `<repo>/agent-vault/memory-budget.config`; another location needs `--config`.
 Relative explicit config paths remain relative to the invocation directory.
 
+Default-config discovery is intentionally stricter on upgrade: a directory,
+dangling symlink, or other non-regular entry at
+`agent-vault/memory-budget.config` was previously ignored in favor of defaults
+but now exits 2. Remove an unintended entry or replace it with a readable regular
+config file. A genuinely absent default config still uses built-in defaults.
+
 Upgrade the managed checker **before adding the new keys**: older checkers reject
 them, including `context_log_target`, as unknown-key errors. Both context byte
 keys and the path designation are supported together in this release. New numeric
@@ -323,10 +345,10 @@ plain decimal budgets retain their values; the generic zero settings still work.
 `--file-budget` no longer controls the designated log's protocol allowance. If a
 project explicitly sets the generic budget but leaves the context budget at its
 default, direct reports include an informational note identifying the new key.
-Set `context_log_budget` explicitly to preserve a tighter log limit. A CLI context
-override suppresses this migration note too. These informational notes neither
-cause strict failures nor trigger a new recurring pre-commit warning, and no
-"already warned" state or rewritten config is stored.
+Set `context_log_budget` explicitly to preserve a tighter log limit. A CLI
+`--context-log-budget` override suppresses this migration note too. These
+informational notes neither cause strict failures nor trigger a new recurring
+pre-commit warning, and no "already warned" state or rewritten config is stored.
 
 Bootstrap/update propagate the managed checker without creating or rewriting
 budget configs, exceptions, logs, or archives for this feature. Managed refreshes

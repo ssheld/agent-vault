@@ -290,4 +290,28 @@ git -C "$p" add agent-vault/memory-budget.config
 AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm config-invalid
 [[ "$HOOK_RC" -eq 0 && "$HOOK_STDERR" == *"context_log_target must be positive"* ]] || fail "invalid context config was hidden or blocked commit" "$HOOK_STDERR"
 
+# A misconfigured explicit designation must reach the real hook error surface,
+# not produce only an unrelated canonical-log overage. Both files are 50 KB.
+context_size 50000
+mkdir -p "$p/docs"
+cp "$p/agent-vault/context-log.md" "$p/docs/log.md"
+printf 'context_log_path=docs/log.md\n' >"$p/agent-vault/memory-budget.config"
+git -C "$p" add agent-vault/context-log.md docs/log.md agent-vault/memory-budget.config
+# A valid unstaged config must not conceal the staged configuration error.
+printf 'context_log_path=docs/log.md\nprotocol_read=docs/log.md\n' >"$p/agent-vault/memory-budget.config"
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm context-path-uncovered
+[[ "$HOOK_RC" -eq 0 && "$HOOK_STDERR" == *"context_log_path 'docs/log.md' is not in effective protocol_read"* ]] || fail "uncovered designation diagnostic was hidden or blocked commit" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" == *"include it in protocol_read"* && "$HOOK_STDERR" != *"over file budget"* ]] || fail "uncovered designation gave a misleading hook warning" "$HOOK_STDERR"
+
+git -C "$p" add agent-vault/memory-budget.config
+printf 'context_log_path=docs/log.md\n' >"$p/agent-vault/memory-budget.config"
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm context-path-covered
+[[ "$HOOK_RC" -eq 0 && "$HOOK_STDERR" != *"memory-budget warning"* ]] || fail "hook rejected staged covered designation using unstaged config" "$HOOK_STDERR"
+
+# Omitting the built-in default via a narrowed file set stays informational.
+printf 'protocol_read=agent-vault/plan.md agent-vault/lessons.md\n' >"$p/agent-vault/memory-budget.config"
+git -C "$p" add agent-vault/memory-budget.config
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm context-default-excluded
+[[ "$HOOK_RC" -eq 0 && "$HOOK_STDERR" != *"memory-budget warning"* ]] || fail "default designation exclusion triggered a hook warning" "$HOOK_STDERR"
+
 echo "memory budget + context-log rollover pre-commit hook regression checks passed."

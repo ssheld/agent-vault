@@ -90,7 +90,10 @@ defaults to 60,000 bytes; imported logs and other memory files still use the
 `context_log_path` are accepted together. The 30,000-byte target is validated and
 reported but not yet enforced by the count-based compactor. Upgrade the checker
 before adding these keys; an older checker rejects unknown keys. No hook compacts
-files or rewrites configuration. Informational migration/coverage notes are
+files or rewrites configuration. An explicit `context_log_path` outside the
+effective `protocol_read` set is a configuration error; the hook prints that
+diagnostic without blocking the commit. Excluding only the built-in default
+remains informational. Informational migration/default-coverage notes are
 available in direct reports and do not trigger additional hook warnings.
 
 The managed checker now fails `--strict` for incomplete **in-scope** import
