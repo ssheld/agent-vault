@@ -831,10 +831,59 @@ line. Only a `## lesson:` heading supplies a record's key; a body `- key:` field
 cannot change it. Unrecognized fields are ignored. Other level-1 and level-2
 ATX headings end the record, including bare `#` and `##` headings. Deeper
 headings stay within the record, and the next `## lesson:` starts a new one.
-Underlined (setext) section headings are not supported; use `#`/`##` sections.
 Archive `###` headings and manifest field bullets may have zero to three
 leading spaces. Four-space or tab-indented code does not supply headings or
 fields.
+
+Underlined (setext) level-1/level-2 sections also end the active record. Only
+`## lesson:` opens a record; a setext title containing `lesson:` never does.
+The supported subset of [CommonMark setext headings](https://spec.commonmark.org/0.31.2/#setext-headings)
+is deliberately narrow:
+
+- Every title line starts at column zero with an ASCII letter or digit, and
+  is not an ordered-list marker (digits followed by `.` or `)` and whitespace
+  or end of line). Inline formatting after that first character is allowed.
+- A title starts at file start, after a blank line, after a column-zero ATX
+  heading or thematic break, or after a supported fence/comment block.
+  Multiline titles have no intervening blank lines.
+- The immediately following underline starts at column zero and contains one
+  or more identical `=` or `-` characters, with optional trailing spaces/tabs.
+  CRLF and a missing final newline are supported.
+
+Indented titles/underlines and titles beginning with punctuation or a non-ASCII
+character are outside this grammar and leave the record open. Use a column-zero
+`#`/`##` section for those titles. A thematic break alone does not close a record;
+it requires at least three identical `-`, `*`, or `_` markers (spaces/tabs between
+markers are allowed). For example:
+
+```md
+## lesson: real lesson
+- classification: archival-only
+
+Other Section
+-------------
+- classification: ignored-outside-record
+
+## lesson: next lesson
+---
+- classification: archival-only
+```
+
+The first underline closes `real lesson`. The second is a thematic break after
+an ATX heading, so the following field still classifies `next lesson`.
+
+Raw HTML is unsupported in manifests. Outside the supported fences/comments, a
+line beginning with `<` after zero to three spaces produces a finding at the
+first such line and disables setext boundaries for the rest of that manifest.
+ATX record/section recognition, field validation, and other checks continue;
+neither a closing tag nor a new record re-enables setext. This prevents blank
+lines inside raw HTML from turning example text into section boundaries.
+The check is conservative: closing tags, autolinks, and literal `<`-led prose
+also trigger it. Four-space/tab-indented code and `<` after ordinary prose or a
+field marker do not. Use fenced code or supported comments for examples.
+The finding warns in advisory mode and fails under `--strict`; a manifest with
+this finding never reports “check passed.” This restriction does not change
+archive heading extraction or rules-source matching.
 
 Each recognized field (`classification`, `covered_by`, `quick_rule`) may appear
 only once per record. Repeated fields produce a finding, with the first value
@@ -857,8 +906,7 @@ are unsupported and remain literal text in headings and field values; they are
 not guaranteed to produce a finding. Identical inline comments in a manifest key
 and archive heading still match as raw text. Use fenced code blocks for reference
 examples. A comment block cannot wrap example content containing `-->`: that
-first terminator closes it even inside a nested-looking example. Setext section
-boundaries remain a separate follow-up in [#155](https://github.com/ssheld/agent-vault/issues/155).
+first terminator closes it even inside a nested-looking example.
 Fence delimiter rules follow
 [CommonMark](https://spec.commonmark.org/0.31.2/#fenced-code-blocks):
 at least three backticks or tildes, with zero to three leading spaces; a closer
