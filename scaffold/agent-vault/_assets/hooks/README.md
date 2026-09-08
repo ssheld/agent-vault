@@ -26,16 +26,23 @@ git config core.hooksPath agent-vault/_assets/hooks
   - This is a baseline gate only. Conditional artifacts such as `open-questions.md`, decision records, handoff notes, and `lessons.md` still depend on the actual session outcome.
   - Emits a **non-blocking** memory-budget warning when the staged commit touches
     memory files (`agent-vault/`, `CLAUDE.md`, `GEMINI.md`, or any `AGENTS.md`)
-    and `scripts/check-memory-budget.sh` is installed. It measures the **staged**
+    and `scripts/check-memory-budget.sh` is executable. It measures the **staged**
     content (the index, not the working tree), surfaces over-budget files/chains,
     incomplete import analysis, external scope exclusions, and checker errors,
-    and always exits `0` — the budget is advisory and never
-    blocks a commit. It runs even when `AGENT_VAULT_SKIP_METADATA_GATE=1` is set;
+    and never blocks a commit. It runs even when `AGENT_VAULT_SKIP_METADATA_GATE=1` is set;
     silence it independently with `AGENT_VAULT_SKIP_MEMORY_BUDGET=1`.
+  - Emits a **non-blocking** structural rollover warning when
+    `agent-vault/context-log.md` is staged and
+    `scripts/check-context-log-rollover.sh` is executable. It checks that single
+    **staged blob** for duplicate snapshots, conflict markers, empty handoff
+    pointers, and unclosed fences. A staged deletion has no blob to check and
+    emits no rollover warning. Silence it with `AGENT_VAULT_SKIP_ROLLOVER_CHECK=1`.
 - `pre-push`
   - Inert by default.
   - When explicitly enabled with local repo config, blocks direct pushes to `main` unless every pushed path is runtime `agent-vault` metadata.
   - Rejects direct deletion of `main`, first-time creation of `main`, and non-fast-forward pushes.
+  - Rejects pushes whose ancestry or complete per-commit file inspection cannot
+    be verified, including unavailable remote commits and Git inspection errors.
   - Rejects `main` pushes when the generated `agent-vault/` directory or shared
     runtime metadata classifier is missing.
   - Uses the same runtime metadata classifier as `pre-commit`.
@@ -61,6 +68,17 @@ The shortcut allows only runtime metadata files:
 
 Everything else still requires the normal PR flow, including source code, config, scripts, root docs, `agent-vault/README.md`, `plan.md`, `coding-standards.md`, `project-context.md`, `project-commands.md`, `handoff.md`, policy files, templates, and hook assets.
 
+The gate distinguishes a verified non-fast-forward update from an operational
+Git failure. When the advertised remote `main` commit is unavailable locally,
+fetch `main` from the push destination and retry. The diagnostic offers a fetch
+command only for a recognized configured remote name; destination URLs are never
+printed because they can contain credentials. The hook does not fetch for you.
+Other ancestry, commit-enumeration, parent-lookup, or file-inspection errors also
+stop the push and report the Git exit status. If fetching does not resolve the
+error, inspect local Git errors and repository objects before retrying. A PR
+does not repair an incomplete local inspection. Every pushed commit is checked,
+including intermediate changes that were later reverted.
+
 Rollback:
 
 ```bash
@@ -82,7 +100,17 @@ feedback only, nothing converged into project state) needs to commit a genuinely
 trivial change: use the bypass and state the review-only skip in the task summary,
 per the `Session End - Required` exception in `agent-vault/shared-rules.md`.
 
-The non-blocking memory-budget warning is independent of the metadata gate.
+Both staged warnings run independently of the metadata gate, including when
+`AGENT_VAULT_SKIP_METADATA_GATE=1` is set. Silencing either warning leaves the
+other enabled and does not bypass metadata enforcement. Neither warning
+automatically compacts files or changes the index.
+
+With partial staging, a working-tree check can disagree with the warning.
+Inspect the index with `git diff --cached -- agent-vault/context-log.md` or
+`git show :agent-vault/context-log.md`; stage any intended fix before retrying.
+The budget warning measures the staged index, while the structural rollover
+warning checks only the staged context-log blob.
+
 The checker uses the staged `agent-vault/memory-budget.config`, including when
 only that config is staged. The designated context log's protocol-read allowance
 defaults to 60,000 bytes; imported logs and other memory files still use the
@@ -113,8 +141,14 @@ An unchanged external target is reported again on later memory-touching commits.
 This deliberately keeps the scope gap visible; there is no separate external-only
 acknowledgement or suppression mechanism in the current contract.
 
-Silence it on its own (it never blocks a commit either way):
+Silence the budget warning on its own:
 
 ```bash
 AGENT_VAULT_SKIP_MEMORY_BUDGET=1 git commit ...
+```
+
+Silence the structural rollover warning on its own:
+
+```bash
+AGENT_VAULT_SKIP_ROLLOVER_CHECK=1 git commit ...
 ```

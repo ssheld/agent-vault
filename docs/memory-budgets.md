@@ -1144,6 +1144,13 @@ The budget warning materializes the staged index to measure the full `@`-chain;
 the rollover warning reads only the single staged `context-log.md` blob via
 `git show`.
 
+Each warning requires its executable checker. A staged context-log deletion
+has no blob, so it emits no rollover warning. Both warnings still run with
+`AGENT_VAULT_SKIP_METADATA_GATE=1`; each warning's suppression variable silences
+only that warning and never bypasses metadata enforcement. No hook compacts or
+rewrites files. With partial staging, inspect `git show :agent-vault/context-log.md`
+or `git diff --cached` before assuming a working-tree check covers the warning.
+
 In the agent-vault template repo itself the checkers live at
 `scaffold/root/scripts/`; the commands above assume a generated project where
 they have been seeded to `scripts/`.
