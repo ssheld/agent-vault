@@ -125,6 +125,17 @@ run_update_project() {
   bash "$repo_root/scripts/update-project.sh" "$target" "$@"
 }
 
+assert_generated_import_discovery() {
+  local target="$1" label="$2" fixture="$tmp_root/generated-imports-$2" output rc=0
+  mkdir -p "$fixture"
+  printf 'See @large.md for instructions.\n' >"$fixture/CLAUDE.md"
+  head -c 45000 /dev/zero | tr '\0' x >"$fixture/large.md"
+  output="$("$target/scripts/check-memory-budget.sh" --repo "$fixture" --strict --format tsv 2>&1)" || rc=$?
+  assert_exit_code 1 "$rc" "$label installed checker rejects oversized inline import"
+  assert_output_contains "$output" $'claude\tlarge.md\tOVER\t45000' "$label installed scanner discovers inline import"
+  assert_files_equal "$repo_root/scaffold/root/scripts/check-memory-budget.sh" "$target/scripts/check-memory-budget.sh" "$label installs complete standalone checker"
+}
+
 assert_generated_rule_eligibility() {
   local target="$1" label="$2" fixture="$tmp_root/generated-lessons-$2"
   local manifest archive rules output rc needle
@@ -346,6 +357,7 @@ assert_executable "$target/scripts/check-lessons-archive.sh" "new-project makes 
 assert_file_contains "$target/scripts/check-lessons-archive.sh" "# agent-vault-managed: helper-script; file=check-lessons-archive.sh" "new-project seeds lessons-archive checker marker"
 assert_files_equal "$repo_root/scaffold/root/scripts/check-lessons-archive.sh" "$target/scripts/check-lessons-archive.sh" "new-project seeds complete lessons-archive checker"
 assert_generated_rule_eligibility "$target" fresh-bootstrap
+assert_generated_import_discovery "$target" fresh-bootstrap
 assert_generated_safety "$target" fresh-bootstrap
 
 # --- Test 2: update-project creates missing helpers in existing vaults ---
@@ -364,6 +376,7 @@ assert_executable "$target/scripts/remove-worktree.sh" "update-project makes rem
 assert_file_contains "$target/scripts/new-worktree.sh" 'DEFAULT_ROOT="${PROJECT_DIR}/.worktrees"' "update-project creates new helper with repo-local default"
 assert_file_contains "$target/scripts/remove-worktree.sh" "Use only after verifying the PR is merged" "update-project creates remove helper with guarded guidance"
 assert_output_contains "$output" "Created: scripts/check-memory-budget.sh" "update-project reports memory-budget checker creation"
+assert_generated_import_discovery "$target" restored-helper
 assert_output_contains "$output" "Created: scripts/check-context-log-rollover.sh" "update-project reports rollover checker creation"
 assert_output_contains "$output" "Created: scripts/compact-context-log.sh" "update-project reports rollover compactor creation"
 assert_output_contains "$output" "Created: scripts/check-lessons-archive.sh" "update-project reports lessons-archive checker creation"
@@ -377,11 +390,14 @@ target="$(setup_empty_repo unmanaged-skip-target)"
 run_new_project "$target" >/dev/null
 printf '%s\n' '#!/usr/bin/env bash' 'echo custom helper' >"$target/scripts/new-worktree.sh"
 chmod +x "$target/scripts/new-worktree.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'echo custom budget checker' >"$target/scripts/check-memory-budget.sh"
 rc=0
 output="$(run_update_project "$target" 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "update-project unmanaged-helper exits 0"
 assert_output_contains "$output" "Skip: scripts/new-worktree.sh (unmanaged root helper script; use --migrate-root-scripts to replace)" "update-project reports unmanaged helper skip"
 assert_file_contains "$target/scripts/new-worktree.sh" "echo custom helper" "update-project preserves unmanaged helper"
+assert_output_contains "$output" "Skip: scripts/check-memory-budget.sh (unmanaged root helper script; use --migrate-root-scripts to replace)" "update-project reports unmanaged budget checker skip"
+assert_file_contains "$target/scripts/check-memory-budget.sh" "echo custom budget checker" "update-project preserves unmanaged budget checker"
 
 # --- Test 4: --migrate-root-scripts backs up and replaces unmanaged helpers ---
 target="$(setup_empty_repo unmanaged-migrate-target)"
@@ -442,6 +458,17 @@ chmod -x "$target/scripts/check-memory-budget.sh"
 chmod -x "$target/scripts/check-context-log-rollover.sh"
 chmod -x "$target/scripts/compact-context-log.sh"
 chmod -x "$target/scripts/check-lessons-archive.sh"
+cp "$target/scripts/check-memory-budget.sh" "$tmp_root/budget-before-dry-run"
+rc=0
+output="$(run_update_project "$target" --dry-run 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "update-project managed budget checker dry-run exits 0"
+assert_files_equal "$tmp_root/budget-before-dry-run" "$target/scripts/check-memory-budget.sh" "dry-run preserves managed budget checker contents"
+if [[ ! -x "$target/scripts/check-memory-budget.sh" ]]; then
+  passed=$((passed + 1))
+else
+  echo "FAIL: dry-run changed budget checker executable bit" >&2
+  failed=$((failed + 1))
+fi
 rc=0
 output="$(run_update_project "$target" 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "update-project managed-refresh exits 0"
@@ -459,6 +486,7 @@ assert_file_contains "$target/scripts/check-context-log-rollover.sh" "stale dupl
 assert_file_contains "$target/scripts/compact-context-log.sh" "Keeps the Current Snapshot plus the newest" "update-project refreshes stale rollover compactor content"
 assert_files_equal "$repo_root/scaffold/root/scripts/check-lessons-archive.sh" "$target/scripts/check-lessons-archive.sh" "update-project refreshes complete lessons-archive checker"
 assert_generated_rule_eligibility "$target" managed-update
+assert_generated_import_discovery "$target" managed-update
 assert_executable "$target/scripts/new-worktree.sh" "update-project fixes managed helper executable bit"
 assert_executable "$target/scripts/remove-worktree.sh" "update-project fixes managed remove helper executable bit"
 assert_executable "$target/scripts/check-memory-budget.sh" "update-project fixes memory-budget checker executable bit"

@@ -144,10 +144,11 @@ Run the scaffold regression scripts locally when changing bootstrap, sync, or tr
 - `bash scripts/test-remove-worktree.sh`
 - `bash scripts/test-worktree-helper-sync.sh`
 - `bash scripts/test-markdown-fences.sh`
+- `bash scripts/test-memory-import-discovery.sh` (also run by the budget suite)
 
-The rollover checker, compactor, and lessons checker embed the same marked awk
-fence-state block to remain standalone. When changing delimiter rules, update all
-three copies together. The fence suite checks marker integrity and equality as
+The rollover checker, compactor, lessons checker, and memory-budget checker embed
+the same marked awk fence-state block to remain standalone. When changing delimiter rules, update all
+four copies together. The fence suite checks marker integrity and equality as
 well as behavior; there is no generator or separately installed runtime library.
 Closure policy stays outside that shared primitive: ordinary rollover checks
 require explicit live closure, historical EOF tails warn even under `--quiet`,
@@ -155,6 +156,13 @@ and explicit recovery warns for otherwise valid immutable live after-images.
 The checker exposes an internal entry point for its matched compactor in an
 isolated Bash process; its public CLI always uses strict live policy. Update
 both helpers together. See [EOF policy and recovery](docs/memory-budgets.md#fence-syntax-and-eof-behavior).
+
+The budget checker uses the frozen delimiter block for its Claude profile;
+Gemini import regions remain separate. Its selected-root, repo-local source-byte
+report distinguishes advisory external exclusions from strict-failing incomplete
+analysis. Managed-helper refreshes can change results for custom strict CI;
+the generated pre-commit report remains non-blocking. See the
+[import contract and upgrade notes](docs/memory-budgets.md#import-discovery-contract).
 
 CI runs these checks via `.github/workflows/scaffold-regression-checks.yml` on
 both `ubuntu-latest` and `macos-latest`, so GNU-vs-BSD userland assumptions in

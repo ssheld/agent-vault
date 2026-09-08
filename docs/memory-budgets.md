@@ -57,7 +57,8 @@ Design choices that matter:
   `MISSING` and skipped; they never make the check fail.
 - **Warn, do not block, by default.** A plain run reports and warns but exits
   `0`, so it can never block an unrelated commit on a mature repo. Pass
-  `--strict` to exit `1` on a non-excepted overage (for example in a dedicated
+  `--strict` to exit `1` on a non-excepted overage or incomplete in-scope import
+  analysis (for example in a dedicated
   CI check), once a project has been brought within budget.
 - **Documented exceptions, per file and chain.** A file may legitimately stay
   over its per-file budget when shrinking it further would mean deleting a live
@@ -71,6 +72,118 @@ Design choices that matter:
   **deprecated** — it was unbounded and no longer suppresses chain overage;
   express an approved residual via per-file exceptions or a configured
   `chain_budget`.)
+
+### Import discovery contract
+
+The import buckets measure **repo-local unique source bytes from the selected
+root CLAUDE.md and GEMINI.md**, not every instruction a client might load.
+[Versioned fixtures and probe provenance](../scripts/fixtures/memory-imports/README.md)
+record the official references and observed Claude Code 2.1.236 behavior.
+
+- **Claude:** four hops, with the root at depth zero. Recognize ordinary
+  whitespace-delimited imports, including several on a line. Ignore tested
+  closed HTML comments, matched backtick spans (including multiline spans),
+  flat backtick/tilde fences, and indented code. Simple blockquote fences are
+  supported. A fragment suffix such as `@rules.md#section` selects the source
+  file for byte measurement. An unmatched inline backtick does not hide the
+  remainder; an unclosed fence extends to EOF without the rollover helper's
+  separate live-closure refusal.
+- **Gemini:** pinned v0.58.0 **tree** behavior, default five hops. Its released
+  token/code-region rules differ from the documentation: paired backtick
+  regions are excluded, but tilde fences and HTML comments are not. Tokens
+  begin at whitespace boundaries, start with a dot/slash/ASCII letter, and run
+  to whitespace. Claude's fragment stripping does not apply to Gemini.
+- At the client boundary, include the file's bytes but do not expand its imports.
+  `DEPTH` explains this complete client-imposed stop. Breadth-first discovery
+  terminates cycles and repeated logical references without hiding shorter paths.
+- Complex raw HTML, fences on list-marker lines, ambiguous deeply indented
+  list imports, control bytes, Unicode whitespace, and unsupported path escapes
+  are `UNSUPPORTED`, not guessed complete. Delimiter runs longer than 128 have
+  an explicit scanner work bound. Ordinary punctuation is not opportunistically
+  removed to make a different filename exist. This is not a full Markdown parser.
+
+Relative imports resolve from the **logical importing path**, not the shell's
+working directory or a symlink target's directory. Containment checks resolve
+directory and leaf symlinks, with a 40-link bound, before opening an imported
+file. External/home/URL targets are `EXTERNAL`: listed, excluded, and never read
+as memory content. Path resolution can inspect directory/symlink metadata
+outside the root, but never opens outside file contents. Missing imports are
+visible `MISSING` diagnostics; non-regular or unresolvable in-scope targets
+cannot yield a complete strict result.
+
+One physical file (device/inode identity) contributes bytes once per client
+chain, including symlink/hard-link aliases. Each logical import context still
+expands independently. Alias rows show their actual size with a counted-once
+note: **do not sum alias rows** to reconstruct totals. Path-keyed exceptions
+do not silently spread to aliases: an oversized physical source is subtracted
+only if **every reached logical alias in that client bucket** has an exception.
+The checker assumes a stable filesystem snapshot; it is not a security boundary
+against hostile concurrent filesystem replacement.
+
+Raw source bytes include import syntax, Markdown, and comments a client may
+strip. Repeated client expansion and client-added wrapper/error text are not
+reconstructed. This is not an exact prompt-byte or token estimate.
+Additional entry points (`.claude/CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules/`,
+ancestor/user/managed memory, other Gemini roots) and Gemini flat mode are
+outside this issue's scope. AGENTS/protocol-read discovery remains unchanged.
+
+#### Reporting and strict-mode upgrade behavior
+
+`update-project.sh` refreshes the managed checker in place. This release adds
+a **new strict failure class** for incomplete in-scope import analysis.
+Downstream custom CI/scripts using `--strict` may fail where an older checker
+silently passed. Fresh-scaffold and current-repository chains are regression-
+gated against unexpected incomplete results. Non-strict runs remain advisory;
+the shipped pre-commit warning remains non-blocking, even on operational errors.
+
+| Condition | Report | Default exit | Strict exit |
+| --- | --- | --- | --- |
+| Complete, within budget | Scoped success summary | 0 | 0 |
+| Non-excepted file/chain overage | `OVER` | 0 | 1 |
+| Optional or explicitly imported file absent | `MISSING`, with origin for imports | 0 | 0 |
+| Known outside target | `EXTERNAL`, excluded | 0 | 0 |
+| Cycle or client-depth stopping | Deduplicated traversal / `DEPTH` | 0 | 0 |
+| Unsupported in-scope syntax or checker work bound | Diagnostic and chain `INCOMPLETE` | 0 | 1 |
+| Invalid configuration, read/scanner failure, observed replacement/disappearance | Actionable error | 2 | 2 |
+
+I/O/usage errors take precedence. An incomplete chain never receives a
+“Within budget” summary, even if its known subtotal is small. Known overages
+remain visible alongside incompleteness; exceptions cannot waive an incomplete scan.
+
+TSV retains five columns: bucket, path, status, bytes, note. Existing bucket and
+`TOTAL` identifiers are retained; `IMPORT` rows hold client-qualified diagnostics,
+`-` for unmeasured bytes, and origin notes. Total notes contain the effective
+profile and bounds; incomplete totals label known net bytes and overages.
+Diagnostic tabs/newlines/backslashes are escaped. Consumers must inspect exit
+status and completeness, not infer success from a small numeric total.
+
+#### Depth and scanner limits
+
+`--gemini-import-depth N` / `gemini_import_depth=N` follows CLI > config > default
+5 precedence. Values are integers 0–64; zero includes only the entry point.
+This models a caller-selected Gemini tree depth, without changing client settings.
+The checker does not read or merge global client configuration.
+
+Independent scanner ceilings: 10,000 edges, 4 MiB per parsed file, and 16 MiB of
+distinct parsed source bytes per client chain. These are checker work limits,
+not presumed client loading thresholds. Accepted file bytes can still be
+measured/reported when an import scan is refused. Boundary files need no scan.
+Representation bounds additionally limit each parsed file to 100,000 lines,
+backtick runs (and Claude tilde runs) to 128 characters, and each import target
+to 4,096 bytes. These prevent pathological string/array work within the byte
+ceilings; exceeding a bound is incomplete analysis, not a client-imposed stop.
+
+`AGENT_VAULT_IMPORT_MAX_EDGES`, `AGENT_VAULT_IMPORT_MAX_FILE_BYTES`, and
+`AGENT_VAULT_IMPORT_MAX_CHAIN_BYTES` may only **lower** their respective positive
+production ceilings. They enable small deterministic tests, never disable or
+raise a bound. Effective limits are always reported.
+
+The hook measures a temporary checkout of the index. An absolute import/symlink
+into the real worktree can therefore become `EXTERNAL` there even when a direct
+worktree check includes it. The hook never retargets such paths or falls back to
+unstaged content. It displays exclusions even on checker exit zero, explaining
+potentially lower staged totals. The existing staged-memory trigger and
+independent suppression flag are unchanged.
 
 ## Budgets and per-repo configuration
 
@@ -98,6 +211,8 @@ choice is durable and discoverable rather than re-typed per invocation:
 # complete key=value with no trailing text, so uncommenting one stays valid.
 file_budget=40000
 chain_budget=120000
+# Modeled Gemini tree import depth (does not change client settings):
+# gemini_import_depth=5
 # Override the bucket-3 (protocol-read) file set:
 # protocol_read=agent-vault/context-log.md agent-vault/plan.md
 # Pin the AGENTS.md set (the default discovers every AGENTS.md):

@@ -169,4 +169,63 @@ AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm eof-unstaged
 [[ "$HOOK_RC" -eq 0 ]] || fail "unstaged EOF example blocked commit" "$HOOK_STDERR"
 [[ "$HOOK_STDERR" != *"context-log rollover warning"* ]] || fail "hook warned on unstaged EOF" "$HOOK_STDERR"
 
+# Inline imports are checked in staged content, not the working tree.
+p="$(fresh_project inline-import)"
+mkdir -p "$p/docs"
+printf '\nSee @docs/large.md for instructions.\n' >>"$p/CLAUDE.md"
+oversize >"$p/docs/large.md"
+git -C "$p" add CLAUDE.md docs/large.md
+printf 'unstaged small content\n' >"$p/docs/large.md"
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm inline-import
+[[ "$HOOK_RC" -eq 0 ]] || fail "inline overage blocked commit" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" == *"OVER docs/large.md"* ]] || fail "staged inline overage was hidden" "$HOOK_STDERR"
+
+p="$(fresh_project code-example)"
+mkdir -p "$p/docs"
+printf '\n~~~md\n@docs/large.md\n~~~\n' >>"$p/CLAUDE.md"
+oversize >"$p/docs/large.md"
+git -C "$p" add CLAUDE.md docs/large.md
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm code-example
+[[ "$HOOK_RC" -eq 0 ]] || fail "code example blocked commit" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" != *"memory-budget warning"* ]] || fail "code example counted as import" "$HOOK_STDERR"
+
+# Both an absolute import and an absolute symlink are outside the staged copy.
+# Advisory exclusions must survive even though the checker itself exits zero.
+p="$(fresh_project external-staged)"
+mkdir -p "$p/docs"
+oversize >"$p/docs/absolute.md"
+printf '\n@%s/docs/absolute.md\n@absolute-link.md\n' "$p" >>"$p/CLAUDE.md"
+ln -s "$p/docs/absolute.md" "$p/absolute-link.md"
+git -C "$p" add CLAUDE.md docs/absolute.md absolute-link.md
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm external-staged
+[[ "$HOOK_RC" -eq 0 ]] || fail "scope exclusion blocked commit" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" == *"EXTERNAL"* ]] || fail "successful checker hid exclusions" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" == *"absolute-link.md"* ]] || fail "symlink exclusion hidden" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" != *"INCOMPLETE"* ]] || fail "known outside target marked incomplete" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" != *"OVER docs/absolute.md"* ]] || fail "hook read unstaged absolute target" "$HOOK_STDERR"
+# Direct measurement can include that same target; the difference is explicit.
+direct_rc=0
+direct_output="$("$p/scripts/check-memory-budget.sh" --repo "$p" --strict 2>&1)" || direct_rc=$?
+[[ "$direct_rc" -eq 1 ]] || fail "direct worktree check missed absolute import" "$direct_output"
+[[ "$direct_output" == *"docs/absolute.md"* ]] || fail "direct check omitted target" "$direct_output"
+printf '\nSuppressed exclusion report.\n' >>"$p/CLAUDE.md"
+git -C "$p" add CLAUDE.md
+AGENT_VAULT_SKIP_METADATA_GATE=1 AGENT_VAULT_SKIP_MEMORY_BUDGET=1 commit_capture "$p" git commit -qm excluded-suppressed
+[[ "$HOOK_RC" -eq 0 && "$HOOK_STDERR" != *"memory-budget warning"* ]] || fail "exclusion suppression failed" "$HOOK_STDERR"
+
+p="$(fresh_project incomplete)"
+printf '\nFixture change.\n' >>"$p/CLAUDE.md"
+git -C "$p" add CLAUDE.md
+AGENT_VAULT_SKIP_METADATA_GATE=1 AGENT_VAULT_IMPORT_MAX_EDGES=1 commit_capture "$p" git commit -qm incomplete
+[[ "$HOOK_RC" -eq 0 ]] || fail "incomplete scan blocked commit" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" == *"INCOMPLETE"* ]] || fail "incomplete scan was filtered out" "$HOOK_STDERR"
+
+p="$(fresh_project checker-error)"
+printf '#!/usr/bin/env bash\nprintf "Error: injected read failure\\n" >&2\nexit 2\n' >"$p/scripts/check-memory-budget.sh"
+printf '\nFixture change.\n' >>"$p/CLAUDE.md"
+git -C "$p" add CLAUDE.md
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm checker-error
+[[ "$HOOK_RC" -eq 0 ]] || fail "checker I/O error blocked commit" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" == *"injected read failure"* ]] || fail "I/O error reason filtered out" "$HOOK_STDERR"
+
 echo "memory budget + context-log rollover pre-commit hook regression checks passed."

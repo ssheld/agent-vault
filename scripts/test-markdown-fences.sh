@@ -162,7 +162,7 @@ extract_fences() {
     END { if (begins != 1 || ends != 1 || active || bad) exit 1 }
   ' "$1"
 }
-for helper in check-context-log-rollover compact-context-log check-lessons-archive; do
+for helper in check-context-log-rollover compact-context-log check-lessons-archive check-memory-budget; do
   extract_fences "$repo_root/scaffold/root/scripts/$helper.sh" >"$tmp_root/$helper.block" || fail "invalid fence markers: $helper"
   check cmp -s "$tmp_root/check-context-log-rollover.block" "$tmp_root/$helper.block"
 done

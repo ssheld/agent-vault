@@ -3,6 +3,37 @@
 
 set -euo pipefail
 
+# Frozen delimiter primitive: changes require review of every existing consumer.
+# BEGIN markdown fences
+markdown_fences='
+    function reset_fence() { fence_marker = ""; fence_length = 0; fence_line = 0 }
+    function fenced(line, candidate, marker, run, tail) {
+      candidate = line
+      sub(/\r$/, "", candidate)
+      sub(/^ ? ? ?/, "", candidate)
+      marker = substr(candidate, 1, 1)
+      run = 0
+      if (marker == "`" || marker == "~") {
+        while (substr(candidate, run + 1, 1) == marker) run++
+      }
+      tail = substr(candidate, run + 1)
+      if (fence_marker != "") {
+        if (marker == fence_marker && run >= fence_length && tail ~ /^[ \t]*$/) {
+          fence_marker = ""
+        }
+        return 1
+      }
+      if (run < 3) return 0
+      if (marker == "`" && index(tail, "`") != 0) return 0
+      fence_marker = marker
+      fence_length = run
+      fence_line = FNR
+      return 1
+    }
+    FNR == 1 { reset_fence() }
+'
+# END markdown fences
+
 # Report the size of an agent-vault project's always-on / session-start memory
 # against budgets, in separate buckets:
 #   1a. Claude @-import chain    (resolved from CLAUDE.md; loaded every Claude session)
@@ -27,7 +58,9 @@ set -euo pipefail
 # default; default config: agent-vault/memory-budget.config). The check is
 # tolerant of missing files (reported, never fatal). By default it REPORTS and
 # WARNS but exits 0 so it never blocks unrelated commits on a mature repo; pass
-# --strict to fail on a non-excepted over-budget file or bucket. An exceptions
+# --strict to fail on a non-excepted overage or incomplete in-scope import scan.
+# Known external targets are listed but excluded from this repo-local scope.
+# Actual usage/read/scanner errors exit 2 in either mode. An exceptions
 # file (path<TAB>reason) documents intentional per-file overages. The @-chain
 # budget is checked NET of those per-file exceptions, so an approved oversized
 # file does not consume the chain budget while the chain budget keeps governing
@@ -43,9 +76,11 @@ Options:
   --repo <path>            Project root to inspect (default: git top-level or cwd).
   --config <file>          Budget config file (default: <repo>/agent-vault/memory-budget.config
                            when present). Keys: file_budget, chain_budget,
-                           protocol_read, agents, exceptions, chain_exception.
+                           protocol_read, agents, exceptions, chain_exception,
+                           gemini_import_depth.
   --file-budget <bytes>    Per-file budget in bytes (default: 40000).
   --chain-budget <bytes>   Per @-chain total budget in bytes (default: 120000).
+  --gemini-import-depth N  Modeled Gemini tree depth, 0-64 (default: 5).
   --protocol-read "<list>" Space-separated protocol-read files (default: the
                            canonical session-start set).
   --agents "<list>"        Space-separated AGENTS.md files, or "discover" to find
@@ -53,11 +88,20 @@ Options:
   --exceptions <file>      File of "path<TAB>reason" lines documenting allowed
                            per-file overages (subtracted from the @-chain total).
                            The reserved "@chain" path is deprecated and ignored.
-  --strict                 Exit 1 when a non-excepted file or bucket is over budget.
+  --strict                 Exit 1 on overage or incomplete in-scope import analysis.
   --format text|tsv        Output format (default: text).
   -h, --help               Show this help.
 
 Precedence for budgets/lists: CLI flag > config file > built-in default.
+Import scope: repo-local source bytes from CLAUDE.md and GEMINI.md, not the full
+client memory hierarchy or expanded prompt. Physical files count once per chain;
+every reached logical alias must be excepted before its source is subtracted.
+Profiles: Claude documented/2.1.236 depth 4; Gemini 0.58.0 tree depth 5 by default.
+EXTERNAL exclusions and MISSING imports are advisory; INCOMPLETE is strict-failing.
+Safety ceilings: 10000 edges, 4194304 scan bytes/file, 16777216 scan bytes/chain.
+Scanner shape bounds: 100000 lines/file, 128 delimiter characters/run, 4096 path bytes.
+AGENT_VAULT_IMPORT_MAX_EDGES, AGENT_VAULT_IMPORT_MAX_FILE_BYTES, and
+AGENT_VAULT_IMPORT_MAX_CHAIN_BYTES may only lower those positive ceilings.
 Exit status: 0 = within budget or non-strict; 1 = strict violation; 2 = usage/IO error.
 EOF
 }
@@ -74,6 +118,7 @@ chain_budget=""
 protocol_read_cli=""
 agents_cli=""
 exceptions_cli=""
+gemini_import_depth=""
 strict="false"
 format="text"
 
@@ -97,6 +142,12 @@ while [[ $# -gt 0 ]]; do
     --chain-budget)
       [[ $# -ge 2 ]] || die "--chain-budget requires a number"
       chain_budget="$2"
+      shift 2
+      ;;
+    --gemini-import-depth)
+      [[ $# -ge 2 ]] || die "--gemini-import-depth requires a number"
+      [[ -n "$2" ]] || die "--gemini-import-depth requires a number"
+      gemini_import_depth="$2"
       shift 2
       ;;
     --protocol-read)
@@ -150,6 +201,7 @@ config_protocol_read=""
 config_agents=""
 config_exceptions=""
 config_chain_exception=""
+config_gemini_import_depth=""
 
 if [[ -z "$config_file" && -f "$repo/agent-vault/memory-budget.config" ]]; then
   config_file="$repo/agent-vault/memory-budget.config"
@@ -174,6 +226,10 @@ if [[ -n "$config_file" ]]; then
       agents) config_agents="$cfg_val" ;;
       exceptions) config_exceptions="$cfg_val" ;;
       chain_exception) config_chain_exception="$cfg_val" ;;
+      gemini_import_depth)
+        [[ -n "$cfg_val" ]] || die "gemini_import_depth requires a number"
+        config_gemini_import_depth="$cfg_val"
+        ;;
       *) die "unknown config key in $config_file: $cfg_key" ;;
     esac
   done <"$config_file"
@@ -181,6 +237,12 @@ fi
 
 file_budget="${file_budget:-${config_file_budget:-40000}}"
 chain_budget="${chain_budget:-${config_chain_budget:-120000}}"
+gemini_import_depth="${gemini_import_depth:-${config_gemini_import_depth:-5}}"
+# Bound before arithmetic (including digit count) so hostile numeric input never
+# becomes a Bash arithmetic expression or overflows before validation.
+[[ "$gemini_import_depth" =~ ^[0-9]{1,2}$ ]] || die "gemini_import_depth must be an integer from 0 to 64"
+gemini_import_depth=$((10#$gemini_import_depth))
+[[ "$gemini_import_depth" -le 64 ]] || die "gemini_import_depth must be an integer from 0 to 64"
 [[ -n "$protocol_read_cli" ]] && config_protocol_read="$protocol_read_cli"
 [[ -n "$agents_cli" ]] && config_agents="$agents_cli"
 exceptions_file="${exceptions_cli:-$config_exceptions}"
@@ -243,55 +305,366 @@ normalize_relpath() {
   printf '%s' "${out[*]}"
 }
 
-declare -A CHAIN_SEEN=()
-CHAIN_RESULT=()
+# Scanner source is trusted repository code, never text taken from an import.
+# Client provenance and independently observed fixtures: scripts/fixtures/memory-imports/.
+scan_imports() {
+  MEMORY_IMPORT_PROFILE="$2" MEMORY_IMPORT_EDGES="$max_import_edges" LC_ALL=C awk "$markdown_fences"'
+    BEGIN {
+      for (i = 0; i < 129; i++) { long_ticks = long_ticks "`"; long_tildes = long_tildes "~" }
+    }
+    function opens_fence(s, old_marker, old_length, old_line, result) {
+      old_marker = fence_marker; old_length = fence_length; old_line = fence_line
+      reset_fence(); result = fenced(s)
+      fence_marker = old_marker; fence_length = old_length; fence_line = old_line
+      return result
+    }
+    function unsupported(line, reason) { print "U\t" line "\t" reason }
+    # Balanced joining avoids repeatedly copying the entire growing document
+    # on awk implementations without an optimized string-append operation.
+    function join_lines(first, last, middle) {
+      if (first == last) return lines[first] "\n"
+      middle = int((first + last) / 2)
+      return join_lines(first, middle) join_lines(middle + 1, last)
+    }
+    function run_at(p, n) {
+      n = 0
+      while (substr(text, p + n, 1) == "`") n++
+      return n
+    }
+    function span_end(p, width, limit, gemini, ticks, q, hit, length_run) {
+      # Gemini uses a greedy opening run with regex backtracking, and accepts
+      # a closing prefix of a longer run. Claude requires exact run lengths.
+      do {
+        ticks = substr(text, p, width); q = p + width
+        while (q < limit) {
+          hit = index(substr(text, q, limit - q), ticks)
+          if (!hit) break
+          q += hit - 1; length_run = run_at(q)
+          if (gemini || (length_run == width && substr(text, q - 1, 1) != "`")) return q + width
+          q += length_run
+        }
+        width--
+      } while (gemini && width > 0)
+      return 0
+    }
+    {
+      if (NR > 100000) { unsupported(NR, "scanner line limit reached (100000)"); invalid_input = 1; exit }
+      s = $0; sub(/\r$/, "", s)
+      controls = s; gsub(/\t/, "", controls)
+      if (!invalid_input && controls ~ /[[:cntrl:]]/) { unsupported(NR, "control bytes in import input"); invalid_input = 1 }
+      # The lexer uses byte-oriented ASCII whitespace. Do not silently miss
+      # JavaScript/Markdown token boundaries written with Unicode whitespace.
+      if (s ~ /\302\240|\341\232\200|\342\200[\200-\212\250\251\257]|\342\201\237|\343\200\200|\357\273\277/) {
+        unicode_line = NR
+      }
+      if (index(s, long_ticks) || (ENVIRON["MEMORY_IMPORT_PROFILE"] == "claude" && index(s, long_tildes)))
+        long_delimiter_line = NR
+      raw_lines[NR] = s
+      quote = 0
+      if (ENVIRON["MEMORY_IMPORT_PROFILE"] == "claude") {
+        while (match(s, /^ ? ? ?> ?/)) { s = substr(s, RLENGTH + 1); quote++ }
+      }
+      lines[NR] = s; quotes[NR] = quote
+      starts[NR] = size + 1
+      size += length(s) + 1
+      if (index(s, "@")) possible_import = 1
+    }
+    END {
+      if (invalid_input || !possible_import) exit
+      if (unicode_line) { unsupported(unicode_line, "Unicode whitespace requires unsupported token/container parsing"); exit }
+      if (long_delimiter_line) { unsupported(long_delimiter_line, "delimiter run exceeds supported scanner work bound (128)"); exit }
+      text = join_lines(1, NR)
+      claude = ENVIRON["MEMORY_IMPORT_PROFILE"] == "claude"
+      starts[NR + 1] = size + 1
+      next_barrier = size + 1
+      for (n = NR; n > 0; n--) {
+        if (n < NR && quotes[n] != quotes[n + 1]) next_barrier = starts[n + 1]
+        barrier[n] = next_barrier
+        if (lines[n] ~ /^[ \t]*$/ || opens_fence(lines[n])) next_barrier = starts[n]
+      }
+      reset_fence(); line_number = 1; p = 1; edges = 0; list_context = 0
+      while (p <= size) {
+        while (line_number < NR && p >= starts[line_number + 1]) line_number++
+        FNR = line_number
+        if (claude && p == starts[line_number]) {
+          # Container-looking text INSIDE a flat fence is literal. Only a
+          # fence opened inside a quote ends when that quote container ends.
+          if (fence_marker != "" && fence_quote == 0) {
+            fenced(raw_lines[line_number]); p = starts[line_number + 1]; continue
+          }
+          if (fence_marker != "" && quotes[line_number] != fence_quote) reset_fence()
+          if (fenced(lines[line_number])) {
+            fence_quote = quotes[line_number]; p = starts[line_number + 1]; continue
+          }
+          if (lines[line_number] ~ /^ ? ? ?([-+*]|[0-9]+[.)])[ \t]+/) {
+            list_context = 1
+            candidate = lines[line_number]
+            sub(/^ ? ? ?([-+*]|[0-9]+[.)])[ \t]+/, "", candidate)
+            if (opens_fence(candidate) && index(substr(text, p), "@"))
+              unsupported(line_number, "fence on list-marker line requires container parsing")
+          } else if (lines[line_number] ~ /^[^ \t]/) list_context = 0
+          if (lines[line_number] ~ /^(    |\t)/) {
+            if (list_context && index(lines[line_number], "@"))
+              unsupported(line_number, "indented list import requires container parsing")
+            p = starts[line_number + 1]; continue
+          }
+          if (lines[line_number] ~ /^ ? ? ?<[A-Za-z!\/]/ && lines[line_number] !~ /^ ? ? ?<!--/ && index(substr(text, p), "@"))
+            unsupported(line_number, "raw HTML import context is not modeled")
+        }
+        line_text = lines[line_number] "\n"; column = p - starts[line_number] + 1
+        c = substr(line_text, column, 1)
+        # Skip plain prose in chunks, so multi-megabyte non-import text does
+        # not require a per-character interpreter loop.
+        if (c !~ /[@`\\<\n]/) {
+          hit = match(substr(line_text, column), /[@`\\<\n]/)
+          if (!hit) break
+          p += hit - 1; continue
+        }
+        if (claude && c == "<" && substr(line_text, column, 4) == "<!--") {
+          close_at = index(substr(text, p + 4), "-->")
+          if (!close_at) {
+            if (index(substr(text, p), "@")) unsupported(line_number, "unclosed HTML comment with possible imports")
+            break
+          }
+          p += close_at + 6; continue
+        }
+        if (claude && c == "\\") { p += 2; continue }
+        if (c == "`") {
+          width = run_at(p)
+          end = span_end(p, width, claude ? barrier[line_number] : size + 1, !claude)
+          if (end) { p = end; continue }
+          p += width; continue
+        }
+        if (c != "@" || (column > 1 && substr(line_text, column - 1, 1) !~ /[ \t\r\n]/)) { p++; continue }
+        first = substr(line_text, column + 1, 1)
+        if (first !~ /[A-Za-z.\/]/ && !(claude && first == "~")) { p++; continue }
+        q = column + match(substr(line_text, column + 1), /[ \t\r\n]/)
+        target = substr(line_text, column + 1, q - column - 1)
+        if (claude) sub(/#.*/, "", target)
+        edges++
+        if (edges > ENVIRON["MEMORY_IMPORT_EDGES"] + 0) {
+          unsupported(line_number, "import edge scan limit reached"); break
+        }
+        if (length(target) > 4096) unsupported(line_number, "import path exceeds supported scanner length (4096)")
+        else if (target ~ /[[:cntrl:]\\`]/) unsupported(line_number, "unsupported import path characters")
+        else if (target != "") print "I\t" line_number "\t" target
+        p = starts[line_number] + q - 1
+      }
+    }
+  ' "$1"
+}
 
-resolve_at_imports() {
-  local rel="$1"
-  local depth="$2"
-  local abs="$repo/$rel"
+# Test overrides may lower, never raise or disable, the production work bounds.
+bounded_limit() {
+  local name="$1" value="$2" ceiling="$3"
+  [[ "$value" =~ ^[0-9]{1,8}$ ]] || die "$name must be an integer from 1 to $ceiling"
+  value=$((10#$value))
+  [[ "$value" -gt 0 && "$value" -le "$ceiling" ]] || die "$name must be an integer from 1 to $ceiling"
+  printf '%s' "$value"
+}
+max_import_edges="$(bounded_limit AGENT_VAULT_IMPORT_MAX_EDGES "${AGENT_VAULT_IMPORT_MAX_EDGES-10000}" 10000)"
+max_import_file_bytes="$(bounded_limit AGENT_VAULT_IMPORT_MAX_FILE_BYTES "${AGENT_VAULT_IMPORT_MAX_FILE_BYTES-4194304}" 4194304)"
+max_import_chain_bytes="$(bounded_limit AGENT_VAULT_IMPORT_MAX_CHAIN_BYTES "${AGENT_VAULT_IMPORT_MAX_CHAIN_BYTES-16777216}" 16777216)"
 
-  [[ "$depth" -le 8 ]] || return 0
-  [[ -n "$rel" && "$rel" != ..* ]] || return 0
-  [[ -f "$abs" ]] || return 0
-  [[ -z "${CHAIN_SEEN[$rel]:-}" ]] || return 0
+declare -A IMPORT_INCOMPLETE=() IMPORT_ID=() IMPORT_PHYSICAL=() IMPORT_SIZE=()
+import_diag_clients=() import_diag_paths=() import_diag_statuses=() import_diag_notes=()
+import_diagnostic() {
+  import_diag_clients+=("$1")
+  import_diag_paths+=("$2")
+  import_diag_statuses+=("$3")
+  import_diag_notes+=("$4")
+  if [[ "$3" == INCOMPLETE || "$3" == UNSUPPORTED ]]; then IMPORT_INCOMPLETE["$1"]=1; fi
+}
 
-  CHAIN_SEEN["$rel"]=1
-  CHAIN_RESULT+=("$rel")
+if stat -c '%d:%i' "$repo" >/dev/null 2>&1; then
+  import_stat_style=gnu
+else
+  import_stat_style=bsd
+fi
+import_identity() {
+  if [[ "$import_stat_style" == gnu ]]; then stat -c '%d:%i' "$1"; else stat -f '%d:%i' "$1"; fi
+}
 
-  local dir
-  dir="$(dirname "$rel")"
-
-  local line target resolved
-  while IFS= read -r line; do
-    target="${line#"${line%%[![:space:]]*}"}"
-    target="${target#@}"
-    target="${target%%[[:space:]]*}"
-    [[ -n "$target" ]] || continue
-    [[ "$target" == /* ]] && continue
-    if [[ "$dir" == "." ]]; then
-      resolved="$target"
-    else
-      resolved="$dir/$target"
+# Resolve directory AND leaf symlinks without GNU realpath/readlink flags.
+# Relative link targets are walked component by component before applying '..'.
+# No final file is opened until containment has been established. This is a
+# read-only snapshot check, not protection against hostile concurrent FS swaps.
+resolve_import_path() {
+  local remaining="$1" component next link links=0 physical="/"
+  [[ "$remaining" == /* ]] || remaining="$repo/$remaining"
+  remaining="${remaining#/}"
+  IMPORT_PATH_STATE=ok
+  IMPORT_PATH=""
+  while [[ -n "$remaining" ]]; do
+    component="${remaining%%/*}"
+    if [[ "$remaining" == */* ]]; then remaining="${remaining#*/}"; else remaining=""; fi
+    case "$component" in
+      '' | '.') continue ;;
+      '..')
+        physical="${physical%/*}"
+        physical="${physical:-/}"
+        continue
+        ;;
+    esac
+    if [[ ! -d "$physical" || ! -x "$physical" ]]; then
+      if [[ "$physical" != "$repo" && "$physical" != "$repo/"* ]]; then
+        IMPORT_PATH_STATE=EXTERNAL
+        return
+      fi
+      die "cannot traverse import directory: $physical"
     fi
-    resolved="$(normalize_relpath "$resolved")"
-    resolve_at_imports "$resolved" "$((depth + 1))"
-  done < <(grep -E '^[[:space:]]*@[^[:space:]]' "$abs" || true)
-}
-
-resolve_chain() {
-  CHAIN_SEEN=()
-  CHAIN_RESULT=()
-  if [[ -f "$repo/$1" ]]; then
-    resolve_at_imports "$1" 0
+    next="${physical%/}/$component"
+    if [[ -L "$next" ]]; then
+      links=$((links + 1))
+      if [[ "$links" -gt 40 ]]; then
+        IMPORT_PATH_STATE=UNSUPPORTED
+        return
+      fi
+      link="$(readlink "$next" && printf '.')" || die "cannot read import symlink: $next"
+      link="${link%$'\n.'}"
+      if [[ "$link" == *$'\n'* || "$link" == *$'\r'* || "$link" == *$'\t'* ]]; then
+        IMPORT_PATH_STATE=UNSUPPORTED
+        return
+      fi
+      if [[ "$link" == /* ]]; then
+        physical="/"
+        link="${link#/}"
+      fi
+      remaining="$link${remaining:+/$remaining}"
+    elif [[ ! -e "$next" ]]; then
+      if [[ "$next" == "$repo/"* ]]; then IMPORT_PATH_STATE=MISSING; else IMPORT_PATH_STATE=EXTERNAL; fi
+      return
+    else
+      physical="$next"
+      if [[ -n "$remaining" && ! -d "$physical" ]]; then
+        if [[ "$physical" == "$repo" || "$physical" == "$repo/"* ]]; then IMPORT_PATH_STATE=UNSUPPORTED; else IMPORT_PATH_STATE=EXTERNAL; fi
+        return
+      fi
+    fi
+  done
+  if [[ "$physical" != "$repo" && "$physical" != "$repo/"* ]]; then
+    IMPORT_PATH_STATE=EXTERNAL
+    return
   fi
+  if [[ ! -f "$physical" ]]; then
+    IMPORT_PATH_STATE=UNSUPPORTED
+    return
+  fi
+  [[ -r "$physical" ]] || die "cannot read imported file: $physical"
+  IMPORT_PATH="$physical"
 }
 
-claude_files=()
-resolve_chain "CLAUDE.md"
+CHAIN_RESULT=()
+resolve_chain() {
+  local client="$1" entry="$2" limit="$3" cursor=0 depth rel target source line kind resolved key identity bytes parsed
+  local edges=0 scanned=0 previous canonical text_bytes
+  local -a queue_paths=("$entry") queue_depths=(0) queue_sources=("entry point")
+  local -A seen=() sizes=() parse_cache=()
+  CHAIN_RESULT=()
+  [[ -e "$repo/$entry" || -L "$repo/$entry" ]] || return 0
+  seen["$entry"]=1
+  while [[ "$cursor" -lt "${#queue_paths[@]}" ]]; do
+    rel="${queue_paths[$cursor]}"
+    depth="${queue_depths[$cursor]}"
+    source="${queue_sources[$cursor]}"
+    cursor=$((cursor + 1))
+    resolve_import_path "$rel"
+    if [[ "$IMPORT_PATH_STATE" != ok ]]; then
+      import_diagnostic "$client" "$rel" "$IMPORT_PATH_STATE" "$source; target excluded ($IMPORT_PATH_STATE)"
+      continue
+    fi
+    canonical="$IMPORT_PATH"
+    identity="$(import_identity "$canonical")" || die "cannot identify imported file: $rel"
+    if [[ -z "${sizes[$identity]+present}" ]]; then
+      bytes="$(wc -c <"$canonical")" || die "cannot measure imported file: $rel"
+      bytes="${bytes//[[:space:]]/}"
+      [[ "$bytes" =~ ^[0-9]+$ ]] || die "invalid imported file size: $rel"
+      sizes["$identity"]="$bytes"
+    fi
+    bytes="${sizes[$identity]}"
+    key="$client:$rel"
+    IMPORT_ID["$key"]="$identity"
+    IMPORT_PHYSICAL["$key"]="$canonical"
+    IMPORT_SIZE["$key"]="$bytes"
+    CHAIN_RESULT+=("$rel")
+    if [[ "$depth" -eq "$limit" ]]; then
+      import_diagnostic "$client" "$rel" DEPTH "included at client depth $limit; imports not expanded"
+      continue
+    fi
+    if [[ -z "${parse_cache[$identity]+present}" ]]; then
+      if [[ "$bytes" -gt "$max_import_file_bytes" || "$((scanned + bytes))" -gt "$max_import_chain_bytes" ]]; then
+        import_diagnostic "$client" "$rel" INCOMPLETE "scanner byte limit reached (file $max_import_file_bytes; chain $max_import_chain_bytes)"
+        parse_cache["$identity"]=$'U\t1\tpreviously reached scanner byte limit'
+        continue
+      fi
+      scanned=$((scanned + bytes))
+      # BSD awk can silently truncate records at NUL. Detect that before the
+      # text parser so binary input never looks like a complete empty scan.
+      text_bytes="$(LC_ALL=C tr -d '\000' <"$canonical" | wc -c)" || die "cannot inspect imported file: $rel"
+      text_bytes="${text_bytes//[[:space:]]/}"
+      if [[ "$text_bytes" != "$bytes" ]]; then
+        import_diagnostic "$client" "$rel" UNSUPPORTED "control bytes or changing content in import input"
+        parse_cache["$identity"]=$'U\t1\tcontrol bytes or changing content in import input'
+        continue
+      fi
+      parsed="$(scan_imports "$canonical" "$client")" || die "import scanner/read failed: $client $rel"
+      # Detect disappearance/replacement during scanning, not as optional absence.
+      previous="$(import_identity "$canonical")" || die "import disappeared during scanning: $rel"
+      [[ "$previous" == "$identity" ]] || die "import changed identity during scanning: $rel"
+      parse_cache["$identity"]="$parsed"
+    fi
+    parsed="${parse_cache[$identity]}"
+    while IFS=$'\t' read -r kind line target; do
+      [[ -n "$kind" ]] || continue
+      if [[ "$kind" == U ]]; then
+        import_diagnostic "$client" "$rel" UNSUPPORTED "$rel:$line; $target"
+        continue
+      fi
+      [[ "$kind" == I && "$line" =~ ^[0-9]+$ && -n "$target" ]] || die "malformed import scanner result: $rel"
+      edges=$((edges + 1))
+      if [[ "$edges" -gt "$max_import_edges" ]]; then
+        import_diagnostic "$client" "$rel" INCOMPLETE "import edge limit reached ($max_import_edges)"
+        return 0
+      fi
+      source="$rel:$line"
+      case "$target" in
+        '~'* | *://*)
+          import_diagnostic "$client" "$target" EXTERNAL "$source; excluded from repo-local measurement; not opened"
+          continue
+          ;;
+        /*)
+          resolved="/$(normalize_relpath "$target")"
+          # Keep an absolute alias context until physically resolved: /tmp and
+          # /private/tmp, for example, can name the same in-scope directory.
+          [[ "$resolved" != "$repo/"* ]] || resolved="${resolved#"$repo/"}"
+          ;;
+        *)
+          if [[ "$rel" == */* ]]; then target="${rel%/*}/$target"; fi
+          resolved="$(normalize_relpath "$target")"
+          [[ "$target" != /* ]] || resolved="/$resolved"
+          ;;
+      esac
+      if [[ "$resolved" == .. || "$resolved" == ../* ]]; then
+        resolved="/$(normalize_relpath "$repo/$resolved")"
+      fi
+      if [[ -z "$resolved" ]]; then
+        import_diagnostic "$client" . UNSUPPORTED "$source; import names the repository directory, not a regular file"
+        continue
+      fi
+      # BFS queues a logical path only at its minimum depth. Physical identity
+      # deduplicates bytes/parser work, NOT the directory used for child imports.
+      [[ -z "${seen[$resolved]+present}" ]] || continue
+      seen["$resolved"]=1
+      queue_paths+=("$resolved")
+      queue_depths+=("$((depth + 1))")
+      queue_sources+=("$source")
+    done <<<"$parsed"
+  done
+}
+
+resolve_chain claude CLAUDE.md 4
 claude_files=("${CHAIN_RESULT[@]}")
-gemini_files=()
-resolve_chain "GEMINI.md"
+resolve_chain gemini GEMINI.md "$gemini_import_depth"
 gemini_files=("${CHAIN_RESULT[@]}")
 
 # --- AGENTS discovery ----------------------------------------------------
@@ -344,6 +717,7 @@ fi
 
 violations=0
 declare -A COUNTED_OVER=()
+declare -A COUNTED_IMPORT_OVER=()
 # Per-bucket sum of bytes of files that are a documented per-file exception AND
 # over the per-file budget. The @-chain budget is checked NET of these, so an
 # approved oversized file does not consume the chain budget while the chain
@@ -356,6 +730,15 @@ byte_count() {
 
 emit_row() {
   local bucket="$1" rel="$2" status="$3" bytes="$4" note="$5"
+  # Keep even diagnostic fields single-line and TSV-safe; never interpret data.
+  rel="${rel//\\/\\\\}"
+  rel="${rel//$'\t'/\\t}"
+  rel="${rel//$'\n'/\\n}"
+  rel="${rel//$'\r'/\\r}"
+  note="${note//\\/\\\\}"
+  note="${note//$'\t'/\\t}"
+  note="${note//$'\n'/\\n}"
+  note="${note//$'\r'/\\r}"
   if [[ "$format" == "tsv" ]]; then
     printf '%s\t%s\t%s\t%s\t%s\n' "$bucket" "$rel" "$status" "$bytes" "$note"
   else
@@ -372,34 +755,70 @@ measure_bucket() {
   shift
   local -n total_ref="$1"
   shift
-  local rel abs bytes status note
+  local rel abs bytes status note identity key current_identity alias occurrence=0
+  local -A measured=() group_bytes=() group_except=()
   total_ref=0
 
   for rel in "$@"; do
     abs="$repo/$rel"
+    # Preserve the existing explicit-list accounting for AGENTS/protocol reads.
+    # Physical grouping is only part of the two import bucket contracts.
+    occurrence=$((occurrence + 1))
+    identity="$occurrence"
+    if [[ "$bucket" == claude || "$bucket" == gemini ]]; then
+      key="$bucket:$rel"
+      abs="${IMPORT_PHYSICAL[$key]}"
+      identity="${IMPORT_ID[$key]}"
+      [[ ! -L "$abs" && -f "$abs" && -r "$abs" ]] || die "import disappeared or changed before measurement: $rel"
+      current_identity="$(import_identity "$abs")" || die "cannot identify import before measurement: $rel"
+      [[ "$current_identity" == "$identity" ]] || die "import changed identity before measurement: $rel"
+    fi
     if [[ ! -f "$abs" ]]; then
       emit_row "$bucket" "$rel" "MISSING" "-" "(optional file absent)"
       continue
     fi
-    bytes="$(byte_count "$abs")"
-    total_ref=$((total_ref + bytes))
+    alias=""
+    if [[ -n "${measured[$identity]+present}" ]]; then
+      bytes="${group_bytes[$identity]}"
+      alias="alias of ${measured[$identity]}; source bytes counted once"
+    else
+      bytes="$(byte_count "$abs")" || die "cannot measure file: $rel"
+      if [[ "$bucket" == claude || "$bucket" == gemini ]]; then
+        [[ "$bytes" == "${IMPORT_SIZE[$key]}" ]] || die "import changed size before measurement: $rel"
+      fi
+      total_ref=$((total_ref + bytes))
+      measured["$identity"]="$rel"
+      group_bytes["$identity"]="$bytes"
+      group_except["$identity"]=1
+    fi
     note=""
     status="ok"
     if [[ "$bytes" -gt "$file_budget" ]]; then
       if [[ -n "${EXCEPTION_REASON[$rel]:-}" ]]; then
         status="EXCEPT"
         note="over file budget; documented: ${EXCEPTION_REASON[$rel]}"
-        BUCKET_EXCEPTED["$bucket"]=$((${BUCKET_EXCEPTED[$bucket]:-0} + bytes))
       else
+        group_except["$identity"]=0
         status="OVER"
         note="over file budget ($file_budget bytes)"
         if [[ -z "${COUNTED_OVER[$rel]:-}" ]]; then
           COUNTED_OVER["$rel"]=1
-          violations=$((violations + 1))
+          if [[ "$bucket" != claude && "$bucket" != gemini ]] || [[ -z "${COUNTED_IMPORT_OVER[$identity]+present}" ]]; then
+            violations=$((violations + 1))
+          fi
+          if [[ "$bucket" == claude || "$bucket" == gemini ]]; then COUNTED_IMPORT_OVER["$identity"]=1; fi
         fi
       fi
     fi
+    [[ -z "$alias" ]] || note="${note:+$note; }$alias"
     emit_row "$bucket" "$rel" "$status" "$bytes" "$note"
+  done
+  # A path-specific exception never silently extends to another alias. Subtract
+  # one physical source only when every reached logical alias is excepted.
+  for identity in "${!group_bytes[@]}"; do
+    if [[ "${group_bytes[$identity]}" -gt "$file_budget" && "${group_except[$identity]}" == 1 ]]; then
+      BUCKET_EXCEPTED["$bucket"]=$((${BUCKET_EXCEPTED[$bucket]:-0} + group_bytes[$identity]))
+    fi
   done
 }
 
@@ -417,6 +836,10 @@ print_chain_bucket() {
 
 if [[ "$format" == "text" ]]; then
   echo "Memory budget report for: $repo"
+  echo "Scope: repo-local selected-entry-point source bytes, not full client context."
+  echo "Profiles: Claude documented/2.1.236 (depth 4); Gemini 0.58.0 tree (depth $gemini_import_depth)."
+  echo "Scanner limits: $max_import_edges edges; $max_import_file_bytes bytes/file; $max_import_chain_bytes bytes/chain."
+  echo "Scanner shape bounds: 100000 lines/file; delimiter run 128; import path 4096 bytes."
   echo "Per-file: $file_budget bytes | per @-chain: $chain_budget bytes"
   [[ -n "$config_file" ]] && echo "Config: $config_file"
   echo
@@ -430,6 +853,11 @@ protocol_total=0
 print_chain_bucket "[1a] Claude @-import chain (CLAUDE.md; loaded every Claude session):" claude_total "${claude_files[@]}"
 [[ "$format" == "text" ]] && echo
 print_chain_bucket "[1b] Gemini @-import chain (GEMINI.md; loaded every Gemini session):" gemini_total "${gemini_files[@]}"
+
+for ((diag_index = 0; diag_index < ${#import_diag_clients[@]}; diag_index++)); do
+  emit_row IMPORT "${import_diag_clients[$diag_index]}:${import_diag_paths[$diag_index]}" \
+    "${import_diag_statuses[$diag_index]}" - "${import_diag_notes[$diag_index]}"
+done
 
 if [[ "$format" == "text" ]]; then
   echo
@@ -485,6 +913,20 @@ build_chain_note() {
 claude_note="$(build_chain_note "$claude_excepted" "$claude_net")"
 gemini_note="$(build_chain_note "$gemini_excepted" "$gemini_net")"
 
+claude_note="${claude_note:+$claude_note; }repo-local unique source bytes; Claude documented/2.1.236 depth=4; limits=$max_import_edges/$max_import_file_bytes/$max_import_chain_bytes; lines=100000/delimiter=128/path=4096"
+gemini_note="${gemini_note:+$gemini_note; }repo-local unique source bytes; Gemini 0.58.0 tree depth=$gemini_import_depth; limits=$max_import_edges/$max_import_file_bytes/$max_import_chain_bytes; lines=100000/delimiter=128/path=4096"
+incomplete_count=0
+if [[ -n "${IMPORT_INCOMPLETE[claude]:-}" ]]; then
+  claude_note+="; partial analysis; known net=$claude_net ($claude_status)"
+  claude_status=INCOMPLETE
+  incomplete_count=$((incomplete_count + 1))
+fi
+if [[ -n "${IMPORT_INCOMPLETE[gemini]:-}" ]]; then
+  gemini_note+="; partial analysis; known net=$gemini_net ($gemini_status)"
+  gemini_status=INCOMPLETE
+  incomplete_count=$((incomplete_count + 1))
+fi
+
 agents_status="info"
 
 if [[ "$format" == "tsv" ]]; then
@@ -502,16 +944,19 @@ else
   [[ -n "$claude_note" ]] && echo "  Claude @-chain: $claude_note"
   [[ -n "$gemini_note" ]] && echo "  Gemini @-chain: $gemini_note"
   echo
-  if [[ "$violations" -eq 0 ]]; then
-    echo "Within budget (no non-excepted overages)."
-  else
+  if [[ "$incomplete_count" -gt 0 ]]; then
+    echo "INCOMPLETE: $incomplete_count import chain(s); cannot establish the in-scope budget."
+  elif [[ "$violations" -eq 0 ]]; then
+    echo "Within budget for the declared repo-local scope (no non-excepted overages; external content excluded)."
+  fi
+  if [[ "$violations" -gt 0 ]]; then
     echo "$violations non-excepted overage(s) found."
     echo "Relocate historical/low-frequency content to docs/ (leave a pointer), or"
     echo "record an intentional overage in an exceptions file with a reason."
   fi
 fi
 
-if [[ "$strict" == "true" && "$violations" -gt 0 ]]; then
+if [[ "$strict" == "true" && ("$violations" -gt 0 || "$incomplete_count" -gt 0) ]]; then
   exit 1
 fi
 exit 0
