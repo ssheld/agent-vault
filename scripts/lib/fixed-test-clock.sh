@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Installer and shared contract checks for the companion fixed-test-date.sh.
+# Installation always verifies the contract; the assertion also supports rechecks.
 # Keep this directly under scripts/lib: check-style.sh only finds direct children.
 # The allowlist covers these suites and their children, not every repo script:
 # scripts/measure-agent-memory-load.sh uses the unsupported +%Y%m%d%H%M%S.
@@ -20,6 +21,7 @@ install_fixed_test_clock() {
   # Deliberately inherited by the suite's child commands; the caller's cleanup
   # trap owns clock_bin. Sourcing this library alone does not change PATH.
   export PATH="$clock_bin:$PATH"
+  assert_fixed_test_clock "$clock_bin"
 }
 
 fixed_test_clock_fail() {

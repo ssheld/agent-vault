@@ -16,7 +16,6 @@ trap cleanup EXIT
 source "$repo_root/scripts/lib/fixed-test-clock.sh"
 clock_bin="$tmp_root/clock-bin"
 install_fixed_test_clock "$clock_bin"
-assert_fixed_test_clock "$clock_bin"
 
 pass=0
 fail() {

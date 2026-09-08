@@ -16,7 +16,6 @@ trap cleanup EXIT
 source "$script_dir/lib/fixed-test-clock.sh"
 clock_bin="$tmp_root/clock-bin"
 install_fixed_test_clock "$clock_bin"
-assert_fixed_test_clock "$clock_bin"
 today="$FIXED_TEST_CLOCK_DAY"
 
 assert_output_contains() {
@@ -115,6 +114,24 @@ clear_context_log_entries() {
 
   perl -0pi -e 's/^## Entries\s*\n.*\z/## Entries\n/mgs' "$file_path"
 }
+
+# PATH skips non-executable entries. The fallback is our working fixed clock,
+# so matching date output alone cannot detect that the wrong executable was used.
+non_executable_clock_bin="$tmp_root/non-executable-clock"
+mkdir -p "$non_executable_clock_bin"
+non_executable_clock_bin="$(cd "$non_executable_clock_bin" && pwd -P)"
+install -m 0644 "$script_dir/lib/fixed-test-date.sh" "$non_executable_clock_bin/date"
+installed_clock_date="$(command -v date)"
+non_executable_clock_rc=0
+non_executable_clock_output="$(PATH="$non_executable_clock_bin:$PATH" assert_fixed_test_clock "$non_executable_clock_bin" 2>&1)" ||
+  non_executable_clock_rc=$?
+if [[ "$non_executable_clock_rc" -ne 1 ]]; then
+  echo "Expected the non-executable clock to fail verification with exit 1; got $non_executable_clock_rc." >&2
+  printf '%s\n' "$non_executable_clock_output" >&2
+  exit 1
+fi
+assert_output_contains "$non_executable_clock_output" \
+  "expected PATH to select $non_executable_clock_bin/date, got $installed_clock_date"
 
 legacy_context_log_fixture="$repo_root/scripts/test-fixtures/context-log/legacy-known.md"
 
