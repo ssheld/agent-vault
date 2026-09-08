@@ -145,6 +145,15 @@ normalize_budget() {
   printf '%s' "$value"
 }
 
+normalize_gemini_import_depth() {
+  local value="$1" LC_ALL=C
+  # Bound syntax and digit count before Bash arithmetic sees untrusted input.
+  [[ "$value" =~ ^[0-9]{1,2}$ ]] || die "gemini_import_depth must be an integer from 0 to 64"
+  value=$((10#$value))
+  [[ "$value" -le 64 ]] || die "gemini_import_depth must be an integer from 0 to 64"
+  printf '%s' "$value"
+}
+
 normalize_context_log_path() {
   local value="$1" part normalized=""
   local -a parts=()
@@ -193,8 +202,7 @@ read_memory_budget_config() {
       exceptions) config_exceptions="$cfg_val" ;;
       chain_exception) config_chain_exception="$cfg_val" ;;
       gemini_import_depth)
-        [[ -n "$cfg_val" ]] || die "gemini_import_depth requires a number"
-        config_gemini_import_depth="$cfg_val"
+        config_gemini_import_depth="$(normalize_gemini_import_depth "$cfg_val")" || exit 2
         ;;
       *) die "unknown config key in $path: $cfg_key" ;;
     esac
@@ -326,11 +334,7 @@ file_budget="${file_budget:-${config_file_budget:-40000}}"
 chain_budget="${chain_budget:-${config_chain_budget:-120000}}"
 resolve_context_log_budget
 gemini_import_depth="${gemini_import_depth:-${config_gemini_import_depth:-5}}"
-# Bound before arithmetic (including digit count) so hostile numeric input never
-# becomes a Bash arithmetic expression or overflows before validation.
-[[ "$gemini_import_depth" =~ ^[0-9]{1,2}$ ]] || die "gemini_import_depth must be an integer from 0 to 64"
-gemini_import_depth=$((10#$gemini_import_depth))
-[[ "$gemini_import_depth" -le 64 ]] || die "gemini_import_depth must be an integer from 0 to 64"
+gemini_import_depth="$(normalize_gemini_import_depth "$gemini_import_depth")" || exit 2
 [[ -n "$protocol_read_cli" ]] && config_protocol_read="$protocol_read_cli"
 [[ -n "$agents_cli" ]] && config_agents="$agents_cli"
 exceptions_file="${exceptions_cli:-$config_exceptions}"

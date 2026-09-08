@@ -75,7 +75,7 @@ run 2 "${common[@]}" --to-budget --context-log-budget 3000 --context-log-target 
 
 # Use the established count renderer as an independent small-fixture oracle.
 # Exercise rendered bytes, not a second implementation of the prefix formula.
-for variant in ordinary crlf suffix existing out-of-order same-minute explicit blank-lines unicode-blank long-topic fences; do
+for variant in ordinary crlf suffix existing out-of-order same-minute explicit blank-lines multi-blank-lines unicode-blank long-topic fences; do
   seed="$tmp_root/seed-$variant"
   make_log "$seed/log.md"
   extra=()
@@ -102,6 +102,10 @@ for variant in ordinary crlf suffix existing out-of-order same-minute explicit b
     explicit) extra=(--boundary 'through mémoire `entry`' --anchors 'entry') ;;
     blank-lines)
       sed 's/^$/   /' "$seed/log.md" >"$seed/log.next"
+      mv "$seed/log.next" "$seed/log.md"
+      ;;
+    multi-blank-lines)
+      awk '{ print; if ($0 == "") print "\n" }' "$seed/log.md" >"$seed/log.next"
       mv "$seed/log.next" "$seed/log.md"
       ;;
     unicode-blank)
@@ -192,6 +196,60 @@ run 0 "${common[@]}" --to-budget --ignore-trigger --context-log-target 500 --all
 check contains 'target missed'
 check test "$(bytes "$d/log.md")" -lt "$(bytes "$d/before")"
 check test "$(bytes "$d/log.md")" -gt 500
+
+# Overage chooses closest to target, not the largest prefix below trigger.
+d="$tmp_root/overage-prefix"
+mkdir -p "$d"
+cp "$tmp_root/seed-ordinary/log.md" "$d/log.md"
+args
+larger_bytes="$(bytes "$tmp_root/oracle-ordinary-4/log.md")"
+smallest_bytes="$(bytes "$tmp_root/oracle-ordinary-1/log.md")"
+check test "$larger_bytes" -gt "$((smallest_bytes * 3))"
+check test "$larger_bytes" -lt 60000
+run 0 "${common[@]}" --to-budget --ignore-trigger --context-log-target "$((smallest_bytes - 1))" --allow-target-overage --quiet
+check contains 'retains 1 entries'
+for name in log archive manifest; do
+  check cmp -s "$d/$name.md" "$tmp_root/oracle-ordinary-1/$name.md"
+done
+
+# Validate checker-only config settings before both byte no-ops and writes.
+# An invalid supplied value cannot be hidden by a later valid setting or CLI.
+d="$tmp_root/depth-config"
+make_log "$d/log.md"
+args
+cp "$d/log.md" "$d/before"
+for value in '' not-a-number 65 99 -1 1.5 000 '1+2' 99999999999999999999 '$(touch never)'; do
+  for trailing in '' 'gemini_import_depth=5'; do
+    printf 'gemini_import_depth=%s\n%s\n' "$value" "$trailing" >"$d/config"
+    for early in false true; do
+      extra=()
+      if [[ "$early" == true ]]; then extra=(--ignore-trigger --context-log-target 3000); fi
+      run 2 "${common[@]}" --to-budget --config "$d/config" "${extra[@]}"
+      check contains 'gemini_import_depth must be an integer from 0 to 64'
+      check cmp -s "$d/log.md" "$d/before"
+      check test ! -e "$d/archive.md"
+      check test ! -e "$d/manifest.md"
+      check test ! -e "$d/.agent-vault-rollover-log.md"
+    done
+    for override in false true; do
+      extra=()
+      if [[ "$override" == true ]]; then extra=(--gemini-import-depth 5); fi
+      rc=0
+      output="$(bash "$checker" --repo "$d" --config "$d/config" "${extra[@]}" 2>&1)" || rc=$?
+      check test "$rc" -eq 2
+      check contains 'gemini_import_depth must be an integer from 0 to 64'
+    done
+  done
+done
+for value in 0 00 08 64; do
+  printf 'gemini_import_depth=%s\n' "$value" >"$d/config"
+  run 0 "${common[@]}" --to-budget --config "$d/config" --ignore-trigger --context-log-target 3000 --dry-run
+  check contains 'kept 1, archived 4'
+  rc=0
+  output="$(bash "$checker" --repo "$d" --config "$d/config" 2>&1)" || rc=$?
+  check test "$rc" -eq 0
+  check contains "tree depth=$((10#$value))"
+done
 
 # Config comes from the log location, not cwd; repository config beats adjacent.
 d="$tmp_root/config-repo"

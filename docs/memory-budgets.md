@@ -634,6 +634,9 @@ the content; the compactor never truncates bodies or drops the newest entry.
 candidate fits the target**: select the smallest rendered candidate (prefer more
 entries on a size tie), require actual reduction and a result within the trigger,
 and warn that the target was missed even under `--quiet`. Otherwise refuse.
+With the current renderer, this retains only the newest entry and archives all
+older entries, even when a larger prefix would fit under the trigger; it is not
+a small overshoot allowance.
 It does not imply `--ignore-trigger` or bypass session, structural, or write gates.
 
 Byte-mode config resolution is explicit `--config` >

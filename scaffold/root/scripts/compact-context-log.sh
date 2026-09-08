@@ -187,6 +187,15 @@ normalize_budget() {
   printf '%s' "$value"
 }
 
+normalize_gemini_import_depth() {
+  local value="$1" LC_ALL=C
+  # Bound syntax and digit count before Bash arithmetic sees untrusted input.
+  [[ "$value" =~ ^[0-9]{1,2}$ ]] || die "gemini_import_depth must be an integer from 0 to 64"
+  value=$((10#$value))
+  [[ "$value" -le 64 ]] || die "gemini_import_depth must be an integer from 0 to 64"
+  printf '%s' "$value"
+}
+
 normalize_context_log_path() {
   local value="$1" part normalized=""
   local -a parts=()
@@ -235,8 +244,7 @@ read_memory_budget_config() {
       exceptions) config_exceptions="$cfg_val" ;;
       chain_exception) config_chain_exception="$cfg_val" ;;
       gemini_import_depth)
-        [[ -n "$cfg_val" ]] || die "gemini_import_depth requires a number"
-        config_gemini_import_depth="$cfg_val"
+        config_gemini_import_depth="$(normalize_gemini_import_depth "$cfg_val")" || exit 2
         ;;
       *) die "unknown config key in $path: $cfg_key" ;;
     esac
@@ -899,6 +907,8 @@ resolve_byte_config() {
 # and inject_pointer. Only headings/prefix byte totals are retained, not bodies.
 # Archive max ties favor the first rendered heading: prepending a moved heading
 # therefore replaces an equal-timestamp maximum, including existing history.
+# Deliberately scan every split without assuming monotonic sizes: this remains
+# linear and handles future split-dependent renderer terms that might break it.
 select_byte_keep() {
   local existing_newest="" bounds_text suffix_bytes=0 selection
   if [[ -f "$archive_input" ]]; then
@@ -910,8 +920,24 @@ select_byte_keep() {
     suffix_bytes=$(($(file_size "$scratch/byte-suffix") + 1))
   fi
   printf '%s\n' "${heading_lines[@]}" >"$scratch/byte-headings"
-  selection="$(BYTE_NEWEST="$existing_newest" BYTE_BOUNDARY="$boundary" BYTE_ID="$rollover_id" \
-    LC_ALL=C awk -v target="$context_log_target" -v suffix="$suffix_bytes" "$markdown_fences"'
+  # Classify normalized blanks/pointer lines in the renderer's locale first.
+  # The second, C-locale pass measures bytes: forcing C for classification too
+  # miscounts Unicode whitespace on multibyte-aware awk implementations.
+  selection="$(awk "$markdown_fences"'
+    {
+      blank = ($0 ~ /^[[:space:]]*$/)
+      line = (blank ? "" : $0)
+      quoted = fenced(line); drop = 0
+      if (!quoted) {
+        if (line ~ /^## Current Snapshot[[:space:]]*$/) in_snap = 1
+        else if (in_snap && line ~ /^## /) in_snap = 0
+        else if (in_snap && tolower(line) ~ /context-log rollover[[:space:]]*:/) drop = 1
+      }
+      printf "%d %d %s\n", blank, drop, $0
+    }
+  ' "$log_input" |
+    BYTE_NEWEST="$existing_newest" BYTE_BOUNDARY="$boundary" BYTE_ID="$rollover_id" \
+      LC_ALL=C awk -v target="$context_log_target" -v suffix="$suffix_bytes" '
     BEGIN {
       newest = ENVIRON["BYTE_NEWEST"]; have_max = (newest != "")
       max_ts = substr(newest, 1, 16)
@@ -922,22 +948,18 @@ select_byte_keep() {
     }
     FILENAME == ARGV[1] { starts[$1] = ++n; next }
     {
+      line = substr($0, 5)
       if (FNR in starts) {
         k = starts[FNR]
         prefix[k - 1] = bytes - last_blank
-        heading = $0
+        heading = line
         sub(/\r$/, "", heading); sub(/^### /, "", heading)
         timestamps[k] = substr(heading, 1, 16)
         sub(/^.* - /, "", heading); topic_bytes[k] = length(heading)
       }
-      quoted = fenced($0); drop = 0
-      if (!quoted) {
-        if ($0 ~ /^## Current Snapshot[[:space:]]*$/) in_snap = 1
-        else if (in_snap && $0 ~ /^## /) in_snap = 0
-        else if (in_snap && tolower($0) ~ /context-log rollover[[:space:]]*:/) drop = 1
-      }
-      last_blank = ($0 ~ /^[[:space:]]*$/)
-      if (!drop) bytes += (last_blank ? 1 : length($0) + 1)
+      last_blank = substr($0, 1, 1) + 0
+      drop = substr($0, 3, 1) + 0
+      if (!drop) bytes += (last_blank ? 1 : length(line) + 1)
     }
     END {
       for (k = n - 1; k >= 1; k--) {
@@ -951,7 +973,7 @@ select_byte_keep() {
       }
       printf "%.0f %.0f %.0f %.0f %.0f\n", fit, fit_size, best, best_size, prefix[1] + suffix
     }
-  ' "$scratch/byte-headings" "$log_input")" || die "cannot compute byte-retention candidates"
+  ' "$scratch/byte-headings" -)" || die "cannot compute byte-retention candidates"
   read -r keep predicted_bytes best_keep best_bytes mandatory_bytes <<<"$selection"
   if [[ "$keep" -eq 0 ]]; then
     if [[ "$allow_target_overage" == true && "$best_bytes" -le "$context_log_budget" && "$best_bytes" -lt "$input_bytes" ]]; then
