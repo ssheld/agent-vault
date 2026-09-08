@@ -29,6 +29,7 @@ on:
       - "scripts/measure-agent-memory-load.sh"
       - "scripts/parse-claude-memory-trace.py"
       - "scripts/test-check-memory-budget.sh"
+      - "scripts/test-context-log-size-budget.sh"
       - "scripts/test-memory-import-discovery.sh"
       - "scripts/fixtures/memory-imports/**"
       - "scripts/test-check-context-log-rollover.sh"
@@ -66,6 +67,7 @@ on:
       - "scripts/measure-agent-memory-load.sh"
       - "scripts/parse-claude-memory-trace.py"
       - "scripts/test-check-memory-budget.sh"
+      - "scripts/test-context-log-size-budget.sh"
       - "scripts/test-memory-import-discovery.sh"
       - "scripts/fixtures/memory-imports/**"
       - "scripts/test-check-context-log-rollover.sh"
@@ -149,6 +151,8 @@ jobs:
         run: bash scripts/test-worktree-helper-sync.sh
       - name: Verify memory budget checker
         run: bash scripts/test-check-memory-budget.sh
+      - name: Verify context-log budget configuration and scope
+        run: bash scripts/test-context-log-size-budget.sh
       - name: Verify context-log rollover checker
         run: bash scripts/test-check-context-log-rollover.sh
       - name: Verify lessons-archive checker

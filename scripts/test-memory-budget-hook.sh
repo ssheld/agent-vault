@@ -241,4 +241,77 @@ AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm checker-erro
 [[ "$HOOK_RC" -eq 0 ]] || fail "checker I/O error blocked commit" "$HOOK_STDERR"
 [[ "$HOOK_STDERR" == *"injected read failure"* ]] || fail "I/O error reason filtered out" "$HOOK_STDERR"
 
+# The new context-log allowance and configuration must both come from the index.
+p="$(fresh_project context-log-budget)"
+cp "$p/agent-vault/context-log.md" "$tmp_root/context-base"
+context_size() {
+  cp "$tmp_root/context-base" "$p/agent-vault/context-log.md"
+  local base_bytes
+  base_bytes="$(wc -c <"$tmp_root/context-base" | tr -d '[:space:]')"
+  head -c "$(($1 - base_bytes))" /dev/zero | tr '\0' x >>"$p/agent-vault/context-log.md"
+}
+context_size 50000
+# The migration note alone is not a recurring hook-warning trigger.
+printf 'file_budget=100000\n' >"$p/agent-vault/memory-budget.config"
+git -C "$p" add agent-vault/context-log.md agent-vault/memory-budget.config
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm context-within-budget
+[[ "$HOOK_RC" -eq 0 && "$HOOK_STDERR" != *"memory-budget warning"* ]] || fail "50 KB protocol log or migration note triggered a warning" "$HOOK_STDERR"
+
+context_size 60001
+cp "$p/agent-vault/context-log.md" "$tmp_root/staged-context"
+git -C "$p" add agent-vault/context-log.md
+cp "$tmp_root/context-base" "$p/agent-vault/context-log.md"
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm context-staged-over
+[[ "$HOOK_RC" -eq 0 && "$HOOK_STDERR" == *"over context-log budget (60000 bytes)"* ]] || fail "staged context overage was hidden or blocked" "$HOOK_STDERR"
+cmp -s "$tmp_root/context-base" "$p/agent-vault/context-log.md" || fail "hook changed the working-tree context log"
+git -C "$p" show HEAD:agent-vault/context-log.md >"$tmp_root/committed-context"
+cmp -s "$tmp_root/staged-context" "$tmp_root/committed-context" || fail "hook compacted staged content"
+
+context_size 50000
+git -C "$p" add agent-vault/context-log.md
+context_size 60001
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm context-staged-small
+[[ "$HOOK_RC" -eq 0 && "$HOOK_STDERR" != *"memory-budget warning"* ]] || fail "unstaged context overage triggered a warning" "$HOOK_STDERR"
+
+# Only the config is staged; the log remains the previous 50 KB index version.
+printf 'context_log_budget=45000\ncontext_log_target=30000\n' >"$p/agent-vault/memory-budget.config"
+git -C "$p" add agent-vault/memory-budget.config
+printf 'context_log_budget=65000\ncontext_log_target=30000\n' >"$p/agent-vault/memory-budget.config"
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm config-staged-low
+[[ "$HOOK_RC" -eq 0 && "$HOOK_STDERR" == *"over context-log budget (45000 bytes)"* ]] || fail "config-only staging ignored staged low limit" "$HOOK_STDERR"
+
+git -C "$p" add agent-vault/memory-budget.config
+printf 'context_log_budget=45000\ncontext_log_target=30000\n' >"$p/agent-vault/memory-budget.config"
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm config-staged-high
+[[ "$HOOK_RC" -eq 0 && "$HOOK_STDERR" != *"memory-budget warning"* ]] || fail "hook read unstaged low config" "$HOOK_STDERR"
+
+printf 'context_log_target=0\n' >"$p/agent-vault/memory-budget.config"
+git -C "$p" add agent-vault/memory-budget.config
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm config-invalid
+[[ "$HOOK_RC" -eq 0 && "$HOOK_STDERR" == *"context_log_target must be positive"* ]] || fail "invalid context config was hidden or blocked commit" "$HOOK_STDERR"
+
+# A misconfigured explicit designation must reach the real hook error surface,
+# not produce only an unrelated canonical-log overage. Both files are 50 KB.
+context_size 50000
+mkdir -p "$p/docs"
+cp "$p/agent-vault/context-log.md" "$p/docs/log.md"
+printf 'context_log_path=docs/log.md\n' >"$p/agent-vault/memory-budget.config"
+git -C "$p" add agent-vault/context-log.md docs/log.md agent-vault/memory-budget.config
+# A valid unstaged config must not conceal the staged configuration error.
+printf 'context_log_path=docs/log.md\nprotocol_read=docs/log.md\n' >"$p/agent-vault/memory-budget.config"
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm context-path-uncovered
+[[ "$HOOK_RC" -eq 0 && "$HOOK_STDERR" == *"context_log_path 'docs/log.md' is not in effective protocol_read"* ]] || fail "uncovered designation diagnostic was hidden or blocked commit" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" == *"include it in protocol_read"* && "$HOOK_STDERR" != *"over file budget"* ]] || fail "uncovered designation gave a misleading hook warning" "$HOOK_STDERR"
+
+git -C "$p" add agent-vault/memory-budget.config
+printf 'context_log_path=docs/log.md\n' >"$p/agent-vault/memory-budget.config"
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm context-path-covered
+[[ "$HOOK_RC" -eq 0 && "$HOOK_STDERR" != *"memory-budget warning"* ]] || fail "hook rejected staged covered designation using unstaged config" "$HOOK_STDERR"
+
+# Omitting the built-in default via a narrowed file set stays informational.
+printf 'protocol_read=agent-vault/plan.md agent-vault/lessons.md\n' >"$p/agent-vault/memory-budget.config"
+git -C "$p" add agent-vault/memory-budget.config
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm context-default-excluded
+[[ "$HOOK_RC" -eq 0 && "$HOOK_STDERR" != *"memory-budget warning"* ]] || fail "default designation exclusion triggered a hook warning" "$HOOK_STDERR"
+
 echo "memory budget + context-log rollover pre-commit hook regression checks passed."

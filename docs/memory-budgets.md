@@ -42,6 +42,7 @@ scripts/check-memory-budget.sh --repo <path> --strict           # exit 1 on over
 scripts/check-memory-budget.sh --repo <path> --format tsv       # machine-readable
 scripts/check-memory-budget.sh --repo <path> --config <file>    # per-repo budget config
 scripts/check-memory-budget.sh --repo <path> --exceptions exceptions.tsv
+scripts/check-memory-budget.sh --repo <path> --context-log-budget 60000 --context-log-target 30000
 ```
 
 Design choices that matter:
@@ -202,7 +203,8 @@ independent suppression flag are unchanged.
 
 ## Budgets and per-repo configuration
 
-Defaults: per-file budget **40000 bytes** and per `@`-chain total budget
+Defaults: general per-file budget **40000 bytes**, designated context-log
+protocol-read budget **60000 bytes**, and per `@`-chain total budget
 **120000 bytes** (each chain budgeted separately). Sizes are measured in bytes
 (`wc -c`) for portability; for the mostly-ASCII memory files this tracks
 characters closely and is conservative for multibyte content. The per-file
@@ -213,8 +215,9 @@ large enough to hurt performance, so a file over it is over a real signal. The
 total is informational (Codex enforces its own `project_doc_max_bytes` cap, and
 a fresh scaffold already exceeds the 32 KiB default).
 
-Both are starting points, not law. Budgets resolve at three levels, highest
-priority first: **CLI flag** (`--file-budget` / `--chain-budget`) > **committed
+These are starting points, not law. Budgets resolve at three levels, highest
+priority first: **CLI flag** (`--file-budget`, `--chain-budget`,
+`--context-log-budget`, `--context-log-target`) > **committed
 config file** > **built-in default**. A repo records its own budget once in
 `agent-vault/memory-budget.config` (read automatically when present) so the
 choice is durable and discoverable rather than re-typed per invocation:
@@ -226,6 +229,11 @@ choice is durable and discoverable rather than re-typed per invocation:
 # complete key=value with no trailing text, so uncommenting one stays valid.
 file_budget=40000
 chain_budget=120000
+# Protocol-read context log only; import/AGENTS rows keep file_budget:
+context_log_budget=60000
+# Accepted and validated now; byte-based compaction is not implemented yet:
+context_log_target=30000
+context_log_path=agent-vault/context-log.md
 # Modeled Gemini tree import depth (does not change client settings):
 # gemini_import_depth=5
 # Override the bucket-3 (protocol-read) file set:
@@ -236,6 +244,116 @@ chain_budget=120000
 # excepted files are subtracted from the @-chain total):
 # exceptions=agent-vault/memory-budget.exceptions.tsv
 ```
+
+### Context-log allowance and current implementation stage
+
+The designated log gets its own threshold **only in the protocol-read bucket**.
+A 50,000-byte `agent-vault/context-log.md` passes there, while a 50,000-byte
+`plan.md`, an archive, or another file named `context-log.md` still exceeds the
+general default. The threshold is exclusive: 60,000 bytes is within budget;
+60,001 bytes is over. This is a storage/rollover allowance, not permission to
+read the whole log at session start. Keep the bounded snapshot/recent-entry reads.
+
+If a client imports the log, its import row still uses `file_budget` and its
+bytes still contribute to the import chain. A protocol `ok` row and an import
+`OVER` row for the same file describe different loading roles, not a contradiction.
+Import deduplication and alias-specific exception subtraction are unchanged:
+an excepted 50 KB imported log remains excepted under a 40 KB general limit,
+even though its protocol row is now within 60 KB. Protocol-only exceptions use
+the context-log threshold. Exceptions remain keyed by the displayed path.
+
+`context_log_path` is a literal repo-relative designation in `protocol_read`,
+not an extra discovery source. It resolves independently as
+`--context-log-path` > selected config > built-in default, just like the byte
+settings. `./` and repeated `/` normalize for designation
+matching; absolute paths, `..` components, whitespace/control characters, and
+empty/dot-only designations are rejected. Physical aliases are not matched.
+The existing protocol list is whitespace-separated, so paths containing
+whitespace cannot be designated. A custom layout configures both:
+
+```ini
+context_log_path=memory/live-log.md
+protocol_read=memory/live-log.md agent-vault/plan.md
+```
+
+An explicit designation from config or `--context-log-path` must belong to the
+effective `protocol_read` set. Otherwise the checker exits 2 in both ordinary
+and strict modes, naming the designation and explaining how to include or change
+it, before producing unrelated file overages. This also applies when explicitly
+choosing the canonical path, or when a CLI `--protocol-read` override excludes
+the configured designation. For a one-off narrowed check, supply a matching
+`--context-log-path` or use a config without an explicit designation.
+
+If only the **built-in default** designation is excluded by a narrowed protocol
+set, the report notes that its protocol size is not checked. This remains
+informational, even under `--strict`, preserving existing narrowed file sets.
+A designated path included in the set but absent on disk receives the existing
+`MISSING` row instead.
+No file is automatically imported or added to session-start reads.
+
+```bash
+scripts/check-memory-budget.sh --repo . --context-log-path memory/live-log.md \
+  --protocol-read 'memory/live-log.md agent-vault/plan.md' --strict
+```
+
+The checker reports the selected config source (or `built-in defaults`),
+effective budgets, and the designation. TSV keeps its existing five columns
+and bucket/status identifiers; config, target, coverage, and migration metadata
+appear in the `TOTAL` / `protocol` note. The target is a **reserved retention
+setting**: it is accepted and validated alongside the threshold so projects
+can adopt the complete config surface before the compactor learns byte-based
+retention. `compact-context-log.sh` still requires `--keep N`, reads no budget
+config, and does not enforce the target. Preview count-based rollover with
+`--dry-run`; no hook or upgrade runs compaction automatically.
+
+The proposed 60,000/30,000 defaults are trial values, not benchmark conclusions.
+Byte-based selection, its growth measurements, and operator flags will follow
+in the second PR for [#145](https://github.com/ssheld/agent-vault/issues/145).
+
+### Validation and upgrade behavior
+
+All four byte settings accept decimal integers up to **2,147,483,647**.
+`file_budget` and `chain_budget` allow zero; both context values must be positive,
+and the effective target must be strictly less than the effective threshold.
+Lowering the threshold below the default target requires setting a smaller target
+too. Leading zeroes are decimal (`040000` means 40,000), not octal. Empty values,
+signs, fractions, expressions, and excessive values are errors before arithmetic.
+Every supplied byte value is validated, including config values overridden by CLI
+flags; valid duplicate settings retain last-occurrence-wins behavior.
+
+Values are literal data, never sourced or evaluated. Full-line comments, CRLF,
+and files without a final newline are supported. An unknown key, a selected
+non-regular/unreadable config, or a failed config read exits 2 in both ordinary
+and strict modes. A malformed selected config never silently falls back to
+defaults. The checker automatically looks only at
+`<repo>/agent-vault/memory-budget.config`; another location needs `--config`.
+Relative explicit config paths remain relative to the invocation directory.
+
+Default-config discovery is intentionally stricter on upgrade: a directory,
+dangling symlink, or other non-regular entry at
+`agent-vault/memory-budget.config` was previously ignored in favor of defaults
+but now exits 2. Remove an unintended entry or replace it with a readable regular
+config file. A genuinely absent default config still uses built-in defaults.
+
+Upgrade the managed checker **before adding the new keys**: older checkers reject
+them, including `context_log_target`, as unknown-key errors. Both context byte
+keys and the path designation are supported together in this release. New numeric
+validation can reject previously accepted malformed or oversized settings, and
+leading-zero values now have their intended decimal meaning. Documented in-range
+plain decimal budgets retain their values; the generic zero settings still work.
+
+`--file-budget` no longer controls the designated log's protocol allowance. If a
+project explicitly sets the generic budget but leaves the context budget at its
+default, direct reports include an informational note identifying the new key.
+Set `context_log_budget` explicitly to preserve a tighter log limit. A CLI
+`--context-log-budget` override suppresses this migration note too. These
+informational notes neither cause strict failures nor trigger a new recurring
+pre-commit warning, and no "already warned" state or rewritten config is stored.
+
+Bootstrap/update propagate the managed checker without creating or rewriting
+budget configs, exceptions, logs, or archives for this feature. Managed refreshes
+can affect custom strict CI through the documented config/threshold changes;
+the shipped hook continues to report checker errors without blocking commits.
 
 ## `check-context-log-rollover.sh`
 

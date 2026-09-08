@@ -326,6 +326,22 @@ EOF
   assert_files_equal "$fixture/project-log-before.md" "$target/agent-vault/context-log.md" "$label leaves project-owned log unchanged"
 }
 
+assert_generated_context_budget() {
+  local target="$1" label="$2" fixture output rc=0
+  fixture="$tmp_root/context-budget-$label"
+  mkdir -p "$fixture/agent-vault"
+  head -c 50000 /dev/zero | tr '\0' x >"$fixture/agent-vault/context-log.md"
+  printf 'context_log_budget=60000\ncontext_log_target=30000\n' >"$fixture/agent-vault/memory-budget.config"
+  output="$(cd "$fixture" && "$target/scripts/check-memory-budget.sh" --repo "$fixture" --strict --format tsv 2>&1)" || rc=$?
+  assert_exit_code 0 "$rc" "$label installed checker accepts both context keys"
+  assert_output_contains "$output" "$(printf 'protocol\tagent-vault/context-log.md\tok\t50000\t')" "$label installed checker applies protocol-only limit"
+  printf '@agent-vault/context-log.md\n' >"$fixture/CLAUDE.md"
+  rc=0
+  output="$("$target/scripts/check-memory-budget.sh" --repo "$fixture" --strict --format tsv 2>&1)" || rc=$?
+  assert_exit_code 1 "$rc" "$label installed checker retains imported-log limit"
+  assert_output_contains "$output" "$(printf 'claude\tagent-vault/context-log.md\tOVER\t50000\t')" "$label imported log remains over general limit"
+}
+
 # --- Test 1: new-project seeds executable managed helpers and the runbook ---
 target="$(setup_empty_repo new-project-target)"
 rc=0
@@ -358,6 +374,7 @@ assert_file_contains "$target/scripts/check-lessons-archive.sh" "# agent-vault-m
 assert_files_equal "$repo_root/scaffold/root/scripts/check-lessons-archive.sh" "$target/scripts/check-lessons-archive.sh" "new-project seeds complete lessons-archive checker"
 assert_generated_rule_eligibility "$target" fresh-bootstrap
 assert_generated_import_discovery "$target" fresh-bootstrap
+assert_generated_context_budget "$target" fresh-bootstrap
 assert_generated_safety "$target" fresh-bootstrap
 
 # --- Test 2: update-project creates missing helpers in existing vaults ---
@@ -377,6 +394,7 @@ assert_file_contains "$target/scripts/new-worktree.sh" 'DEFAULT_ROOT="${PROJECT_
 assert_file_contains "$target/scripts/remove-worktree.sh" "Use only after verifying the PR is merged" "update-project creates remove helper with guarded guidance"
 assert_output_contains "$output" "Created: scripts/check-memory-budget.sh" "update-project reports memory-budget checker creation"
 assert_generated_import_discovery "$target" restored-helper
+assert_generated_context_budget "$target" restored-helper
 assert_output_contains "$output" "Created: scripts/check-context-log-rollover.sh" "update-project reports rollover checker creation"
 assert_output_contains "$output" "Created: scripts/compact-context-log.sh" "update-project reports rollover compactor creation"
 assert_output_contains "$output" "Created: scripts/check-lessons-archive.sh" "update-project reports lessons-archive checker creation"
@@ -459,10 +477,19 @@ chmod -x "$target/scripts/check-context-log-rollover.sh"
 chmod -x "$target/scripts/compact-context-log.sh"
 chmod -x "$target/scripts/check-lessons-archive.sh"
 cp "$target/scripts/check-memory-budget.sh" "$tmp_root/budget-before-dry-run"
+# Budget upgrades never rewrite project-owned memory or budget configuration.
+printf 'context_log_budget=72000\ncontext_log_target=35000\n# project choice\n' >"$target/agent-vault/memory-budget.config"
+printf 'agent-vault/context-log.md\tproject exception\n' >"$target/agent-vault/memory-budget.exceptions.tsv"
+for name in context-log.md memory-budget.config memory-budget.exceptions.tsv; do
+  cp "$target/agent-vault/$name" "$tmp_root/budget-preserve-$name"
+done
 rc=0
 output="$(run_update_project "$target" --dry-run 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "update-project managed budget checker dry-run exits 0"
 assert_files_equal "$tmp_root/budget-before-dry-run" "$target/scripts/check-memory-budget.sh" "dry-run preserves managed budget checker contents"
+for name in context-log.md memory-budget.config memory-budget.exceptions.tsv; do
+  assert_files_equal "$tmp_root/budget-preserve-$name" "$target/agent-vault/$name" "dry-run preserves project-owned $name"
+done
 if [[ ! -x "$target/scripts/check-memory-budget.sh" ]]; then
   passed=$((passed + 1))
 else
@@ -487,6 +514,10 @@ assert_file_contains "$target/scripts/compact-context-log.sh" "Keeps the Current
 assert_files_equal "$repo_root/scaffold/root/scripts/check-lessons-archive.sh" "$target/scripts/check-lessons-archive.sh" "update-project refreshes complete lessons-archive checker"
 assert_generated_rule_eligibility "$target" managed-update
 assert_generated_import_discovery "$target" managed-update
+assert_generated_context_budget "$target" managed-update
+for name in context-log.md memory-budget.config memory-budget.exceptions.tsv; do
+  assert_files_equal "$tmp_root/budget-preserve-$name" "$target/agent-vault/$name" "refresh preserves project-owned $name"
+done
 assert_executable "$target/scripts/new-worktree.sh" "update-project fixes managed helper executable bit"
 assert_executable "$target/scripts/remove-worktree.sh" "update-project fixes managed remove helper executable bit"
 assert_executable "$target/scripts/check-memory-budget.sh" "update-project fixes memory-budget checker executable bit"

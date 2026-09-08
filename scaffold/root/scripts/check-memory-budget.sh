@@ -53,6 +53,8 @@ markdown_fences='
 # as informational only (Codex enforces its own project_doc_max_bytes cap, and a
 # fresh scaffold already exceeds the 32 KiB default), though the per-file budget
 # still flags an individual oversized AGENTS.md.
+# The designated context log alone gets 60000 bytes in the protocol-read bucket;
+# importing that log still uses the general per-file and chain budgets.
 #
 # Budgets are configurable at three levels (CLI flag > config file > built-in
 # default; default config: agent-vault/memory-budget.config). The check is
@@ -77,9 +79,13 @@ Options:
   --config <file>          Budget config file (default: <repo>/agent-vault/memory-budget.config
                            when present). Keys: file_budget, chain_budget,
                            protocol_read, agents, exceptions, chain_exception,
-                           gemini_import_depth.
-  --file-budget <bytes>    Per-file budget in bytes (default: 40000).
+                           gemini_import_depth, context_log_path,
+                           context_log_budget, context_log_target.
+  --file-budget <bytes>    General per-file budget in bytes (default: 40000).
   --chain-budget <bytes>   Per @-chain total budget in bytes (default: 120000).
+  --context-log-budget N  Protocol-read context-log budget (default: 60000 bytes).
+  --context-log-target N  Reserved retention target (default: 30000 bytes).
+  --context-log-path PATH Designated repo-relative path (default: agent-vault/context-log.md).
   --gemini-import-depth N  Modeled Gemini tree depth, 0-64 (default: 5).
   --protocol-read "<list>" Space-separated protocol-read files (default: the
                            canonical session-start set).
@@ -92,7 +98,17 @@ Options:
   --format text|tsv        Output format (default: text).
   -h, --help               Show this help.
 
-Precedence for budgets/lists: CLI flag > config file > built-in default.
+Precedence for budgets/lists/designation: CLI flag > config file > built-in default.
+Byte budgets use decimal integers up to 2147483647; leading zeroes are decimal.
+General file/chain budgets allow zero; context budgets must be positive and
+context_log_target must be less than context_log_budget. The target is validated
+and reported now, but the compactor still requires --keep and does not enforce it.
+context_log_path defaults to agent-vault/context-log.md, relative to --repo.
+It designates a path in protocol_read; it does not add a file to that set.
+Designations allow ./ and repeated /, not whitespace, absolute paths, or ..
+components. No physical-alias matching: imported/aliased logs retain the general
+limit. An explicit designation outside effective protocol_read is a config error
+(exit 2). Excluding the built-in default alone is informational, even under --strict.
 Import scope: repo-local source bytes from CLAUDE.md and GEMINI.md, not the full
 client memory hierarchy or expanded prompt. Physical files count once per chain;
 every reached logical alias must be excepted before its source is subtracted.
@@ -111,10 +127,95 @@ die() {
   exit 2
 }
 
+# Standalone config functions. PR B of #145 will embed this marked block in the
+# compactor and add parity tests; do not introduce an installed library dependency.
+# BEGIN memory budget config
+normalize_budget() {
+  local key="$1" value="$2" minimum=0 LC_ALL=C
+  case "$key" in context_log_budget | context_log_target) minimum=1 ;; esac
+  [[ "$value" =~ ^[0-9]+$ ]] || die "$key must be a decimal integer from $minimum to 2147483647"
+  # Strip zeroes before bounding digit count. Never pass raw input to arithmetic.
+  value="${value#"${value%%[!0]*}"}"
+  value="${value:-0}"
+  # Equal-length ASCII digit strings compare numerically without arithmetic overflow.
+  # shellcheck disable=SC2071
+  [[ "${#value}" -lt 10 || ("${#value}" -eq 10 && ! "$value" > 2147483647) ]] ||
+    die "$key must be a decimal integer from $minimum to 2147483647"
+  [[ "$minimum" -eq 0 || "$value" != 0 ]] || die "$key must be positive"
+  printf '%s' "$value"
+}
+
+normalize_context_log_path() {
+  local value="$1" part normalized=""
+  local -a parts=()
+  [[ -n "$value" && "$value" != /* && "$value" != *[[:space:][:cntrl:]]* && "/$value/" != */../* ]] ||
+    die "context_log_path must be repo-relative without whitespace, control bytes, or '..' components"
+  IFS=/ read -r -a parts <<<"$value"
+  for part in "${parts[@]}"; do
+    case "$part" in '' | .) continue ;; esac
+    normalized+="${normalized:+/}$part"
+  done
+  [[ -n "$normalized" ]] || die "context_log_path must name a file"
+  printf '%s' "$normalized"
+}
+
+read_memory_budget_config() {
+  local path="$1" contents raw_line cfg_line cfg_key cfg_val
+  config_file_budget="" config_chain_budget=""
+  config_context_log_budget="" config_context_log_target="" config_context_log_path=""
+  config_protocol_read="" config_agents="" config_exceptions=""
+  config_chain_exception="" config_gemini_import_depth=""
+  [[ -n "$path" ]] || return 0
+  [[ -f "$path" && -r "$path" ]] || die "config file is not a readable regular file: $path"
+  # Read completely before parsing: a partial read must not silently select defaults.
+  contents="$(cat -- "$path")" || die "cannot read config file: $path"
+  while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
+    raw_line="${raw_line%$'\r'}"
+    cfg_line="${raw_line#"${raw_line%%[![:space:]]*}"}"
+    [[ -z "$cfg_line" || "$cfg_line" == \#* ]] && continue
+    [[ "$cfg_line" == *=* ]] || continue
+    cfg_key="${cfg_line%%=*}"
+    cfg_val="${cfg_line#*=}"
+    cfg_key="${cfg_key%"${cfg_key##*[![:space:]]}"}"
+    cfg_val="${cfg_val#"${cfg_val%%[![:space:]]*}"}"
+    cfg_val="${cfg_val%"${cfg_val##*[![:space:]]}"}"
+    case "$cfg_key" in
+      file_budget) config_file_budget="$(normalize_budget "$cfg_key" "$cfg_val")" || exit 2 ;;
+      chain_budget) config_chain_budget="$(normalize_budget "$cfg_key" "$cfg_val")" || exit 2 ;;
+      context_log_budget) config_context_log_budget="$(normalize_budget "$cfg_key" "$cfg_val")" || exit 2 ;;
+      # Accept/validate the complete config surface before PR B adds byte retention.
+      context_log_target) config_context_log_target="$(normalize_budget "$cfg_key" "$cfg_val")" || exit 2 ;;
+      context_log_path) config_context_log_path="$(normalize_context_log_path "$cfg_val")" || exit 2 ;;
+      protocol_read) config_protocol_read="$cfg_val" ;;
+      agents) config_agents="$cfg_val" ;;
+      exceptions) config_exceptions="$cfg_val" ;;
+      chain_exception) config_chain_exception="$cfg_val" ;;
+      gemini_import_depth)
+        [[ -n "$cfg_val" ]] || die "gemini_import_depth requires a number"
+        config_gemini_import_depth="$cfg_val"
+        ;;
+      *) die "unknown config key in $path: $cfg_key" ;;
+    esac
+  done <<<"$contents"
+}
+
+resolve_context_log_budget() {
+  context_log_budget="${context_log_budget:-${config_context_log_budget:-60000}}"
+  context_log_target="${context_log_target:-${config_context_log_target:-30000}}"
+  context_log_path_explicit=false
+  [[ -z "${context_log_path:-$config_context_log_path}" ]] || context_log_path_explicit=true
+  context_log_path="${context_log_path:-${config_context_log_path:-agent-vault/context-log.md}}"
+  [[ "$context_log_target" -lt "$context_log_budget" ]] || die "context_log_target must be less than context_log_budget"
+}
+# END memory budget config
+
 repo=""
 config_file=""
 file_budget=""
 chain_budget=""
+context_log_budget=""
+context_log_target=""
+context_log_path=""
 protocol_read_cli=""
 agents_cli=""
 exceptions_cli=""
@@ -131,17 +232,33 @@ while [[ $# -gt 0 ]]; do
       ;;
     --config)
       [[ $# -ge 2 ]] || die "--config requires a path"
+      [[ -n "$2" ]] || die "--config requires a nonempty path"
       config_file="$2"
       shift 2
       ;;
     --file-budget)
       [[ $# -ge 2 ]] || die "--file-budget requires a number"
-      file_budget="$2"
+      file_budget="$(normalize_budget file_budget "$2")" || exit 2
       shift 2
       ;;
     --chain-budget)
       [[ $# -ge 2 ]] || die "--chain-budget requires a number"
-      chain_budget="$2"
+      chain_budget="$(normalize_budget chain_budget "$2")" || exit 2
+      shift 2
+      ;;
+    --context-log-budget)
+      [[ $# -ge 2 ]] || die "--context-log-budget requires a number"
+      context_log_budget="$(normalize_budget context_log_budget "$2")" || exit 2
+      shift 2
+      ;;
+    --context-log-target)
+      [[ $# -ge 2 ]] || die "--context-log-target requires a number"
+      context_log_target="$(normalize_budget context_log_target "$2")" || exit 2
+      shift 2
+      ;;
+    --context-log-path)
+      [[ $# -ge 2 ]] || die "--context-log-path requires a path"
+      context_log_path="$(normalize_context_log_path "$2")" || exit 2
       shift 2
       ;;
     --gemini-import-depth)
@@ -195,48 +312,17 @@ repo="$(cd "$repo_arg" 2>/dev/null && pwd -P)" || die "repo path not found: $rep
 
 # --- config file (CLI > config > default) --------------------------------
 
-config_file_budget=""
-config_chain_budget=""
-config_protocol_read=""
-config_agents=""
-config_exceptions=""
-config_chain_exception=""
-config_gemini_import_depth=""
-
-if [[ -z "$config_file" && -f "$repo/agent-vault/memory-budget.config" ]]; then
+if [[ -z "$config_file" && (-e "$repo/agent-vault/memory-budget.config" || -L "$repo/agent-vault/memory-budget.config") ]]; then
   config_file="$repo/agent-vault/memory-budget.config"
 fi
-
-if [[ -n "$config_file" ]]; then
-  [[ -f "$config_file" ]] || die "config file not found: $config_file"
-  while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
-    raw_line="${raw_line%$'\r'}"
-    cfg_line="${raw_line#"${raw_line%%[![:space:]]*}"}"
-    [[ -z "$cfg_line" || "$cfg_line" == \#* ]] && continue
-    [[ "$cfg_line" == *=* ]] || continue
-    cfg_key="${cfg_line%%=*}"
-    cfg_val="${cfg_line#*=}"
-    cfg_key="${cfg_key%"${cfg_key##*[![:space:]]}"}"
-    cfg_val="${cfg_val#"${cfg_val%%[![:space:]]*}"}"
-    cfg_val="${cfg_val%"${cfg_val##*[![:space:]]}"}"
-    case "$cfg_key" in
-      file_budget) config_file_budget="$cfg_val" ;;
-      chain_budget) config_chain_budget="$cfg_val" ;;
-      protocol_read) config_protocol_read="$cfg_val" ;;
-      agents) config_agents="$cfg_val" ;;
-      exceptions) config_exceptions="$cfg_val" ;;
-      chain_exception) config_chain_exception="$cfg_val" ;;
-      gemini_import_depth)
-        [[ -n "$cfg_val" ]] || die "gemini_import_depth requires a number"
-        config_gemini_import_depth="$cfg_val"
-        ;;
-      *) die "unknown config key in $config_file: $cfg_key" ;;
-    esac
-  done <"$config_file"
+read_memory_budget_config "$config_file"
+context_budget_migration=""
+if [[ -n "${file_budget:-$config_file_budget}" && -z "$context_log_budget" && -z "$config_context_log_budget" ]]; then
+  context_budget_migration="generic file_budget does not set the protocol context-log limit; set context_log_budget explicitly to override its default"
 fi
-
 file_budget="${file_budget:-${config_file_budget:-40000}}"
 chain_budget="${chain_budget:-${config_chain_budget:-120000}}"
+resolve_context_log_budget
 gemini_import_depth="${gemini_import_depth:-${config_gemini_import_depth:-5}}"
 # Bound before arithmetic (including digit count) so hostile numeric input never
 # becomes a Bash arithmetic expression or overflows before validation.
@@ -247,10 +333,6 @@ gemini_import_depth=$((10#$gemini_import_depth))
 [[ -n "$agents_cli" ]] && config_agents="$agents_cli"
 exceptions_file="${exceptions_cli:-$config_exceptions}"
 chain_exception_reason="$config_chain_exception"
-
-for b in file_budget chain_budget; do
-  [[ "${!b}" =~ ^[0-9]+$ ]] || die "$b must be a non-negative integer"
-done
 
 if [[ -n "$exceptions_file" ]]; then
   case "$exceptions_file" in
@@ -792,6 +874,31 @@ else
   protocol_read_files=("${default_protocol_read[@]}")
 fi
 
+# Designation is a normalized logical path in one bucket, not a physical alias
+# or an instruction to discover/import more files. Reject '..' during matching
+# too: lexical cancellation across a symlink could identify a different file.
+is_protocol_context_log() {
+  local normalized
+  normalized="$(normalize_context_log_path "$1" 2>/dev/null)" || return 1
+  [[ "$normalized" == "$context_log_path" ]]
+}
+context_log_covered=false
+for protocol_path in "${protocol_read_files[@]}"; do
+  if is_protocol_context_log "$protocol_path"; then
+    context_log_covered=true
+    break
+  fi
+done
+context_coverage_note=""
+if [[ "$context_log_covered" == false ]]; then
+  # Explicit designations assert coverage, including when a CLI file-set
+  # override narrows it. Only the implicit default may be excluded benignly.
+  if [[ "$context_log_path_explicit" == true ]]; then
+    die "context_log_path '$context_log_path' is not in effective protocol_read; include it in protocol_read (or --protocol-read), or change context_log_path (--context-log-path)"
+  fi
+  context_coverage_note="$context_log_path is not in effective protocol_read; its protocol size is not checked (designation does not add a file)"
+fi
+
 # --- measurement ---------------------------------------------------------
 
 violations=0
@@ -835,11 +942,17 @@ measure_bucket() {
   local -n total_ref="$1"
   shift
   local rel abs bytes status note identity key current_identity alias occurrence=0
-  local -A measured=() group_bytes=() group_except=()
+  local effective_budget budget_label role_note
+  local -A measured=() group_bytes=() group_except=() group_budget=()
   total_ref=0
 
   for rel in "$@"; do
     abs="$repo/$rel"
+    effective_budget="$file_budget" budget_label="file budget" role_note=""
+    if [[ "$bucket" == protocol ]] && is_protocol_context_log "$rel"; then
+      effective_budget="$context_log_budget" budget_label="context-log budget"
+      role_note="protocol-only limit $context_log_budget bytes; imports still use file_budget=$file_budget; retention target $context_log_target bytes is reserved, not enforced"
+    fi
     # Preserve the existing explicit-list accounting for AGENTS/protocol reads.
     # Physical grouping is only part of the two import bucket contracts.
     occurrence=$((occurrence + 1))
@@ -869,17 +982,18 @@ measure_bucket() {
       measured["$identity"]="$rel"
       group_bytes["$identity"]="$bytes"
       group_except["$identity"]=1
+      group_budget["$identity"]="$effective_budget"
     fi
     note=""
     status="ok"
-    if [[ "$bytes" -gt "$file_budget" ]]; then
+    if [[ "$bytes" -gt "$effective_budget" ]]; then
       if [[ -n "${EXCEPTION_REASON[$rel]:-}" ]]; then
         status="EXCEPT"
-        note="over file budget; documented: ${EXCEPTION_REASON[$rel]}"
+        note="over $budget_label; documented: ${EXCEPTION_REASON[$rel]}"
       else
         group_except["$identity"]=0
         status="OVER"
-        note="over file budget ($file_budget bytes)"
+        note="over $budget_label ($effective_budget bytes)"
         if [[ -z "${COUNTED_OVER[$rel]:-}" ]]; then
           COUNTED_OVER["$rel"]=1
           if [[ "$bucket" != claude && "$bucket" != gemini ]] || [[ -z "${COUNTED_IMPORT_OVER[$identity]+present}" ]]; then
@@ -889,13 +1003,17 @@ measure_bucket() {
         fi
       fi
     fi
+    [[ -z "$role_note" ]] || note="${note:+$note; }$role_note"
+    if [[ "$status" == OVER && "$budget_label" == "context-log budget" ]]; then
+      note+="; preview an explicit --keep rollover with compact-context-log.sh (byte retention is not implemented yet)"
+    fi
     [[ -z "$alias" ]] || note="${note:+$note; }$alias"
     emit_row "$bucket" "$rel" "$status" "$bytes" "$note"
   done
   # A path-specific exception never silently extends to another alias. Subtract
   # one physical source only when every reached logical alias is excepted.
   for identity in "${!group_bytes[@]}"; do
-    if [[ "${group_bytes[$identity]}" -gt "$file_budget" && "${group_except[$identity]}" == 1 ]]; then
+    if [[ "${group_bytes[$identity]}" -gt "${group_budget[$identity]}" && "${group_except[$identity]}" == 1 ]]; then
       BUCKET_EXCEPTED["$bucket"]=$((${BUCKET_EXCEPTED[$bucket]:-0} + group_bytes[$identity]))
     fi
   done
@@ -920,7 +1038,10 @@ if [[ "$format" == "text" ]]; then
   echo "Scanner limits: $max_import_edges edges; $max_import_file_bytes bytes/file; $max_import_chain_bytes bytes/chain."
   echo "Scanner shape bounds: 100000 lines/file; delimiter run 128; import path 4096 bytes."
   echo "Per-file: $file_budget bytes | per @-chain: $chain_budget bytes"
-  [[ -n "$config_file" ]] && echo "Config: $config_file"
+  echo "Config: ${config_file:-built-in defaults}"
+  echo "Context log: $context_log_path | protocol budget: $context_log_budget bytes | retention target: $context_log_target bytes (reserved, not enforced)"
+  [[ -z "$context_budget_migration" ]] || echo "Note: $context_budget_migration"
+  [[ -z "$context_coverage_note" ]] || echo "Note: $context_coverage_note"
   echo
 fi
 
@@ -1012,7 +1133,10 @@ if [[ "$format" == "tsv" ]]; then
   printf 'TOTAL\tclaude_chain\t%s\t%s\t%s\n' "$claude_status" "$claude_total" "$claude_note"
   printf 'TOTAL\tgemini_chain\t%s\t%s\t%s\n' "$gemini_status" "$gemini_total" "$gemini_note"
   printf 'TOTAL\tagents\t%s\t%s\t\n' "$agents_status" "$agents_total"
-  printf 'TOTAL\tprotocol\tinfo\t%s\t\n' "$protocol_total"
+  protocol_note="config: ${config_file:-built-in defaults}; file_budget=$file_budget; chain_budget=$chain_budget; context_log_path=$context_log_path; context_log_budget=$context_log_budget; context_log_target=$context_log_target (reserved, not enforced)"
+  [[ -z "$context_budget_migration" ]] || protocol_note+="; $context_budget_migration"
+  [[ -z "$context_coverage_note" ]] || protocol_note+="; $context_coverage_note"
+  emit_row TOTAL protocol info "$protocol_total" "$protocol_note"
 else
   echo
   echo "Totals (per @-chain budget: $chain_budget bytes; Codex AGENTS total is informational):"
