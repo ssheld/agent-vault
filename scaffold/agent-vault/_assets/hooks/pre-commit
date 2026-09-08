@@ -42,22 +42,37 @@ warn_memory_budget() {
   [[ "$touched_memory" == "true" ]] || return 0
 
   # Measure the staged commit content by materializing the index into a temp dir.
-  local staged_root budget_output
+  local staged_root budget_output budget_rc=0
   staged_root="$(mktemp -d "${TMPDIR:-/tmp}/agent-vault-budget-staged.XXXXXX")" || return 0
   if ! git checkout-index -a --prefix="$staged_root/" >/dev/null 2>&1; then
     rm -rf "$staged_root"
     return 0
   fi
-  if budget_output="$(scripts/check-memory-budget.sh --repo "$staged_root" --strict 2>&1)"; then
-    rm -rf "$staged_root"
-    return 0
-  fi
+  budget_output="$(scripts/check-memory-budget.sh --repo "$staged_root" --strict --format tsv 2>&1)" || budget_rc=$?
   rm -rf "$staged_root"
 
+  # EXTERNAL is advisory even under --strict, so success alone cannot authorize
+  # hiding scope exclusions. Never retarget absolute paths into this index copy
+  # or read the working tree as a fallback for an excluded staged reference.
+  if [[ "$budget_rc" -eq 0 ]] && ! printf '%s\n' "$budget_output" | awk -F '\t' '
+    $1 == "IMPORT" && $3 == "EXTERNAL" { external = 1 }
+    END { exit !external }
+  '; then
+    return 0
+  fi
+
   echo "agent-vault memory-budget warning (non-blocking; staged content; set AGENT_VAULT_SKIP_MEMORY_BUDGET=1 to silence):" >&2
-  printf '%s\n' "$budget_output" | awk '
-    /non-excepted overage/ { print; next }
-    /[[:space:]]OVER[[:space:]]/ && !seen[$2]++ { print }
+  printf '%s\n' "$budget_output" | awk -F '\t' '
+    $1 == "IMPORT" && $3 ~ /^(EXTERNAL|INCOMPLETE|UNSUPPORTED)$/ {
+      printf "  %s %s: %s\n", $3, $2, $5; next
+    }
+    $1 == "TOTAL" && $3 ~ /^(OVER|INCOMPLETE)$/ {
+      printf "  %s %s: %s bytes; %s\n", $3, $2, $4, $5; next
+    }
+    $3 == "OVER" && !seen[$2]++ {
+      printf "  OVER %s: %s bytes; %s\n", $2, $4, $5; next
+    }
+    NF != 5 && $0 != "" { print }
   ' >&2 || true
   echo "Run scripts/check-memory-budget.sh for the full report." >&2
   return 0

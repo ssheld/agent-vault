@@ -300,4 +300,5 @@ expect_result 0 "bytes" --repo "$project"
 expect_result 2 "must be text or tsv" --repo "$project" --format bogus
 expect_result 2 "repo path not found" --repo "$tmp_root/no-such-dir"
 
+bash "$repo_root/scripts/test-memory-import-discovery.sh"
 echo "memory budget checker regression checks passed."

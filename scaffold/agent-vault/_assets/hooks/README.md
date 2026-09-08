@@ -27,8 +27,9 @@ git config core.hooksPath agent-vault/_assets/hooks
   - Emits a **non-blocking** memory-budget warning when the staged commit touches
     memory files (`agent-vault/`, `CLAUDE.md`, `GEMINI.md`, or any `AGENTS.md`)
     and `scripts/check-memory-budget.sh` is installed. It measures the **staged**
-    content (the index, not the working tree), surfaces any over-budget
-    `@`-chain or file, and always exits `0` — the budget is advisory and never
+    content (the index, not the working tree), surfaces over-budget files/chains,
+    incomplete import analysis, external scope exclusions, and checker errors,
+    and always exits `0` — the budget is advisory and never
     blocks a commit. It runs even when `AGENT_VAULT_SKIP_METADATA_GATE=1` is set;
     silence it independently with `AGENT_VAULT_SKIP_MEMORY_BUDGET=1`.
 - `pre-push`
@@ -82,6 +83,22 @@ trivial change: use the bypass and state the review-only skip in the task summar
 per the `Session End - Required` exception in `agent-vault/shared-rules.md`.
 
 The non-blocking memory-budget warning is independent of the metadata gate.
+The managed checker now fails `--strict` for incomplete **in-scope** import
+analysis as well as overages; `update-project.sh` refreshes that behavior in
+place. This can affect custom downstream CI/scripts, but the shipped hook
+continues to catch checker failures and never blocks a commit for its budget.
+
+The checker measures unique source bytes from the selected repo-local root
+chains, not every client instruction or exact expanded prompt. Known external
+imports are advisory exclusions, not incomplete analysis. Exclusions remain
+visible even when the checker exits zero. An absolute import or symlink into
+the worktree may be outside the hook's temporary index checkout, so its staged
+total can be lower than a direct worktree check. The hook never retargets those
+paths or reads unstaged content as a fallback; the exclusion explains the gap.
+An unchanged external target is reported again on later memory-touching commits.
+This deliberately keeps the scope gap visible; there is no separate external-only
+acknowledgement or suppression mechanism in the current contract.
+
 Silence it on its own (it never blocks a commit either way):
 
 ```bash

@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-# Keep this trusted, static awk source identical in all three standalone helpers.
+# Keep this trusted, static awk source identical in all four standalone helpers.
 # Tests check marker integrity, equality, and caller behavior.
 # BEGIN markdown fences
 markdown_fences='
