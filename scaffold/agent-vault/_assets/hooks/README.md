@@ -83,6 +83,16 @@ trivial change: use the bypass and state the review-only skip in the task summar
 per the `Session End - Required` exception in `agent-vault/shared-rules.md`.
 
 The non-blocking memory-budget warning is independent of the metadata gate.
+The checker uses the staged `agent-vault/memory-budget.config`, including when
+only that config is staged. The designated context log's protocol-read allowance
+defaults to 60,000 bytes; imported logs and other memory files still use the
+40,000-byte general default. `context_log_budget`, `context_log_target`, and
+`context_log_path` are accepted together. The 30,000-byte target is validated and
+reported but not yet enforced by the count-based compactor. Upgrade the checker
+before adding these keys; an older checker rejects unknown keys. No hook compacts
+files or rewrites configuration. Informational migration/coverage notes are
+available in direct reports and do not trigger additional hook warnings.
+
 The managed checker now fails `--strict` for incomplete **in-scope** import
 analysis as well as overages; `update-project.sh` refreshes that behavior in
 place. This can affect custom downstream CI/scripts, but the shipped hook
