@@ -30,6 +30,8 @@ on:
       - "scripts/parse-claude-memory-trace.py"
       - "scripts/test-check-memory-budget.sh"
       - "scripts/test-context-log-size-budget.sh"
+      - "scripts/test-byte-context-log-retention.sh"
+      - "scripts/test-context-log-growth.sh"
       - "scripts/test-memory-import-discovery.sh"
       - "scripts/fixtures/memory-imports/**"
       - "scripts/test-check-context-log-rollover.sh"
@@ -68,6 +70,8 @@ on:
       - "scripts/parse-claude-memory-trace.py"
       - "scripts/test-check-memory-budget.sh"
       - "scripts/test-context-log-size-budget.sh"
+      - "scripts/test-byte-context-log-retention.sh"
+      - "scripts/test-context-log-growth.sh"
       - "scripts/test-memory-import-discovery.sh"
       - "scripts/fixtures/memory-imports/**"
       - "scripts/test-check-context-log-rollover.sh"
@@ -153,6 +157,10 @@ jobs:
         run: bash scripts/test-check-memory-budget.sh
       - name: Verify context-log budget configuration and scope
         run: bash scripts/test-context-log-size-budget.sh
+      - name: Verify byte-based context-log retention and recovery
+        run: bash scripts/test-byte-context-log-retention.sh
+      - name: Verify deterministic context-log growth contract
+        run: bash scripts/test-context-log-growth.sh
       - name: Verify context-log rollover checker
         run: bash scripts/test-check-context-log-rollover.sh
       - name: Verify lessons-archive checker

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Issue #145, PR A: checker/config contract. Byte-mode compaction follows in PR B.
+# Issue #145: checker/config contract. Byte-mode compaction has a separate suite.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -89,7 +89,7 @@ check contains '@-chain total'
 printf 'no imports\n' >"$project/CLAUDE.md"
 printf 'no imports\n' >"$project/GEMINI.md"
 
-# Config surface lands complete before byte-mode compaction.
+# Both consumers accept the complete configuration surface.
 printf 'context_log_budget=55000\ncontext_log_target=25000\n' >"$config"
 run 0 --strict
 check contains "Config: $config"

@@ -231,7 +231,7 @@ file_budget=40000
 chain_budget=120000
 # Protocol-read context log only; import/AGENTS rows keep file_budget:
 context_log_budget=60000
-# Accepted and validated now; byte-based compaction is not implemented yet:
+# Final live-byte target for explicit --to-budget compaction:
 context_log_target=30000
 context_log_path=agent-vault/context-log.md
 # Modeled Gemini tree import depth (does not change client settings):
@@ -245,7 +245,7 @@ context_log_path=agent-vault/context-log.md
 # exceptions=agent-vault/memory-budget.exceptions.tsv
 ```
 
-### Context-log allowance and current implementation stage
+### Context-log allowance and byte retention
 
 The designated log gets its own threshold **only in the protocol-read bucket**.
 A 50,000-byte `agent-vault/context-log.md` passes there, while a 50,000-byte
@@ -299,16 +299,35 @@ scripts/check-memory-budget.sh --repo . --context-log-path memory/live-log.md \
 The checker reports the selected config source (or `built-in defaults`),
 effective budgets, and the designation. TSV keeps its existing five columns
 and bucket/status identifiers; config, target, coverage, and migration metadata
-appear in the `TOTAL` / `protocol` note. The target is a **reserved retention
-setting**: it is accepted and validated alongside the threshold so projects
-can adopt the complete config surface before the compactor learns byte-based
-retention. `compact-context-log.sh` still requires `--keep N`, reads no budget
-config, and does not enforce the target. Preview count-based rollover with
-`--dry-run`; no hook or upgrade runs compaction automatically.
+appear in the `TOTAL` / `protocol` note. The target is enforced by an explicit
+`compact-context-log.sh --to-budget` invocation, not by the checker or hook.
+The existing `--keep N` mode remains count-based and ignores budget config.
+Preview either mode with `--dry-run`; no hook or upgrade runs compaction automatically.
 
-The proposed 60,000/30,000 defaults are trial values, not benchmark conclusions.
-Byte-based selection, its growth measurements, and operator flags will follow
-in the second PR for [#145](https://github.com/ssheld/agent-vault/issues/145).
+The 60,000/30,000 defaults remain trial values, not claims of real-world optimality.
+The [fixed growth experiment](context-log-growth-workload.md) compares them with
+40,000/30,000 using identical synthetic streams and predeclared acceptance criteria.
+
+Measured with `bash scripts/test-context-log-growth.sh` (96 sessions per stream;
+target 30,000 bytes; the shared fixed test clock):
+
+| Workload | Trigger | Rollovers | Refusals | Median sessions between rollovers | Retained bytes | Retained entries | Headroom bytes |
+| --- | ---: | ---: | ---: | ---: | --- | --- | --- |
+| Normal | 40,000 | 18 | 0 | 5 | 28,423–29,430 | 11 | 10,570–11,577 |
+| Normal | 60,000 | 6 | 0 | 12 | 28,707–29,231 | 11 | 30,769–31,293 |
+| Burst | 40,000 | 19 | 0 | 5 | 14,233–29,961 | 5–10 | 10,039–25,767 |
+| Burst | 60,000 | 7 | 0 | 12 | 15,655–17,335 | 6–7 | 42,665–44,345 |
+| Oversized | 40,000 | 11 | 4 | 5 | 2,655–29,111 | 1–11 | 10,889–37,345 |
+| Oversized | 60,000 | 6 | 4 | 22 | 2,655–29,196 | 1–11 | 30,804–57,345 |
+
+The normal median interval increased from 5 to 12 additional sessions with no
+target refusals, satisfying the predeclared criterion. All successful strict
+rollovers met target, and every stream preserved complete entry contents exactly
+once and in order across live/archive history. Four oversized newest entries per
+stream caused intentional no-write refusals; later smaller entries could permit
+rollover. A separate 33,000-byte snapshot regression confirms mandatory-content
+refusal. These synthetic results support more headroom for the trial defaults,
+not a guarantee about real session lengths or an optimal retention policy.
 
 ### Validation and upgrade behavior
 
@@ -582,11 +601,70 @@ No-ops and dormant projects do not acquire a new record automatically.
 ## `compact-context-log.sh`
 
 Automates the context-log rollover the checker validates. It keeps the single
-`## Current Snapshot` plus the newest `--keep` entries, moves older entries into
+`## Current Snapshot` plus a newest-entry prefix, moves older entries into
 the dated archive (newest-at-top), writes the live `Context-log rollover`
 pointer, and prepends a record to the manifest. Prose memory files
 (`project-context.md`, `lessons.md`, …) deliberately stay agent-driven and are
 out of scope.
+
+### Choosing count or byte retention
+
+Choose exactly one mode. `--keep N` preserves the existing count-based contract,
+including deliberate below-threshold compaction. `--to-budget` uses the effective
+context-log trigger/target (defaults 60,000/30,000 bytes). It is a no-op at or below
+the trigger, after existing input/structure/recovery checks. `--ignore-trigger`
+permits early byte compaction; a log already within target remains unchanged.
+
+Byte mode retains the **largest complete newest-entry prefix** whose fully
+rendered live file fits the target, keeping at least the newest entry and archiving
+at least one. Accounting includes the snapshot/header, the rewritten pointer,
+legacy blank-line rendering, preserved suffix bytes, and multibyte content. It
+uses linear prefix/boundary passes, not a full render for every split. The actual
+chosen after-image byte count must equal the prediction before publication.
+Archive boundaries keep the existing whole-archive timestamp rules, including
+first-at-max/last-at-min ties, rather than assuming the first moved heading wins.
+
+If no candidate fits, ordinary `--to-budget` refuses without writes (exit 1),
+reporting the smallest achievable candidate and retained count, target/trigger,
+and mandatory header/snapshot/newest/suffix bytes excluding the new pointer.
+An only-entry log has no archivable candidate. Adjust the target/trigger or review
+the content; the compactor never truncates bodies or drops the newest entry.
+
+`--allow-target-overage` is an explicit best-effort exception **only when no
+candidate fits the target**: select the smallest rendered candidate (prefer more
+entries on a size tie), require actual reduction and a result within the trigger,
+and warn that the target was missed even under `--quiet`. Otherwise refuse.
+It does not imply `--ignore-trigger` or bypass session, structural, or write gates.
+
+Byte-mode config resolution is explicit `--config` >
+`<git root resolved from the input log's directory>/agent-vault/memory-budget.config`
+> `memory-budget.config` beside the log > built-in defaults. Only those two
+default locations are probed, never ancestors selected from the caller's cwd.
+A selected invalid/unreadable config is an error, not permission to fall back.
+Reports identify the source and effective values, including no-ops; an adjacent
+fallback notes that the checker does not automatically read that location.
+Relative explicit config paths remain relative to the invocation directory.
+
+`--context-log-budget` and `--context-log-target` override selected config values.
+The same standalone parser/validation block is embedded in both tools and tested
+for parity. The compactor validates the full config surface, but its positional
+log argument selects the input; `context_log_path` does not redirect it or impose
+checker-specific protocol coverage. `--keep` and `--recover` never read ambient
+budget config, including malformed designations. Byte options require
+`--to-budget` and are rejected with recovery. Recovery replays recorded bytes;
+changed budgets cannot change or block a pending transaction.
+
+```bash
+scripts/compact-context-log.sh agent-vault/context-log.md --to-budget \
+  --archive agent-vault/context/archive/context-log-2026.md \
+  --manifest agent-vault/context/archive/context-log-manifest.md \
+  --require-top-entry "rollover" --dry-run
+```
+
+Normal byte summaries include mode, source, input/final bytes, trigger/target,
+and retained/archived counts. `--quiet` suppresses ordinary summaries, not
+failures or missed-target warnings. All existing transaction safeguards below
+apply to both modes.
 
 Only canonical entries inside `## Entries` participate in counting, the newest
 entry gate, selection, and the live-side overlap safety check. That section ends

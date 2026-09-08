@@ -84,7 +84,7 @@ Options:
   --file-budget <bytes>    General per-file budget in bytes (default: 40000).
   --chain-budget <bytes>   Per @-chain total budget in bytes (default: 120000).
   --context-log-budget N  Protocol-read context-log budget (default: 60000 bytes).
-  --context-log-target N  Reserved retention target (default: 30000 bytes).
+  --context-log-target N  Compactor byte-retention target (default: 30000 bytes).
   --context-log-path PATH Designated repo-relative path (default: agent-vault/context-log.md).
   --gemini-import-depth N  Modeled Gemini tree depth, 0-64 (default: 5).
   --protocol-read "<list>" Space-separated protocol-read files (default: the
@@ -101,8 +101,8 @@ Options:
 Precedence for budgets/lists/designation: CLI flag > config file > built-in default.
 Byte budgets use decimal integers up to 2147483647; leading zeroes are decimal.
 General file/chain budgets allow zero; context budgets must be positive and
-context_log_target must be less than context_log_budget. The target is validated
-and reported now, but the compactor still requires --keep and does not enforce it.
+context_log_target must be less than context_log_budget. The checker reports the
+target; compact-context-log.sh --to-budget enforces it. --keep remains count-based.
 context_log_path defaults to agent-vault/context-log.md, relative to --repo.
 It designates a path in protocol_read; it does not add a file to that set.
 Designations allow ./ and repeated /, not whitespace, absolute paths, or ..
@@ -127,8 +127,8 @@ die() {
   exit 2
 }
 
-# Standalone config functions. PR B of #145 will embed this marked block in the
-# compactor and add parity tests; do not introduce an installed library dependency.
+# Keep this standalone config block identical in the checker and compactor.
+# Parity tests guard both copies; no installed library dependency is needed.
 # BEGIN memory budget config
 normalize_budget() {
   local key="$1" value="$2" minimum=0 LC_ALL=C
@@ -159,6 +159,8 @@ normalize_context_log_path() {
   printf '%s' "$normalized"
 }
 
+# Some outputs are checker-only; both standalone consumers accept the same file.
+# shellcheck disable=SC2034
 read_memory_budget_config() {
   local path="$1" contents raw_line cfg_line cfg_key cfg_val
   config_file_budget="" config_chain_budget=""
@@ -183,7 +185,7 @@ read_memory_budget_config() {
       file_budget) config_file_budget="$(normalize_budget "$cfg_key" "$cfg_val")" || exit 2 ;;
       chain_budget) config_chain_budget="$(normalize_budget "$cfg_key" "$cfg_val")" || exit 2 ;;
       context_log_budget) config_context_log_budget="$(normalize_budget "$cfg_key" "$cfg_val")" || exit 2 ;;
-      # Accept/validate the complete config surface before PR B adds byte retention.
+      # Both consumers validate the full config surface; only byte mode retains to target.
       context_log_target) config_context_log_target="$(normalize_budget "$cfg_key" "$cfg_val")" || exit 2 ;;
       context_log_path) config_context_log_path="$(normalize_context_log_path "$cfg_val")" || exit 2 ;;
       protocol_read) config_protocol_read="$cfg_val" ;;
@@ -951,7 +953,7 @@ measure_bucket() {
     effective_budget="$file_budget" budget_label="file budget" role_note=""
     if [[ "$bucket" == protocol ]] && is_protocol_context_log "$rel"; then
       effective_budget="$context_log_budget" budget_label="context-log budget"
-      role_note="protocol-only limit $context_log_budget bytes; imports still use file_budget=$file_budget; retention target $context_log_target bytes is reserved, not enforced"
+      role_note="protocol-only limit $context_log_budget bytes; imports still use file_budget=$file_budget; retention target $context_log_target bytes applies to compactor --to-budget"
     fi
     # Preserve the existing explicit-list accounting for AGENTS/protocol reads.
     # Physical grouping is only part of the two import bucket contracts.
@@ -1005,7 +1007,7 @@ measure_bucket() {
     fi
     [[ -z "$role_note" ]] || note="${note:+$note; }$role_note"
     if [[ "$status" == OVER && "$budget_label" == "context-log budget" ]]; then
-      note+="; preview an explicit --keep rollover with compact-context-log.sh (byte retention is not implemented yet)"
+      note+="; preview compact-context-log.sh --to-budget --dry-run with explicit archive/manifest and required session-entry assertion"
     fi
     [[ -z "$alias" ]] || note="${note:+$note; }$alias"
     emit_row "$bucket" "$rel" "$status" "$bytes" "$note"
@@ -1039,7 +1041,7 @@ if [[ "$format" == "text" ]]; then
   echo "Scanner shape bounds: 100000 lines/file; delimiter run 128; import path 4096 bytes."
   echo "Per-file: $file_budget bytes | per @-chain: $chain_budget bytes"
   echo "Config: ${config_file:-built-in defaults}"
-  echo "Context log: $context_log_path | protocol budget: $context_log_budget bytes | retention target: $context_log_target bytes (reserved, not enforced)"
+  echo "Context log: $context_log_path | protocol budget: $context_log_budget bytes | retention target: $context_log_target bytes (compactor --to-budget)"
   [[ -z "$context_budget_migration" ]] || echo "Note: $context_budget_migration"
   [[ -z "$context_coverage_note" ]] || echo "Note: $context_coverage_note"
   echo
@@ -1133,7 +1135,7 @@ if [[ "$format" == "tsv" ]]; then
   printf 'TOTAL\tclaude_chain\t%s\t%s\t%s\n' "$claude_status" "$claude_total" "$claude_note"
   printf 'TOTAL\tgemini_chain\t%s\t%s\t%s\n' "$gemini_status" "$gemini_total" "$gemini_note"
   printf 'TOTAL\tagents\t%s\t%s\t\n' "$agents_status" "$agents_total"
-  protocol_note="config: ${config_file:-built-in defaults}; file_budget=$file_budget; chain_budget=$chain_budget; context_log_path=$context_log_path; context_log_budget=$context_log_budget; context_log_target=$context_log_target (reserved, not enforced)"
+  protocol_note="config: ${config_file:-built-in defaults}; file_budget=$file_budget; chain_budget=$chain_budget; context_log_path=$context_log_path; context_log_budget=$context_log_budget; context_log_target=$context_log_target (compactor --to-budget)"
   [[ -z "$context_budget_migration" ]] || protocol_note+="; $context_budget_migration"
   [[ -z "$context_coverage_note" ]] || protocol_note+="; $context_coverage_note"
   emit_row TOTAL protocol info "$protocol_total" "$protocol_note"

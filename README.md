@@ -146,6 +146,8 @@ Run the scaffold regression scripts locally when changing bootstrap, sync, or tr
 - `bash scripts/test-markdown-fences.sh`
 - `bash scripts/test-memory-import-discovery.sh` (also run by the budget suite)
 - `bash scripts/test-context-log-size-budget.sh`
+- `bash scripts/test-byte-context-log-retention.sh`
+- `bash scripts/test-context-log-growth.sh` (fixed synthetic workloads and acceptance criteria)
 
 The rollover checker, compactor, lessons checker, and memory-budget checker embed
 the same marked awk fence-state block to remain standalone. When changing delimiter rules, update all
@@ -167,13 +169,14 @@ the generated pre-commit report remains non-blocking. See the
 
 The designated context log now has a 60,000-byte allowance in the protocol-read
 bucket only; imported logs and other files retain the 40,000-byte general default.
-The checker accepts a 30,000-byte retention target, but byte-based compaction is
-not implemented yet: the compactor still requires `--keep N` and reads no budget
-config. Designations support `--context-log-path`; explicitly selected paths
+The compactor's explicit `--to-budget` mode retains whole entries to a 30,000-byte
+target using shared budget configuration; `--keep N` retains its count-based
+behavior and ignores budget config. Designations support `--context-log-path` in
+the checker; explicitly selected paths
 must be in the effective `protocol_read` set or the checker exits 2. Excluding
 the built-in default alone remains informational. Update managed helpers before
 adding the new config keys. See
-[context-log configuration and upgrade behavior](docs/memory-budgets.md#context-log-allowance-and-current-implementation-stage).
+[context-log configuration and upgrade behavior](docs/memory-budgets.md#context-log-allowance-and-byte-retention).
 
 CI runs these checks via `.github/workflows/scaffold-regression-checks.yml` on
 both `ubuntu-latest` and `macos-latest`, so GNU-vs-BSD userland assumptions in
