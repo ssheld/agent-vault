@@ -102,6 +102,21 @@ record the official references and observed Claude Code 2.1.236 behavior.
   an explicit scanner work bound. Ordinary punctuation is not opportunistically
   removed to make a different filename exist. This is not a full Markdown parser.
 
+Container diagnostics require an import candidate **inside the affected
+region**, after escape/comment/matched-span exclusions; an email address or an
+unrelated later import is not sufficient. Ordinary HTML regions end at blank
+lines or their enclosing quote boundary; raw-text HTML, declarations, processing
+instructions, and CDATA use their explicit terminators. These bounds follow
+the [CommonMark HTML block envelopes](https://spec.commonmark.org/0.31.2/#html-blocks),
+without claiming full client HTML parsing. List guards inspect only the
+affected indented continuation, not later dedented paragraphs or sibling items.
+For an unsupported container, move real imports into ordinary top-level prose;
+use supported flat fences or matched code spans for examples.
+
+Bare names such as `@Override` and `@octocat` are valid extensionless import
+candidates, not automatic mention exemptions. Missing ordinary imports remain
+advisory, but a genuine candidate in an unsupported container remains incomplete.
+
 Relative imports resolve from the **logical importing path**, not the shell's
 working directory or a symlink target's directory. Containment checks resolve
 directory and leaf symlinks, with a 40-link bound, before opening an imported

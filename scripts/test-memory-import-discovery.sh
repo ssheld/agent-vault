@@ -65,6 +65,14 @@ for invalid in -1 65 999999999999999999999 '1+1' ''; do
   check test "$rc" = 2
 done
 
+# Exact follow-up client inventory: extensionless imports, not bare mentions.
+fresh extensionless_contract
+cp -R "$repo_root/scripts/fixtures/memory-imports/claude-extensionless/." "$d/"
+run --strict
+check test "$rc" = 0
+lacks UNSUPPORTED
+check test "$(paths claude)" = "$(printf '%s\n' CLAUDE.md Override octocat plain real.md)"
+
 # Count the boundary file, not its imports. Client stopping is complete.
 for client in claude gemini; do
   fresh "boundary-$client"
@@ -160,6 +168,116 @@ printf '\n~~~\n@hidden.md\n' >>"$d/CLAUDE.md"
 run --strict --file-budget 1000
 check test "$rc" = 0
 lacks INCOMPLETE
+
+# Container ambiguity is local and import-bearing, not bare-@-bearing.
+fresh container_guards
+printf 'real\n' >"$d/real.md"
+printf 'candidate\n' >"$d/candidate.md"
+printf '%s\n' '- Contacts' '    - Ask someone@example.com before deploying.' '' 'Real import: @real.md' >"$d/CLAUDE.md"
+run --strict
+check test "$rc" = 0
+lacks UNSUPPORTED
+check test "$(paths claude)" = "$(printf '%s\n' CLAUDE.md real.md)"
+printf '%s\n' '<details>' '<summary>Notes</summary>' '</details>' '' 'Real import: @real.md' >"$d/CLAUDE.md"
+run --strict
+check test "$rc" = 0
+lacks UNSUPPORTED
+check test "$(paths claude)" = "$(printf '%s\n' CLAUDE.md real.md)"
+printf '%s\n' '- ~~~' '  someone@example.com' '  ~~~' '' 'Real import: @real.md' >"$d/CLAUDE.md"
+run --strict
+check test "$rc" = 0
+lacks UNSUPPORTED
+check test "$(paths claude)" = "$(printf '%s\n' CLAUDE.md real.md)"
+
+for container in nested_list html list_fence; do
+  case "$container" in
+    nested_list)
+      opening=('- Contacts')
+      closing=()
+      indent='    - '
+      ;;
+    html)
+      opening=('<details>' '<summary>Notes</summary>')
+      closing=('</details>')
+      indent=''
+      ;;
+    list_fence)
+      opening=('- ~~~')
+      closing=('  ~~~')
+      indent='  '
+      ;;
+  esac
+  # These exclusions must be checked before a container guard can fire.
+  for inner in 'someone@example.com' '\@Override \@octocat' '`@Override @octocat @candidate.md`' '``literal ` @candidate.md``' '<!-- @candidate.md -->'; do
+    printf '%s\n' "${opening[@]}" "$indent$inner" "${closing[@]}" '' 'Real import: @real.md' >"$d/CLAUDE.md"
+    run --strict
+    check test "$rc" = 0
+    lacks UNSUPPORTED
+    check test "$(paths claude)" = "$(printf '%s\n' CLAUDE.md real.md)"
+  done
+  printf '%s\n' "${opening[@]}" "$indent"' Before `literal' "$indent @candidate.md" "$indent"' closes here`' "${closing[@]}" '' 'Real import: @real.md' >"$d/CLAUDE.md"
+  run --strict
+  check test "$rc" = 0
+  lacks UNSUPPORTED
+  check test "$(paths claude)" = "$(printf '%s\n' CLAUDE.md real.md)"
+  printf '%s\n' "${opening[@]}" "$indent @candidate.md" "${closing[@]}" '' 'Real import: @real.md' >"$d/CLAUDE.md"
+  run --strict
+  check test "$rc" = 1
+  has UNSUPPORTED
+  has $'TOTAL\tclaude_chain\tINCOMPLETE'
+  check test "$(paths claude)" = "$(printf '%s\n' CLAUDE.md real.md)"
+  check test "$(printf '%s\n' "$output" | awk -F'\t' '$3 == "UNSUPPORTED" {n++} END {print n+0}')" = 1
+done
+
+# Extensionless names are valid candidates, not an email/mention exemption.
+printf 'extensionless\n' >"$d/Override"
+printf 'extensionless\n' >"$d/octocat"
+printf '@Override @octocat\n' >"$d/CLAUDE.md"
+run --strict
+check test "$rc" = 0
+check test "$(paths claude)" = "$(printf '%s\n' CLAUDE.md Override octocat)"
+printf '%s\n' '- Contacts' '    - @Override @octocat' >"$d/CLAUDE.md"
+run --strict
+check test "$rc" = 1
+has 'indented list import requires container parsing'
+
+# Explicit HTML terminators, blank-line boundaries and quote exits must not
+# leak a guard into a later import. Raw-text HTML continues across blank lines.
+for html in '<script>notes</script>' '<!DOCTYPE html>' '<?instruction ?>' '<![CDATA[notes]]>'; do
+  printf '%s\n' "$html" 'Real import: @real.md' >"$d/CLAUDE.md"
+  run --strict
+  check test "$rc" = 0
+  lacks UNSUPPORTED
+  has $'claude\treal.md\t'
+done
+printf '%s\n' '<SCRIPT>' '' '@candidate.md' '</SCRIPT>' '' '@real.md' >"$d/CLAUDE.md"
+run --strict
+check test "$rc" = 1
+has 'raw HTML import context is not modeled'
+has $'claude\treal.md\t'
+printf '%s\n' '> <details>' '> contact@example.com' '@real.md' >"$d/CLAUDE.md"
+run --strict
+check test "$rc" = 0
+lacks UNSUPPORTED
+has $'claude\treal.md\t'
+printf '%s\n' '<details>' '' '@real.md' '' '</details>' >"$d/CLAUDE.md"
+run --strict
+check test "$rc" = 0
+lacks UNSUPPORTED
+has $'claude\treal.md\t'
+printf '%s\n' '- ~~~' '  plain example' '  ~~~' '- Next item: @real.md' >"$d/CLAUDE.md"
+run --strict
+check test "$rc" = 0
+lacks UNSUPPORTED
+has $'claude\treal.md\t'
+printf '%s\n' '<!-- contact@example.com' >"$d/CLAUDE.md"
+run --strict
+check test "$rc" = 0
+lacks UNSUPPORTED
+printf '%s\n' '<!-- @candidate.md' >"$d/CLAUDE.md"
+run --strict
+check test "$rc" = 1
+has 'unclosed HTML comment with possible imports'
 
 fresh spans_comments
 # A quoted heredoc plus a marker replacement keeps literal backticks out of

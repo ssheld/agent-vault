@@ -347,6 +347,71 @@ scan_imports() {
       } while (gemini && width > 0)
       return 0
     }
+    function import_start(s, column, first) {
+      if (substr(s, column, 1) != "@" ||
+          (column > 1 && substr(s, column - 1, 1) !~ /[ \t\r\n]/)) return 0
+      first = substr(s, column + 1, 1)
+      return first ~ /[A-Za-z.\/]/ || (claude && first == "~")
+    }
+    # Return the first candidate line in this region, after the same escape,
+    # comment and matched-span exclusions used by the main lexer. Region guards
+    # do not interpret the container as supported Markdown or discover files.
+    function region_candidate(first, last, offset, p, limit, row, col, s, c, hit, end, width, span_limit) {
+      p = offset ? offset : starts[first]; limit = starts[last + 1]; row = first
+      while (p < limit) {
+        while (row < last && p >= starts[row + 1]) row++
+        s = lines[row] "\n"; col = p - starts[row] + 1; c = substr(s, col, 1)
+        if (c == "\\") { p += 2; continue }
+        if (c == "<" && substr(s, col, 4) == "<!--") {
+          hit = index(substr(text, p + 4, limit - p - 4), "-->")
+          if (hit) { p += hit + 6; continue }
+          p += 4; continue
+        }
+        if (c == "`") {
+          width = run_at(p); span_limit = barrier[row] < limit ? barrier[row] : limit
+          end = span_end(p, width, span_limit, 0)
+          p = end ? end : p + width; continue
+        }
+        if (import_start(s, col)) return row
+        hit = match(substr(s, col + 1), /[@`\\<\n]/)
+        p = hit ? p + hit : starts[row + 1]
+      }
+      return 0
+    }
+    function indentation(s, i, width, c) {
+      for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (c == " ") width++
+        else if (c == "\t") width += 4 - width % 4
+        else break
+      }
+      return width
+    }
+    # Only the continuation of this list item is ambiguous; a dedented sibling
+    # or outside paragraph cannot contaminate its guard.
+    function list_region_end(first, indent, n) {
+      for (n = first + 1; n <= NR; n++) {
+        if (quotes[n] != quotes[first]) break
+        if (lines[n] !~ /^[ \t]*$/ && indentation(lines[n]) < indent) break
+      }
+      return n - 1
+    }
+    # Bound ordinary HTML by its blank-line/container boundary. Raw-text tags,
+    # declarations, processing instructions and CDATA have explicit terminators.
+    # This is an ambiguity envelope, not a complete HTML/Markdown parser.
+    function html_region_end(first, s, terminator, n) {
+      s = tolower(lines[first]); sub(/^ ? ? ?/, "", s)
+      if (s ~ /^<(pre|script|style|textarea)([ \t>]|$)/) terminator = "</(pre|script|style|textarea)>"
+      else if (s ~ /^<\?/) terminator = "\\?>"
+      else if (s ~ /^<!\[cdata\[/) terminator = "\\]\\]>"
+      else if (s ~ /^<![a-z]/) terminator = ">"
+      for (n = first; n <= NR; n++) {
+        if (quotes[n] != quotes[first]) return n - 1
+        if (!terminator && lines[n] ~ /^[ \t]*$/) return n - 1
+        if (terminator && tolower(lines[n]) ~ terminator) return n
+      }
+      return NR
+    }
     {
       if (NR > 100000) { unsupported(NR, "scanner line limit reached (100000)"); invalid_input = 1; exit }
       s = $0; sub(/\r$/, "", s)
@@ -400,16 +465,31 @@ scan_imports() {
             list_context = 1
             candidate = lines[line_number]
             sub(/^ ? ? ?([-+*]|[0-9]+[.)])[ \t]+/, "", candidate)
-            if (opens_fence(candidate) && index(substr(text, p), "@"))
-              unsupported(line_number, "fence on list-marker line requires container parsing")
+            if (opens_fence(candidate)) {
+              list_prefix = substr(lines[line_number], 1, length(lines[line_number]) - length(candidate))
+              gsub(/[^ \t]/, " ", list_prefix)
+              list_indent = indentation(list_prefix)
+              region_end = list_region_end(line_number, list_indent)
+              candidate_line = region_candidate(line_number, region_end)
+              if (candidate_line) unsupported(candidate_line, "fence on list-marker line requires container parsing")
+              p = starts[region_end + 1]; continue
+            }
           } else if (lines[line_number] ~ /^[^ \t]/) list_context = 0
           if (lines[line_number] ~ /^(    |\t)/) {
-            if (list_context && index(lines[line_number], "@"))
-              unsupported(line_number, "indented list import requires container parsing")
+            if (list_context) {
+              region_end = list_region_end(line_number, 4)
+              candidate_line = region_candidate(line_number, region_end)
+              if (candidate_line) unsupported(candidate_line, "indented list import requires container parsing")
+              p = starts[region_end + 1]; continue
+            }
             p = starts[line_number + 1]; continue
           }
-          if (lines[line_number] ~ /^ ? ? ?<[A-Za-z!\/]/ && lines[line_number] !~ /^ ? ? ?<!--/ && index(substr(text, p), "@"))
-            unsupported(line_number, "raw HTML import context is not modeled")
+          if (lines[line_number] ~ /^ ? ? ?<[A-Za-z!?\/]/ && lines[line_number] !~ /^ ? ? ?<!--/) {
+            region_end = html_region_end(line_number)
+            candidate_line = region_candidate(line_number, region_end)
+            if (candidate_line) unsupported(candidate_line, "raw HTML import context is not modeled")
+            p = starts[region_end + 1]; continue
+          }
         }
         line_text = lines[line_number] "\n"; column = p - starts[line_number] + 1
         c = substr(line_text, column, 1)
@@ -423,7 +503,8 @@ scan_imports() {
         if (claude && c == "<" && substr(line_text, column, 4) == "<!--") {
           close_at = index(substr(text, p + 4), "-->")
           if (!close_at) {
-            if (index(substr(text, p), "@")) unsupported(line_number, "unclosed HTML comment with possible imports")
+            candidate_line = region_candidate(line_number, NR, p)
+            if (candidate_line) unsupported(candidate_line, "unclosed HTML comment with possible imports")
             break
           }
           p += close_at + 6; continue
@@ -435,9 +516,7 @@ scan_imports() {
           if (end) { p = end; continue }
           p += width; continue
         }
-        if (c != "@" || (column > 1 && substr(line_text, column - 1, 1) !~ /[ \t\r\n]/)) { p++; continue }
-        first = substr(line_text, column + 1, 1)
-        if (first !~ /[A-Za-z.\/]/ && !(claude && first == "~")) { p++; continue }
+        if (!import_start(line_text, column)) { p++; continue }
         q = column + match(substr(line_text, column + 1), /[ \t\r\n]/)
         target = substr(line_text, column + 1, q - column - 1)
         if (claude) sub(/#.*/, "", target)

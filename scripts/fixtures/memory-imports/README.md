@@ -55,6 +55,16 @@ bracket-prefixed, backslash-escaped, and quoted-space references did not load
 the corresponding punctuation-free targets. Unverified complex containers or
 other syntax remain explicit scanner limitations, not inferred client behavior.
 
+Follow-up probe on 2026-09-08, also Claude Code **2.1.236**, used the same
+isolated `/context` command against `claude-extensionless/`. Its structured
+inventory included exactly `CLAUDE.md`, `Override`, `octocat`, `plain`, and
+`real.md`; `html-code.md` was absent. The result again reported zero API
+duration, zero turns, and zero cost. Thus whitespace-preceded bare words such
+as `@Override` and `@octocat` cannot be discarded as annotations/handles:
+they load extensionless files when those names exist. Email-like tokens with
+text immediately before `@`, escapes, and matched code spans remain separate
+negative cases. This probe does not establish full raw-HTML/container semantics.
+
 ## Gemini baseline
 
 Gemini CLI **v0.58.0**, commit

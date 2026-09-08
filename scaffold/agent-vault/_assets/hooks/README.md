@@ -95,6 +95,9 @@ visible even when the checker exits zero. An absolute import or symlink into
 the worktree may be outside the hook's temporary index checkout, so its staged
 total can be lower than a direct worktree check. The hook never retargets those
 paths or reads unstaged content as a fallback; the exclusion explains the gap.
+An unchanged external target is reported again on later memory-touching commits.
+This deliberately keeps the scope gap visible; there is no separate external-only
+acknowledgement or suppression mechanism in the current contract.
 
 Silence it on its own (it never blocks a commit either way):
 

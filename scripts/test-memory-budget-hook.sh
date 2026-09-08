@@ -189,6 +189,19 @@ AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm code-example
 [[ "$HOOK_RC" -eq 0 ]] || fail "code example blocked commit" "$HOOK_STDERR"
 [[ "$HOOK_STDERR" != *"memory-budget warning"* ]] || fail "code example counted as import" "$HOOK_STDERR"
 
+# Ordinary container content must not create a staged incomplete warning.
+p="$(fresh_project container-negative)"
+mkdir -p "$p/docs"
+printf 'real import target\n' >"$p/docs/real.md"
+printf '%s\n' '' '- Contacts' '    - Ask someone@example.com before deploying.' '' \
+  '<details>' '<summary>Notes</summary>' '</details>' '' \
+  '- ~~~' '  example@example.com' '  ~~~' '' \
+  'Real import: @docs/real.md' >>"$p/CLAUDE.md"
+git -C "$p" add CLAUDE.md docs/real.md
+AGENT_VAULT_SKIP_METADATA_GATE=1 commit_capture "$p" git commit -qm container-negative
+[[ "$HOOK_RC" -eq 0 ]] || fail "ordinary containers blocked commit" "$HOOK_STDERR"
+[[ "$HOOK_STDERR" != *"memory-budget warning"* ]] || fail "ordinary containers produced a false incomplete warning" "$HOOK_STDERR"
+
 # Both an absolute import and an absolute symlink are outside the staged copy.
 # Advisory exclusions must survive even though the checker itself exits zero.
 p="$(fresh_project external-staged)"
