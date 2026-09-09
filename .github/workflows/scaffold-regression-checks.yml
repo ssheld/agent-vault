@@ -8,6 +8,7 @@ on:
       - "scaffold/**"
       - "scripts/check-scaffold-markdown-whitespace.sh"
       - "scripts/test-scaffold-markdown-whitespace.sh"
+      - "scripts/test-root-readme-seeding.sh"
       - "scripts/new-project.sh"
       - "scripts/update-project.sh"
       - "scripts/test-gitignore-management.sh"
@@ -47,6 +48,7 @@ on:
       - "scaffold/**"
       - "scripts/check-scaffold-markdown-whitespace.sh"
       - "scripts/test-scaffold-markdown-whitespace.sh"
+      - "scripts/test-root-readme-seeding.sh"
       - "scripts/new-project.sh"
       - "scripts/update-project.sh"
       - "scripts/test-gitignore-management.sh"
@@ -117,6 +119,8 @@ jobs:
           bash -c 'echo "suite bash: $BASH_VERSION"; [[ ${BASH_VERSINFO[0]} -ge 4 ]]'
       - name: Verify scaffold Markdown whitespace
         run: bash scripts/test-scaffold-markdown-whitespace.sh
+      - name: Verify root README seeding and preservation
+        run: bash scripts/test-root-readme-seeding.sh
       - name: Verify managed .gitignore handling
         run: bash scripts/test-gitignore-management.sh
       - name: Verify coding standards sync behavior
