@@ -111,6 +111,9 @@ jobs:
         # Extract two files only. The suite still uses Ubuntu's Git, awk,
         # coreutils, and libc, not the historical container's userland.
         # Test-only, linux/amd64 artifacts; never install into system paths.
+        # If this digest disappears, replace it with reviewed, checksum-pinned
+        # Bash 4.4.x + libtinfo artifacts compatible with native Ubuntu. Do not
+        # silently switch to an Alpine/BusyBox lane or skip the minimum runtime.
         run: |
           image='buildpack-deps@sha256:78e995165a5788c2f55aed6e548d8f6c1534830d4310c870408fccb2da8c5b2e'
           timeout 180 docker pull --platform linux/amd64 "$image"
@@ -130,6 +133,9 @@ jobs:
             echo "Provisioned $BASH: $BASH_VERSION"
           '
           echo "$bash44_dir/bin" >> "$GITHUB_PATH"
+          # Inherit the isolated library path for env-bash shebangs and direct
+          # "$BASH" children too. It contains only libtinfo.so.5; no libc or
+          # current Ubuntu library is replaced. This applies only to this job.
           echo "LD_LIBRARY_PATH=$bash44_dir/lib" >> "$GITHUB_ENV"
       - name: Ensure Bash 4.4+ on macOS (Apple ships Bash 3.2)
         if: runner.os == 'macOS'

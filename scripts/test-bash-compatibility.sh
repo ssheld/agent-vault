@@ -294,6 +294,7 @@ cat >"$tmp_root/compact/log.md" <<'EOF'
 ### 2026-05-28 09:00 local - test - oldest
 - Older.
 EOF
+cp "$tmp_root/compact/log.md" "$tmp_root/healthy-log.md"
 compact_args=("$tmp_root/compact/log.md" --keep 1 --archive "$tmp_root/compact/archive.md"
   --manifest "$tmp_root/compact/manifest.md" --require-top-entry 'rollover session')
 compactor="$repo_root/scaffold/root/scripts/compact-context-log.sh"
@@ -318,21 +319,173 @@ expect_rc 0
 # Exercise the actual child wrapper with static shell fixtures, never documents.
 awk '/^run_checker\(\) \{$/ { active = 1; starts++ } active { print } active && /^}$/ { active = 0 }
   END { if (starts != 1 || active) exit 1 }' "$compactor" >"$tmp_root/run-checker.sh"
-for failure in missing returned; do
+for failure in missing returned load-error syntax; do
   source_file="$tmp_root/missing-checker.sh"
-  expected=1
-  if [[ "$failure" == returned ]]; then
-    source_file="$tmp_root/returned-checker.sh"
-    printf 'return 2\n' >"$source_file"
-    expected=2
-  fi
-  run "$BASH" -c '
+  case "$failure" in
+    returned)
+      source_file="$tmp_root/returned-checker.sh"
+      printf 'return 2\n' >"$source_file"
+      ;;
+    load-error)
+      source_file="$tmp_root/load-error-checker.sh"
+      printf 'false\nrollover_check_main() { touch "$SOURCE_FALLTHROUGH"; }\n' >"$source_file"
+      ;;
+    syntax)
+      source_file="$tmp_root/syntax-checker.sh"
+      printf 'rollover_check_main() {\n' >"$source_file"
+      ;;
+  esac
+  run env SOURCE_FALLTHROUGH="$tmp_root/source-fallthrough" "$BASH" -c '
     source "$1"
     checker=$2
     destinations=(archive manifest log)
     run_checker strict input
   ' child-source "$tmp_root/run-checker.sh" "$source_file"
-  expect_rc "$expected"
+  expect_rc 2
   check test "${output#*command not found}" = "$output"
+  check test ! -e "$tmp_root/source-fallthrough"
 done
+
+# The loader's status mapping must end before validation begins, and it must
+# preserve errexit inside the entry point even in the caller's conditional.
+printf 'rollover_check_main() { return 1; }\n' >"$tmp_root/finding-checker.sh"
+printf 'rollover_check_main() { false; touch "$SOURCE_FALLTHROUGH"; }\n' >"$tmp_root/entry-error-checker.sh"
+for source_file in "$tmp_root/finding-checker.sh" "$tmp_root/entry-error-checker.sh"; do
+  run env SOURCE_FALLTHROUGH="$tmp_root/source-fallthrough" "$BASH" -c '
+    source "$1"
+    checker=$2
+    destinations=(archive manifest log)
+    if run_checker strict input; then exit 90; else exit $?; fi
+  ' child-entry "$tmp_root/run-checker.sh" "$source_file"
+  expect_rc 1
+  check test ! -e "$tmp_root/source-fallthrough"
+done
+if [[ -n "$unsupported_bash" ]]; then
+  run "$unsupported_bash" -c '
+    source "$1"
+    checker=$2
+    destinations=(archive manifest log)
+    run_checker strict input
+  ' child-guard "$tmp_root/run-checker.sh" "$checker"
+  expect_rc 2
+  contains 'Bash 4.4+ is required'
+  check test "${output#*command not found}" = "$output"
+fi
+
+# Drive load failures through the real compactor, including its recovery caller.
+# Only test-owned sibling checker files are changed; the compactor is verbatim.
+mkdir -p "$tmp_root/fault-scripts" "$tmp_root/fault-data" "$tmp_root/fault-bin"
+cp "$compactor" "$tmp_root/fault-scripts/compact-context-log.sh"
+fault_compactor="$tmp_root/fault-scripts/compact-context-log.sh"
+fault_checker="$tmp_root/fault-scripts/check-context-log-rollover.sh"
+fault_args=("$tmp_root/fault-data/log.md" --keep 1 --archive "$tmp_root/fault-data/archive.md"
+  --manifest "$tmp_root/fault-data/manifest.md" --require-top-entry 'rollover session')
+for failure in unreadable returned syntax guard load-error; do
+  for mode in ordinary recovery; do
+    chmod u+rw "$fault_checker" 2>/dev/null || :
+    cp "$checker" "$fault_checker"
+    cp "$tmp_root/healthy-log.md" "$tmp_root/fault-data/log.md"
+    if [[ "$mode" == recovery ]]; then
+      cat >"$tmp_root/fault-bin/mv" <<'EOF'
+#!/bin/sh
+for arg do last=$arg; done
+if [ "$last" = "$COMPAT_FAIL_DEST" ]; then exit 73; fi
+exec "$COMPAT_REAL_MV" "$@"
+EOF
+      chmod +x "$tmp_root/fault-bin/mv"
+      run env PATH="$tmp_root/fault-bin:$PATH" COMPAT_FAIL_DEST="$tmp_root/fault-data/archive.md" \
+        COMPAT_REAL_MV="$(command -v mv)" "$BASH" "$fault_compactor" "${fault_args[@]}"
+      expect_rc 3
+      contains 'Recovery required: replacement failed'
+      check test -f "$tmp_root/fault-data/.agent-vault-rollover-log.md/record"
+    fi
+    case "$failure" in
+      unreadable) chmod 000 "$fault_checker" ;;
+      returned) printf 'return 2\n' >"$fault_checker" ;;
+      syntax) printf 'rollover_check_main() {\n' >"$fault_checker" ;;
+      # Real production guard, with only its readonly version input substituted.
+      guard) substitute_version "$tmp_root/check-context-log-rollover.guard" 4 3 >"$fault_checker" ;;
+      load-error) cp "$tmp_root/load-error-checker.sh" "$fault_checker" ;;
+    esac
+    if [[ "$failure" == unreadable && -r "$fault_checker" ]]; then
+      [[ "$EUID" -eq 0 ]] || fail 'chmod 000 checker unexpectedly readable'
+      echo 'Unreadable-checker test skipped: root can read mode-000 files (CI runs unprivileged).'
+    else
+      snapshot="$tmp_root/fault-before-$failure-$mode"
+      cp -R "$tmp_root/fault-data" "$snapshot"
+      args=("${fault_args[@]}")
+      expected=2
+      diagnostic='structural rollover check could not read/parse inputs'
+      if [[ "$mode" == recovery ]]; then
+        args=("$tmp_root/fault-data/log.md" --recover)
+        expected=3
+        diagnostic='Recovery required: could not read/parse recorded result'
+      fi
+      run env SOURCE_FALLTHROUGH="$tmp_root/source-fallthrough" "$BASH" "$fault_compactor" "${args[@]}"
+      expect_rc "$expected"
+      contains "$diagnostic"
+      check test "${output#*fails the structural rollover check}" = "$output"
+      check test "${output#*failed validation}" = "$output"
+      check test "${output#*command not found}" = "$output"
+      check test ! -e "$tmp_root/source-fallthrough"
+      check diff -r "$snapshot" "$tmp_root/fault-data"
+      if [[ "$failure" == guard ]]; then contains 'Bash 4.4+ is required'; fi
+    fi
+    chmod u+rw "$fault_checker"
+    cp "$checker" "$fault_checker"
+    if [[ "$mode" == recovery ]]; then
+      run "$BASH" "$fault_compactor" "$tmp_root/fault-data/log.md" --recover
+      expect_rc 0
+      check test ! -e "$tmp_root/fault-data/.agent-vault-rollover-log.md"
+      run "$BASH" "$checker" "$tmp_root/fault-data/log.md" --archive "$tmp_root/fault-data/archive.md" --manifest "$tmp_root/fault-data/manifest.md"
+      expect_rc 0
+      rm "$tmp_root/fault-data/archive.md" "$tmp_root/fault-data/manifest.md"
+    fi
+  done
+done
+# A checker can also become unavailable between replacement and the installed
+# after-image check. Keep the journal recoverable, with no false data finding.
+cp "$tmp_root/healthy-log.md" "$tmp_root/fault-data/log.md"
+cat >"$tmp_root/fault-bin/mv" <<'EOF'
+#!/bin/sh
+for arg do last=$arg; done
+"$COMPAT_REAL_MV" "$@" || exit $?
+if [ "$last" = "$COMPAT_FAIL_DEST" ]; then printf 'return 2\n' >"$COMPAT_CHECKER"; fi
+EOF
+run env PATH="$tmp_root/fault-bin:$PATH" COMPAT_FAIL_DEST="$tmp_root/fault-data/log.md" \
+  COMPAT_CHECKER="$fault_checker" COMPAT_REAL_MV="$(command -v mv)" "$BASH" "$fault_compactor" "${fault_args[@]}"
+expect_rc 3
+contains 'Recovery required: could not read/parse installed result'
+check test -f "$tmp_root/fault-data/.agent-vault-rollover-log.md/record"
+cp -R "$tmp_root/fault-data" "$tmp_root/installed-before"
+for result in runtime finding; do
+  diagnostic='Recovery required: could not read/parse recorded result'
+  if [[ "$result" == finding ]]; then
+    cp "$tmp_root/finding-checker.sh" "$fault_checker"
+    diagnostic='Recovery required: recorded result failed validation'
+  fi
+  run "$BASH" "$fault_compactor" "$tmp_root/fault-data/log.md" --recover
+  expect_rc 3
+  contains "$diagnostic"
+  check diff -r "$tmp_root/installed-before" "$tmp_root/fault-data"
+done
+cp "$checker" "$fault_checker"
+run "$BASH" "$fault_compactor" "$tmp_root/fault-data/log.md" --recover
+expect_rc 0
+check test ! -e "$tmp_root/fault-data/.agent-vault-rollover-log.md"
+run "$BASH" "$checker" "$tmp_root/fault-data/log.md" --archive "$tmp_root/fault-data/archive.md" --manifest "$tmp_root/fault-data/manifest.md"
+expect_rc 0
+rm "$tmp_root/fault-data/archive.md" "$tmp_root/fault-data/manifest.md"
+
+# Genuine malformed logs must still use the finding diagnostic/status, not 2.
+cp "$tmp_root/healthy-log.md" "$tmp_root/fault-data/log.md"
+printf '\n## Current Snapshot\n- duplicate\n' >>"$tmp_root/fault-data/log.md"
+cp "$tmp_root/fault-data/log.md" "$tmp_root/malformed-before"
+run "$BASH" "$fault_compactor" "${fault_args[@]}"
+expect_rc 1
+contains 'context log fails the structural rollover check'
+check cmp -s "$tmp_root/malformed-before" "$tmp_root/fault-data/log.md"
+check test ! -e "$tmp_root/fault-data/archive.md"
+check test ! -e "$tmp_root/fault-data/manifest.md"
+check test ! -e "$tmp_root/fault-data/.agent-vault-rollover-log.md"
 printf 'Bash compatibility checks passed (%s assertions).\n' "$pass"

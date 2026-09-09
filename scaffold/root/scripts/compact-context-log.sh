@@ -292,9 +292,12 @@ run_checker() {
   local policy="$1" image="$2"
   shift 2
   "$BASH" -e -c '
-    # Stop at a failed load, preserving its status rather than falling through
-    # to an undefined entry point. Do not conditionalize source: keep errexit.
+    # Loading failures are runtime errors (2), never validation findings (1).
+    # Keep source unconditional so errexit also stops failures inside the file.
+    # Remove the load-only trap before running the checker to retain its status.
+    trap "exit 2" EXIT
     source "$1"
+    trap - EXIT
     shift
     rollover_check_main "$@"
   ' rollover-check "$checker" "$policy" "$image" "${destinations[2]}" "${destinations[0]}" "${destinations[1]}" "$@" >/dev/null
@@ -812,8 +815,10 @@ apply_transaction() {
       [[ "$(file_mode "${destinations[$i]}")" == "${modes[$i]}" ]] || pending "destination permissions changed: ${destinations[$i]}"
     fi
   done
-  run_checker "$policy" "recorded after-image" "${effective[2]}" --archive "${effective[0]}" --manifest "${effective[1]}" --quiet ||
+  run_checker "$policy" "recorded after-image" "${effective[2]}" --archive "${effective[0]}" --manifest "${effective[1]}" --quiet || {
+    [[ "$?" -eq 1 ]] || pending "could not read/parse recorded result; check the checker diagnostics above before retrying --recover"
     pending "recorded result failed validation"
+  }
   if [[ "$dry_run" == true ]]; then
     printf '[dry-run] transaction %s: archive=%s manifest=%s log=%s; no outputs changed\n' "$rollover_id" "${states[0]}" "${states[1]}" "${states[2]}"
     return
@@ -827,8 +832,10 @@ apply_transaction() {
   for i in 0 1 2; do
     [[ "$(fingerprint "${destinations[$i]}")" == "${after_hashes[$i]}" ]] || pending "installed output changed: ${destinations[$i]}"
   done
-  run_checker "$policy" "installed after-image" "${destinations[2]}" --archive "${destinations[0]}" --manifest "${destinations[1]}" --quiet ||
+  run_checker "$policy" "installed after-image" "${destinations[2]}" --archive "${destinations[0]}" --manifest "${destinations[1]}" --quiet || {
+    [[ "$?" -eq 1 ]] || pending "could not read/parse installed result; check the checker diagnostics above before retrying --recover"
     pending "installed result failed validation"
+  }
   phase=committed
   write_record || pending "outputs installed; could not record commitment"
   finish_transaction
