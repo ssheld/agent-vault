@@ -1,6 +1,23 @@
 #!/usr/bin/env bash
 # agent-vault-managed: helper-script; file=compact-context-log.sh
 
+# BEGIN bash compatibility
+# Keep this standalone guard identical in all four memory helpers. It must run
+# on Bash 3.2 before shell options, argument parsing, or transaction handling.
+# The subshell leaves a sourcing caller's variables and options unchanged.
+if ! (
+  agent_vault_bash_major=${BASH_VERSINFO[0]} agent_vault_bash_minor=${BASH_VERSINFO[1]}
+  ((agent_vault_bash_major > 4 || (agent_vault_bash_major == 4 && agent_vault_bash_minor >= 4)))
+); then
+  printf '%s: Bash 4.4+ is required; running %s.\n' "${BASH_SOURCE[0]##*/}" "$BASH_VERSION" >&2
+  printf '%s\n' 'Install a current Bash (macOS: brew install bash), then put its bin directory first on PATH or invoke this helper with that Bash executable.' >&2
+  if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 2
+  fi
+  exit 2
+fi
+# END bash compatibility
+
 set -euo pipefail
 
 # Keep this trusted, static awk source identical in all four standalone helpers.
@@ -274,8 +291,13 @@ pending() {
 run_checker() {
   local policy="$1" image="$2"
   shift 2
-  bash -c '
+  "$BASH" -e -c '
+    # Loading failures are runtime errors (2), never validation findings (1).
+    # Keep source unconditional so errexit also stops failures inside the file.
+    # Remove the load-only trap before running the checker to retain its status.
+    trap "exit 2" EXIT
     source "$1"
+    trap - EXIT
     shift
     rollover_check_main "$@"
   ' rollover-check "$checker" "$policy" "$image" "${destinations[2]}" "${destinations[0]}" "${destinations[1]}" "$@" >/dev/null
@@ -793,8 +815,10 @@ apply_transaction() {
       [[ "$(file_mode "${destinations[$i]}")" == "${modes[$i]}" ]] || pending "destination permissions changed: ${destinations[$i]}"
     fi
   done
-  run_checker "$policy" "recorded after-image" "${effective[2]}" --archive "${effective[0]}" --manifest "${effective[1]}" --quiet ||
+  run_checker "$policy" "recorded after-image" "${effective[2]}" --archive "${effective[0]}" --manifest "${effective[1]}" --quiet || {
+    [[ "$?" -eq 1 ]] || pending "could not read/parse recorded result; check the checker diagnostics above before retrying --recover"
     pending "recorded result failed validation"
+  }
   if [[ "$dry_run" == true ]]; then
     printf '[dry-run] transaction %s: archive=%s manifest=%s log=%s; no outputs changed\n' "$rollover_id" "${states[0]}" "${states[1]}" "${states[2]}"
     return
@@ -808,8 +832,10 @@ apply_transaction() {
   for i in 0 1 2; do
     [[ "$(fingerprint "${destinations[$i]}")" == "${after_hashes[$i]}" ]] || pending "installed output changed: ${destinations[$i]}"
   done
-  run_checker "$policy" "installed after-image" "${destinations[2]}" --archive "${destinations[0]}" --manifest "${destinations[1]}" --quiet ||
+  run_checker "$policy" "installed after-image" "${destinations[2]}" --archive "${destinations[0]}" --manifest "${destinations[1]}" --quiet || {
+    [[ "$?" -eq 1 ]] || pending "could not read/parse installed result; check the checker diagnostics above before retrying --recover"
     pending "installed result failed validation"
+  }
   phase=committed
   write_record || pending "outputs installed; could not record commitment"
   finish_transaction

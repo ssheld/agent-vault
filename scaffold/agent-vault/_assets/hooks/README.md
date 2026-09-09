@@ -2,6 +2,33 @@
 
 Tracked git hook assets for generated projects live here.
 
+## Bash Compatibility
+
+`pre-commit`, `pre-push`, and `lib/runtime-note.sh` support **Bash 3.2+**.
+The four memory helpers in `scripts/` require **Bash 4.4+**. They reject an older
+interpreter with exit 2 and an always-visible diagnostic, including under
+`--quiet`; exit 2 can also mean an ordinary usage/config/read error.
+
+With stock macOS Bash on `PATH`, applicable optional checks report that they
+could not run, rather than implying successful validation. These warnings stay
+non-blocking; metadata and push enforcement remain active. The independent
+`AGENT_VAULT_SKIP_MEMORY_BUDGET` and `AGENT_VAULT_SKIP_ROLLOVER_CHECK` switches
+silence their respective warnings without bypassing metadata enforcement.
+
+Install a current Bash (`brew install bash` on macOS), then verify the `PATH`
+used by your terminal or GUI Git client. For a terminal, explicitly select it
+with `export PATH="$(brew --prefix)/bin:$PATH"` and check
+`bash -c 'echo "$BASH_VERSION"'`. Installing Bash alone does not select it for
+every client. Alternatively, invoke a helper through
+`"$(brew --prefix)/bin/bash" scripts/check-memory-budget.sh`.
+No automatic installation, path guessing, or interpreter re-execution occurs.
+
+Existing projects need a managed refresh from the template's
+`scripts/update-project.sh <repo-path>` to receive the guards and deletion-only
+commit fix. The previous stock-shell empty-array crash failed closed, not as a
+gate bypass. Runtime-note-only deletions now retain their exemption; substantive
+deletions still require metadata. Do not replace `/bin/bash` to apply the fix.
+
 ## Install
 
 Enable the tracked hooks for the current clone:

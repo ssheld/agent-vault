@@ -17,6 +17,7 @@ on:
       - "scripts/test-session-metadata-hook.sh"
       - "scripts/test-memory-budget-hook.sh"
       - "scripts/test-main-push-gate.sh"
+      - "scripts/test-bash-compatibility.sh"
       - "scripts/test-session-start-load-contract.sh"
       - "scripts/test-agent-memory-load-measurement.sh"
       - "scripts/test-parse-claude-memory-trace.sh"
@@ -56,6 +57,7 @@ on:
       - "scripts/test-session-metadata-hook.sh"
       - "scripts/test-memory-budget-hook.sh"
       - "scripts/test-main-push-gate.sh"
+      - "scripts/test-bash-compatibility.sh"
       - "scripts/test-session-start-load-contract.sh"
       - "scripts/test-agent-memory-load-measurement.sh"
       - "scripts/test-parse-claude-memory-trace.sh"
@@ -79,6 +81,9 @@ on:
       - ".github/workflows/scaffold-regression-checks.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   scaffold-regression-checks:
     strategy:
@@ -88,12 +93,51 @@ jobs:
       # Ubuntu failure must not cancel the macOS evidence or vice versa.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            bash: current
+          - os: macos-latest
+            bash: current
+          - os: ubuntu-24.04
+            bash: "4.4"
     runs-on: ${{ matrix.os }}
+    name: scaffold-regression-checks (${{ matrix.os }}, Bash ${{ matrix.bash }})
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Ensure bash 4+ on macOS (Apple ships bash 3.2; suites use mapfile/declare -A)
+      - name: Provision pinned Bash 4.4.12 on native Ubuntu
+        if: matrix.bash == '4.4'
+        # Extract two files only. The suite still uses Ubuntu's Git, awk,
+        # coreutils, and libc, not the historical container's userland.
+        # Test-only, linux/amd64 artifacts; never install into system paths.
+        # If this digest disappears, replace it with reviewed, checksum-pinned
+        # Bash 4.4.x + libtinfo artifacts compatible with native Ubuntu. Do not
+        # silently switch to an Alpine/BusyBox lane or skip the minimum runtime.
+        run: |
+          image='buildpack-deps@sha256:78e995165a5788c2f55aed6e548d8f6c1534830d4310c870408fccb2da8c5b2e'
+          timeout 180 docker pull --platform linux/amd64 "$image"
+          bash44_dir="$(mktemp -d "$RUNNER_TEMP/bash44.XXXXXX")"
+          mkdir "$bash44_dir/bin" "$bash44_dir/lib"
+          bash44_container="$(docker create --platform linux/amd64 "$image")"
+          trap 'docker rm "$bash44_container" >/dev/null' EXIT
+          docker cp "$bash44_container:/bin/bash" "$bash44_dir/bin/bash"
+          docker cp "$bash44_container:/lib/x86_64-linux-gnu/libtinfo.so.5.9" "$bash44_dir/lib/libtinfo.so.5"
+          printf '%s  %s\n' \
+            '3f0bc167fa8ef1f7a38452a5fd16d077ed8ef657bb81cdce5af9537ca96e8345' "$bash44_dir/bin/bash" \
+            '33626a82c73c983b4bd872e80cd9d8965eb6d985ac82d53fa1d3a21ccd4a2c27' "$bash44_dir/lib/libtinfo.so.5" |
+            sha256sum -c -
+          LD_LIBRARY_PATH="$bash44_dir/lib" "$bash44_dir/bin/bash" -euc '
+            [[ $BASH_VERSION == 4.4.12* ]]
+            a=(); for item in "${a[@]}"; do :; done
+            echo "Provisioned $BASH: $BASH_VERSION"
+          '
+          echo "$bash44_dir/bin" >> "$GITHUB_PATH"
+          # Inherit the isolated library path for env-bash shebangs and direct
+          # "$BASH" children too. It contains only libtinfo.so.5; no libc or
+          # current Ubuntu library is replaced. This applies only to this job.
+          echo "LD_LIBRARY_PATH=$bash44_dir/lib" >> "$GITHUB_ENV"
+      - name: Ensure Bash 4.4+ on macOS (Apple ships Bash 3.2)
         if: runner.os == 'macOS'
         # Assert against the exact Homebrew binary, not bare "bash": this
         # step's shell hashes "bash" to /bin/bash on first use, so a bare
@@ -105,16 +149,37 @@ jobs:
             brew install bash
           fi
           echo "$brew_bin" >> "$GITHUB_PATH"
-          "$brew_bin/bash" -c '[[ ${BASH_VERSINFO[0]} -ge 4 ]]'
+          "$brew_bin/bash" -c '((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4)))'
           "$brew_bin/bash" --version | head -1
-      - name: Verify the suite interpreter is bash 4+ (macOS)
-        if: runner.os == 'macOS'
+      - name: Verify the actual suite and child interpreter (all lanes)
+        env:
+          EXPECTED_TEST_BASH: ${{ matrix.bash }}
         # Fresh step, fresh shell: bare "bash" here resolves exactly as it
         # will in every suite step below, so this asserts what the suites
         # actually run with (not just that a modern bash exists somewhere).
         run: |
           command -v bash
-          bash -c 'echo "suite bash: $BASH_VERSION"; [[ ${BASH_VERSINFO[0]} -ge 4 ]]'
+          bash -euc '
+            echo "suite bash: $BASH ($BASH_VERSION)"
+            ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4)))
+            if [[ "$EXPECTED_TEST_BASH" == 4.4 ]]; then
+              [[ $BASH_VERSION == 4.4.12* ]]
+            fi
+            "$BASH" -c '\''echo "child bash: $BASH ($BASH_VERSION)"'\''
+          '
+          git --version
+      - name: Verify Bash compatibility contract
+        run: bash scripts/test-bash-compatibility.sh
+      - name: Verify stock Bash 3.2 hooks and unsupported helpers (macOS)
+        if: runner.os == 'macOS'
+        env:
+          HOOK_TEST_BASH: /bin/bash
+          UNSUPPORTED_TEST_BASH: /bin/bash
+        run: |
+          /bin/bash -c '[[ ${BASH_VERSINFO[0]} -eq 3 && ${BASH_VERSINFO[1]} -eq 2 ]]'
+          bash scripts/test-bash-compatibility.sh
+          bash scripts/test-session-metadata-hook.sh
+          bash scripts/test-main-push-gate.sh
       - name: Verify scaffold Markdown whitespace
         run: bash scripts/test-scaffold-markdown-whitespace.sh
       - name: Verify managed .gitignore handling
