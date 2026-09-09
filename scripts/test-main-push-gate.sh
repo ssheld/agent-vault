@@ -4,6 +4,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd "$script_dir/.." && pwd -P)"
+hook_bash="$(command -v "${HOOK_TEST_BASH:-bash}")"
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/agent-vault-main-push-gate-test.XXXXXX")"
 today="$(date '+%Y-%m-%d')"
 zero_sha="0000000000000000000000000000000000000000"
@@ -116,7 +117,7 @@ run_pre_push() {
   local remote_sha="$5"
   shift 5
 
-  (cd "$repo_path" && printf '%s %s %s %s\n' "$local_ref" "$local_sha" "$remote_ref" "$remote_sha" | agent-vault/_assets/hooks/pre-push "$@")
+  (cd "$repo_path" && printf '%s %s %s %s\n' "$local_ref" "$local_sha" "$remote_ref" "$remote_sha" | "$hook_bash" agent-vault/_assets/hooks/pre-push "$@")
 }
 
 run_pre_push_expect_failure() {
@@ -154,7 +155,7 @@ git -C "$no_vault_repo" commit -am "Change plain repo" >/dev/null
 no_vault_local_sha="$(git -C "$no_vault_repo" rev-parse HEAD)"
 (cd "$no_vault_repo" && printf '%s %s %s %s\n' \
   "refs/heads/main" "$no_vault_local_sha" "refs/heads/main" "$no_vault_remote_sha" |
-  "$repo_root/scaffold/agent-vault/_assets/hooks/pre-push")
+  "$hook_bash" "$repo_root/scaffold/agent-vault/_assets/hooks/pre-push")
 
 missing_vault_repo="$tmp_root/enabled-missing-agent-vault-blocked"
 seed_project "$missing_vault_repo"
@@ -165,7 +166,7 @@ git -C "$missing_vault_repo" rm -r agent-vault >/dev/null
 missing_vault_local_sha="$(git -C "$missing_vault_repo" rev-parse HEAD)"
 if missing_vault_output="$(cd "$missing_vault_repo" && printf '%s %s %s %s\n' \
   "refs/heads/main" "$missing_vault_local_sha" "refs/heads/main" "$missing_vault_remote_sha" |
-  "$repo_root/scaffold/agent-vault/_assets/hooks/pre-push" 2>&1)"; then
+  "$hook_bash" "$repo_root/scaffold/agent-vault/_assets/hooks/pre-push" 2>&1)"; then
   echo "Expected pre-push hook to fail when agent-vault is missing but the main push gate is enabled." >&2
   exit 1
 fi
@@ -190,7 +191,7 @@ commit_source_change "$global_config_repo"
 global_config_local_sha="$(git -C "$global_config_repo" rev-parse HEAD)"
 (cd "$global_config_repo" && printf '%s %s %s %s\n' \
   "refs/heads/main" "$global_config_local_sha" "refs/heads/main" "$global_config_remote_sha" |
-  GIT_CONFIG_GLOBAL="$global_config_file" agent-vault/_assets/hooks/pre-push)
+  GIT_CONFIG_GLOBAL="$global_config_file" "$hook_bash" agent-vault/_assets/hooks/pre-push)
 
 metadata_repo="$tmp_root/metadata-only-allowed"
 seed_project "$metadata_repo"
@@ -261,7 +262,7 @@ multi_ref_feature_sha="$(git -C "$multi_ref_repo" rev-parse HEAD)"
 (cd "$multi_ref_repo" && {
   printf '%s %s %s %s\n' "refs/heads/feature-side" "$multi_ref_feature_sha" "refs/heads/feature-side" "$multi_ref_base_sha"
   printf '%s %s %s %s\n' "refs/heads/main" "$multi_ref_main_sha" "refs/heads/main" "$multi_ref_base_sha"
-} | agent-vault/_assets/hooks/pre-push)
+} | "$hook_bash" agent-vault/_assets/hooks/pre-push)
 
 for blocked_path in \
   agent-vault/AGENTS.md \

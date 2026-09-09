@@ -4,6 +4,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd "$script_dir/.." && pwd -P)"
+hook_bash="$(command -v "${HOOK_TEST_BASH:-bash}")"
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/agent-vault-session-hook-test.XXXXXX")"
 
 cleanup() {
@@ -73,7 +74,7 @@ run_hook_expect_failure() {
   local repo_path="$1"
   local output=""
 
-  if output="$(cd "$repo_path" && agent-vault/_assets/hooks/pre-commit 2>&1)"; then
+  if output="$(cd "$repo_path" && "$hook_bash" agent-vault/_assets/hooks/pre-commit 2>&1)"; then
     echo "Expected hook to fail in $repo_path" >&2
     exit 1
   fi
@@ -84,7 +85,7 @@ run_hook_expect_failure() {
 run_hook_expect_success() {
   local repo_path="$1"
 
-  (cd "$repo_path" && agent-vault/_assets/hooks/pre-commit)
+  (cd "$repo_path" && "$hook_bash" agent-vault/_assets/hooks/pre-commit)
 }
 
 replace_first_match() {
@@ -162,7 +163,7 @@ assert_output_contains "$failure_output" "agent-vault metadata gate failed."
 assert_output_contains "$failure_output" "stage agent-vault/context-log.md"
 assert_output_contains "$failure_output" "stage one note under agent-vault/daily/"
 assert_output_contains "$failure_output" "stage one note under agent-vault/design-log/"
-(cd "$hook_repo" && AGENT_VAULT_SKIP_METADATA_GATE=1 agent-vault/_assets/hooks/pre-commit)
+(cd "$hook_repo" && AGENT_VAULT_SKIP_METADATA_GATE=1 "$hook_bash" agent-vault/_assets/hooks/pre-commit)
 
 printf '\nHook coverage update.\n' >>"$hook_repo/agent-vault/context-log.md"
 cat <<EOF >"$hook_repo/agent-vault/daily/$today.md"
@@ -364,7 +365,7 @@ init_repo "$missing_vault_repo"
 git -C "$missing_vault_repo" add .
 (cd "$missing_vault_repo" && AGENT_VAULT_SKIP_METADATA_GATE=1 git commit -m "Bootstrap missing vault fixture" >/dev/null)
 git -C "$missing_vault_repo" rm -r agent-vault >/dev/null
-if missing_vault_output="$(cd "$missing_vault_repo" && "$repo_root/scaffold/agent-vault/_assets/hooks/pre-commit" 2>&1)"; then
+if missing_vault_output="$(cd "$missing_vault_repo" && "$hook_bash" "$repo_root/scaffold/agent-vault/_assets/hooks/pre-commit" 2>&1)"; then
   echo "Expected pre-commit hook to fail when staged changes remove agent-vault." >&2
   exit 1
 fi
@@ -376,7 +377,7 @@ init_repo "$missing_classifier_repo"
 git -C "$missing_classifier_repo" add .
 (cd "$missing_classifier_repo" && AGENT_VAULT_SKIP_METADATA_GATE=1 git commit -m "Bootstrap missing classifier fixture" >/dev/null)
 git -C "$missing_classifier_repo" rm agent-vault/_assets/hooks/lib/runtime-note.sh >/dev/null
-if missing_classifier_output="$(cd "$missing_classifier_repo" && "$repo_root/scaffold/agent-vault/_assets/hooks/pre-commit" 2>&1)"; then
+if missing_classifier_output="$(cd "$missing_classifier_repo" && "$hook_bash" "$repo_root/scaffold/agent-vault/_assets/hooks/pre-commit" 2>&1)"; then
   echo "Expected pre-commit hook to fail when the runtime metadata classifier is missing." >&2
   exit 1
 fi
