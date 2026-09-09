@@ -155,6 +155,50 @@ for variant in ordinary crlf suffix existing out-of-order same-minute explicit b
   done
 done
 
+# Unicode blank classification differs by locale and awk implementation. Pick
+# a space recognized by this awk in UTF-8 (BSD awk: NBSP; GNU awk: em space).
+# Byte-only awk builds may have no such class; report that limitation explicitly.
+locale_space=""
+for candidate_space in ' ' ' '; do
+  if BYTE_LOCALE_SPACE="$candidate_space" LC_ALL=C.UTF-8 awk 'BEGIN { exit !(ENVIRON["BYTE_LOCALE_SPACE"] ~ /^[[:space:]]*$/) }'; then
+    locale_space="$candidate_space"
+    break
+  fi
+done
+if [[ -n "$locale_space" ]]; then
+  seed="$tmp_root/seed-cross-locale"
+  make_log "$seed/log.md"
+  sed "s/^$/$locale_space/" "$seed/log.md" >"$seed/log.next"
+  mv "$seed/log.next" "$seed/log.md"
+  for render_locale in C C.UTF-8; do
+    for keep in 1 2; do
+      d="$tmp_root/oracle-$render_locale-$keep"
+      mkdir -p "$d"
+      cp "$seed/log.md" "$d/log.md"
+      args
+      LC_ALL="$render_locale" run 0 "${common[@]}" --keep "$keep"
+    done
+  done
+  target="$(bytes "$tmp_root/oracle-C.UTF-8-2/log.md")"
+  check test "$(bytes "$tmp_root/oracle-C-2/log.md")" -gt "$target"
+  check test "$(bytes "$tmp_root/oracle-C-1/log.md")" -le "$target"
+  for render_locale in C C.UTF-8; do
+    expected=1
+    if [[ "$render_locale" == C.UTF-8 ]]; then expected=2; fi
+    d="$tmp_root/byte-$render_locale"
+    mkdir -p "$d"
+    cp "$seed/log.md" "$d/log.md"
+    args
+    LC_ALL="$render_locale" run 0 "${common[@]}" --to-budget --ignore-trigger --context-log-target "$target"
+    check contains "kept $expected,"
+    for name in log archive manifest; do
+      check cmp -s "$d/$name.md" "$tmp_root/oracle-$render_locale-$expected/$name.md"
+    done
+  done
+else
+  printf 'SKIP: cross-locale selection requires an awk with UTF-8 whitespace classification.\n'
+fi
+
 # Exact trigger boundaries and write gates are independent of target selection.
 d="$tmp_root/threshold"
 make_log "$d/log.md"

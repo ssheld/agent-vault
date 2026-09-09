@@ -621,6 +621,9 @@ at least one. Accounting includes the snapshot/header, the rewritten pointer,
 legacy blank-line rendering, preserved suffix bytes, and multibyte content. It
 uses linear prefix/boundary passes, not a full render for every split. The actual
 chosen after-image byte count must equal the prediction before publication.
+Whitespace classification follows the renderer's caller locale: Unicode blank
+lines can produce different byte counts and retained entry counts across locales,
+so use the same `LC_ALL` setting when comparing runs.
 Archive boundaries keep the existing whole-archive timestamp rules, including
 first-at-max/last-at-min ties, rather than assuming the first moved heading wins.
 
