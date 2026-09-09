@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Source templates must not reintroduce trailing whitespace in generated repos.
+# Scaffold Markdown and Cursor rules must not generate trailing whitespace.
 
 set -euo pipefail
 
@@ -9,7 +9,8 @@ cd "$repo_root"
 # git grep reads working-tree contents of tracked files, including hidden
 # directories and paths with spaces. Match spaces/tabs before LF or CRLF.
 status=0
-git grep --line-number --color=never --extended-regexp $'[ \t]+\r?$' -- ':(glob)scaffold/**/*.md' || status=$?
+git grep --line-number --color=never --extended-regexp $'[ \t]+\r?$' -- \
+  ':(glob)scaffold/**/*.md' ':(glob)scaffold/**/*.mdc' || status=$?
 case "$status" in
   0)
     echo "Scaffold Markdown has trailing spaces or tabs. Use a backslash for intentional Markdown hard breaks." >&2

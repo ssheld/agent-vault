@@ -128,11 +128,13 @@ and verifies both downloads with pinned SHA-256 digests.
 
 CI runs the same command via `.github/workflows/style-check.yml`.
 
-Tracked Markdown under `scaffold/` must have no trailing spaces or tabs. Use a
-backslash at the end of a line for an intentional Markdown hard break. Check
+Tracked Markdown (`.md`) and Cursor rules (`.mdc`) under `scaffold/` must have no
+trailing spaces or tabs. Use a backslash at the end of a line for an intentional
+Markdown hard break. Check
 the source templates with `bash scripts/check-scaffold-markdown-whitespace.sh`.
 The scaffold regression workflow enforces this for all scaffold changes,
-including Markdown under hidden directories such as `scaffold/root/.github/`.
+including files under hidden directories such as `scaffold/root/.github/` and
+`scaffold/root/.cursor/rules/`.
 This source convention does not rewrite project-owned notes or update backups.
 
 ## Scaffold Regression Checks

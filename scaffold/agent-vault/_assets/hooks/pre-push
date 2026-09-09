@@ -37,11 +37,15 @@ reject_main_push() {
 push_remote="${1:-}"
 
 reject_unverifiable_push() {
-  local reason="$1" status="$2" detail="${3:-}" remotes remote
+  local reason="$1" status="$2" missing_remote_commit="${3:-}" remotes remote
 
   echo "agent-vault main push gate failed." >&2
   echo "$reason (Git exit $status)." >&2
-  [[ -z "$detail" ]] || echo "$detail" >&2
+  if [[ -z "$missing_remote_commit" ]]; then
+    echo "Inspect local Git errors and repository objects before retrying." >&2
+    exit 1
+  fi
+  echo "Advertised remote main commit is unavailable locally: $missing_remote_commit." >&2
   # Without a named remote, Git passes the destination location in both hook
   # arguments. Never echo those arguments: URLs can contain credentials.
   if [[ -n "$push_remote" ]] && remotes="$(git remote 2>/dev/null)"; then
@@ -95,11 +99,11 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
     0) ;;
     1) reject_main_push "Direct non-fast-forward push to main is not allowed." ;;
     *)
-      detail=""
+      missing_remote_commit=""
       if ! git cat-file -e "${remote_sha}^{commit}" 2>/dev/null; then
-        detail="Advertised remote main commit is unavailable locally: $remote_sha."
+        missing_remote_commit="$remote_sha"
       fi
-      reject_unverifiable_push "Could not verify main push ancestry" "$ancestry_status" "$detail"
+      reject_unverifiable_push "Could not verify main push ancestry" "$ancestry_status" "$missing_remote_commit"
       ;;
   esac
 

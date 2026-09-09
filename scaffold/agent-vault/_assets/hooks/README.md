@@ -73,10 +73,14 @@ Git failure. When the advertised remote `main` commit is unavailable locally,
 fetch `main` from the push destination and retry. The diagnostic offers a fetch
 command only for a recognized configured remote name; destination URLs are never
 printed because they can contain credentials. The hook does not fetch for you.
+If fetching does not resolve a missing-commit error, inspect local Git errors
+and repository objects before retrying.
+
 Other ancestry, commit-enumeration, parent-lookup, or file-inspection errors also
-stop the push and report the Git exit status. If fetching does not resolve the
-error, inspect local Git errors and repository objects before retrying. A PR
-does not repair an incomplete local inspection. Every pushed commit is checked,
+stop the push and report the Git exit status. Their diagnostics direct you to
+inspect local Git errors and repository objects before retrying. Fetch guidance
+is reserved for a missing advertised remote commit. A PR does not repair an
+incomplete local inspection. Every pushed commit is checked,
 including intermediate changes that were later reverted.
 
 Rollback:

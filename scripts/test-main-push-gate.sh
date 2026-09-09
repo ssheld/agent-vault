@@ -388,13 +388,21 @@ EOF
 chmod +x "$probe/git"
 
 assert_inspection_failures() {
-  local repo_path="$1" base="$2" tip="$3" failure output
+  local repo_path="$1" base="$2" tip="$3" failure output remote_args
+  shift 3
+  remote_args=("$@")
   for failure in ancestry commits-empty commits-partial parents-empty parents-partial diff-empty diff-partial; do
-    output="$(PATH="$probe:$PATH" PUSH_GATE_TEST_FAILURE="$failure" run_pre_push_expect_failure "$repo_path" refs/heads/main "$tip" refs/heads/main "$base")"
+    output="$(PATH="$probe:$PATH" PUSH_GATE_TEST_FAILURE="$failure" run_pre_push_expect_failure "$repo_path" refs/heads/main "$tip" refs/heads/main "$base" "${remote_args[@]}")"
     assert_output_contains "$output" "Git exit 128"
     assert_output_excludes "$output" "non-fast-forward"
     assert_output_excludes "$output" "Use the PR flow"
     assert_output_excludes "$output" "Advertised remote main commit is unavailable"
+    assert_output_excludes "$output" "synthetic-credential-marker"
+    assert_output_excludes "$output" "example.invalid"
+    assert_output_excludes "$output" "Fetch main"
+    assert_output_excludes "$output" "git fetch"
+    assert_output_excludes "$output" "If fetching"
+    assert_output_contains "$output" "Inspect local Git errors and repository objects before retrying."
     case "$failure" in
       ancestry) assert_output_contains "$output" "Could not verify main push ancestry" ;;
       commits-*) assert_output_contains "$output" "Could not enumerate commits" ;;
@@ -404,6 +412,8 @@ assert_inspection_failures() {
   done
 }
 assert_inspection_failures "$metadata_repo" "$metadata_remote_sha" "$metadata_local_sha"
+assert_inspection_failures "$metadata_repo" "$metadata_remote_sha" "$metadata_local_sha" origin "$missing_origin"
+assert_inspection_failures "$metadata_repo" "$metadata_remote_sha" "$metadata_local_sha" "$secret_url" "$secret_url"
 
 # Updating an installed stale hook delivers the same fail-closed behavior and
 # restores its executable bit, without requiring a fresh generated project.
@@ -435,6 +445,9 @@ for failure in root-empty root-partial; do
   root_output="$(PATH="$probe:$PATH" PUSH_GATE_TEST_FAILURE="$failure" run_pre_push_expect_failure "$root_repo" refs/heads/main "$root_local_sha" refs/heads/main "$root_remote_sha")"
   assert_output_contains "$root_output" "Could not inspect files in commit $root_commit_sha (Git exit 128)"
   assert_output_excludes "$root_output" "Use the PR flow"
+  assert_output_excludes "$root_output" "Fetch main"
+  assert_output_excludes "$root_output" "If fetching"
+  assert_output_contains "$root_output" "Inspect local Git errors and repository objects before retrying."
 done
 
 rename_repo="$tmp_root/rename-source-blocked"

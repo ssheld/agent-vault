@@ -22,6 +22,7 @@ paths=(
   'scaffold/agent-vault/README.md'
   'scaffold/root/docs/design.md'
   'scaffold/root/.github/pull_request_template.md'
+  'scaffold/root/.cursor/rules/agent-vault.mdc'
 )
 for path in "${paths[@]}"; do
   mkdir -p "$fixture/$(dirname "$path")"
