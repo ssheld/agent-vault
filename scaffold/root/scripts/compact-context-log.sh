@@ -63,7 +63,7 @@ checker="$here/check-context-log-rollover.sh"
 
 usage() {
   cat <<EOF
-Usage: $0 <context-log-file> --keep <N> --archive <file> --manifest <file>
+Usage: $0 <context-log-file> (--keep <N> | --to-budget) --archive <file> --manifest <file>
           [--rollover-id <id>] [--boundary <text>] [--anchors "<a>; <b>"]
           [--require-top-entry <substring>] [--dry-run] [--quiet]
        $0 <context-log-file> --recover [--dry-run] [--quiet]
@@ -97,6 +97,13 @@ path migration without requiring another rollover.
 
 Options:
   --keep <N>                 Entries to keep live (>=1; the newest, snapshot aside).
+  --to-budget                Retain the largest whole-entry prefix within the byte target.
+  --config <file>            Explicit literal memory-budget config (byte mode only).
+  --context-log-budget <N>   Trigger in decimal bytes (default: 60000).
+  --context-log-target <N>   Final live-byte target (default: 30000; less than trigger).
+  --ignore-trigger          Allow early byte compaction; all other gates still apply.
+  --allow-target-overage    If target is infeasible, explicitly permit the smallest
+                             reducing result within trigger; warn even under --quiet.
   --archive <file>           Dated archive to grow (created if missing).
   --manifest <file>          Rollover manifest to prepend to (created if missing).
   --rollover-id <id>         Manifest/pointer id (default: <YYYY-MM-DD>-<seq>).
@@ -123,6 +130,17 @@ Options:
   --recover                  Finish the recorded operation without generation options.
   --quiet                    Suppress summaries, not warnings/failures.
   -h, --help                 Show this help.
+
+Byte mode config: explicit --config > repository config resolved from the log's
+directory > memory-budget.config beside the log > built-in defaults. Reports
+identify the selected source. CLI byte overrides win. Values are bounded decimal
+integers (1..2147483647); every supplied setting is validated before arithmetic.
+The positional log selects the input; context_log_path is a checker designation,
+not a redirect or a compactor coverage requirement. Count mode and recovery ignore
+ambient config and reject byte-mode flags. Neither mode runs automatically.
+Ordinary byte mode does nothing at/below trigger after the existing safety checks.
+Strict byte retention refuses without writes if no complete candidate meets the
+target; the refusal reports the achievable frontier and possible remedies.
 
 Use only one writer for the log, archive, and manifest, including recovery. Stop
 the original process and its children before recovering. Pending data lives in
@@ -152,6 +170,97 @@ abort() {
   exit 1
 }
 
+# Keep this standalone config block identical in the checker and compactor.
+# BEGIN memory budget config
+normalize_budget() {
+  local key="$1" value="$2" minimum=0 LC_ALL=C
+  case "$key" in context_log_budget | context_log_target) minimum=1 ;; esac
+  [[ "$value" =~ ^[0-9]+$ ]] || die "$key must be a decimal integer from $minimum to 2147483647"
+  # Strip zeroes before bounding digit count. Never pass raw input to arithmetic.
+  value="${value#"${value%%[!0]*}"}"
+  value="${value:-0}"
+  # Equal-length ASCII digit strings compare numerically without arithmetic overflow.
+  # shellcheck disable=SC2071
+  [[ "${#value}" -lt 10 || ("${#value}" -eq 10 && ! "$value" > 2147483647) ]] ||
+    die "$key must be a decimal integer from $minimum to 2147483647"
+  [[ "$minimum" -eq 0 || "$value" != 0 ]] || die "$key must be positive"
+  printf '%s' "$value"
+}
+
+normalize_gemini_import_depth() {
+  local value="$1" LC_ALL=C
+  # Bound syntax and digit count before Bash arithmetic sees untrusted input.
+  [[ "$value" =~ ^[0-9]{1,2}$ ]] || die "gemini_import_depth must be an integer from 0 to 64"
+  value=$((10#$value))
+  [[ "$value" -le 64 ]] || die "gemini_import_depth must be an integer from 0 to 64"
+  printf '%s' "$value"
+}
+
+normalize_context_log_path() {
+  local value="$1" part normalized=""
+  local -a parts=()
+  [[ -n "$value" && "$value" != /* && "$value" != *[[:space:][:cntrl:]]* && "/$value/" != */../* ]] ||
+    die "context_log_path must be repo-relative without whitespace, control bytes, or '..' components"
+  IFS=/ read -r -a parts <<<"$value"
+  for part in "${parts[@]}"; do
+    case "$part" in '' | .) continue ;; esac
+    normalized+="${normalized:+/}$part"
+  done
+  [[ -n "$normalized" ]] || die "context_log_path must name a file"
+  printf '%s' "$normalized"
+}
+
+# Some outputs are checker-only; both standalone consumers accept the same file.
+# shellcheck disable=SC2034
+read_memory_budget_config() {
+  local path="$1" contents raw_line cfg_line cfg_key cfg_val
+  config_file_budget="" config_chain_budget=""
+  config_context_log_budget="" config_context_log_target="" config_context_log_path=""
+  config_protocol_read="" config_agents="" config_exceptions=""
+  config_chain_exception="" config_gemini_import_depth=""
+  [[ -n "$path" ]] || return 0
+  [[ -f "$path" && -r "$path" ]] || die "config file is not a readable regular file: $path"
+  # Read completely before parsing: a partial read must not silently select defaults.
+  contents="$(cat -- "$path")" || die "cannot read config file: $path"
+  while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
+    raw_line="${raw_line%$'\r'}"
+    cfg_line="${raw_line#"${raw_line%%[![:space:]]*}"}"
+    [[ -z "$cfg_line" || "$cfg_line" == \#* ]] && continue
+    [[ "$cfg_line" == *=* ]] || continue
+    cfg_key="${cfg_line%%=*}"
+    cfg_val="${cfg_line#*=}"
+    cfg_key="${cfg_key%"${cfg_key##*[![:space:]]}"}"
+    cfg_val="${cfg_val#"${cfg_val%%[![:space:]]*}"}"
+    cfg_val="${cfg_val%"${cfg_val##*[![:space:]]}"}"
+    case "$cfg_key" in
+      file_budget) config_file_budget="$(normalize_budget "$cfg_key" "$cfg_val")" || exit 2 ;;
+      chain_budget) config_chain_budget="$(normalize_budget "$cfg_key" "$cfg_val")" || exit 2 ;;
+      context_log_budget) config_context_log_budget="$(normalize_budget "$cfg_key" "$cfg_val")" || exit 2 ;;
+      # Both consumers validate the full config surface; only byte mode retains to target.
+      context_log_target) config_context_log_target="$(normalize_budget "$cfg_key" "$cfg_val")" || exit 2 ;;
+      context_log_path) config_context_log_path="$(normalize_context_log_path "$cfg_val")" || exit 2 ;;
+      protocol_read) config_protocol_read="$cfg_val" ;;
+      agents) config_agents="$cfg_val" ;;
+      exceptions) config_exceptions="$cfg_val" ;;
+      chain_exception) config_chain_exception="$cfg_val" ;;
+      gemini_import_depth)
+        config_gemini_import_depth="$(normalize_gemini_import_depth "$cfg_val")" || exit 2
+        ;;
+      *) die "unknown config key in $path: $cfg_key" ;;
+    esac
+  done <<<"$contents"
+}
+
+resolve_context_log_budget() {
+  context_log_budget="${context_log_budget:-${config_context_log_budget:-60000}}"
+  context_log_target="${context_log_target:-${config_context_log_target:-30000}}"
+  context_log_path_explicit=false
+  [[ -z "${context_log_path:-$config_context_log_path}" ]] || context_log_path_explicit=true
+  context_log_path="${context_log_path:-${config_context_log_path:-agent-vault/context-log.md}}"
+  [[ "$context_log_target" -lt "$context_log_budget" ]] || die "context_log_target must be less than context_log_budget"
+}
+# END memory budget config
+
 pending() {
   echo "Recovery required: $*" >&2
   reported_status=3
@@ -174,6 +283,15 @@ run_checker() {
 
 context_log=""
 keep=""
+keep_supplied=false
+to_budget=false
+byte_options=false
+config_file=""
+context_log_budget=""
+context_log_target=""
+context_log_path=""
+allow_target_overage=false
+ignore_trigger=false
 archive_file=""
 manifest_file=""
 rollover_id=""
@@ -190,7 +308,7 @@ generation_options="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --keep | --archive | --manifest | --rollover-id | --boundary | --anchors | --require-top-entry | --allow-missing-top-entry | --allow-stale-archive-metadata | --adopt-manual-rollover)
+    --keep | --archive | --manifest | --rollover-id | --boundary | --anchors | --require-top-entry | --allow-missing-top-entry | --allow-stale-archive-metadata | --adopt-manual-rollover | --to-budget | --config | --context-log-budget | --context-log-target | --allow-target-overage | --ignore-trigger)
       generation_options="true"
       ;;
   esac
@@ -201,8 +319,39 @@ while [[ $# -gt 0 ]]; do
       ;;
     --keep)
       [[ $# -ge 2 ]] || die "--keep requires a value"
+      keep_supplied=true
       keep="$2"
       shift 2
+      ;;
+    --to-budget)
+      to_budget=true
+      shift
+      ;;
+    --config)
+      [[ $# -ge 2 && -n "$2" ]] || die "--config requires a nonempty path"
+      byte_options=true
+      config_file="$2"
+      shift 2
+      ;;
+    --context-log-budget | --context-log-target)
+      [[ $# -ge 2 ]] || die "$1 requires a number"
+      byte_options=true
+      if [[ "$1" == --context-log-budget ]]; then
+        context_log_budget="$(normalize_budget context_log_budget "$2")" || exit 2
+      else
+        context_log_target="$(normalize_budget context_log_target "$2")" || exit 2
+      fi
+      shift 2
+      ;;
+    --allow-target-overage)
+      byte_options=true
+      allow_target_overage=true
+      shift
+      ;;
+    --ignore-trigger)
+      byte_options=true
+      ignore_trigger=true
+      shift
       ;;
     --archive)
       [[ $# -ge 2 ]] || die "--archive requires a path"
@@ -731,6 +880,111 @@ classify_pointer() {
 
 # --- preconditions (outputs unchanged) -----------------------------------
 
+resolve_byte_config() {
+  local root="" adjacent="${log_canon%/*}/memory-budget.config"
+  config_note=""
+  if [[ -z "$config_file" ]]; then
+    root="$(git -C "${log_canon%/*}" rev-parse --show-toplevel 2>/dev/null)" || root=""
+    if [[ -n "$root" && (-e "$root/agent-vault/memory-budget.config" || -L "$root/agent-vault/memory-budget.config") ]]; then
+      config_file="$root/agent-vault/memory-budget.config"
+    elif [[ -e "$adjacent" || -L "$adjacent" ]]; then
+      config_file="$adjacent"
+      if [[ -z "$root" || "$adjacent" != "$root/agent-vault/memory-budget.config" ]]; then
+        config_note="; adjacent fallback: check-memory-budget.sh does not read this location automatically"
+      fi
+    fi
+  fi
+  read_memory_budget_config "$config_file"
+  if [[ -n "$config_file_budget" && -z "$context_log_budget" && -z "$config_context_log_budget" ]]; then
+    config_note+="; generic file_budget does not set the context-log limit; set context_log_budget explicitly to override its default"
+  fi
+  resolve_context_log_budget
+  byte_config_summary="Config: ${config_file:-built-in defaults}$config_note; trigger=$context_log_budget bytes; target=$context_log_target bytes; checker designation=$context_log_path (explicit=$context_log_path_explicit; positional log is authoritative)"
+}
+
+# Calculate every split without rendering each candidate. The prefix accounting
+# mirrors strip_trailing_blanks (including its legacy one-final-blank removal)
+# and inject_pointer. Only headings/prefix byte totals are retained, not bodies.
+# Archive max ties favor the first rendered heading: prepending a moved heading
+# therefore replaces an equal-timestamp maximum, including existing history.
+# Deliberately scan every split without assuming monotonic sizes: this remains
+# linear and handles future split-dependent renderer terms that might break it.
+select_byte_keep() {
+  local existing_newest="" bounds_text suffix_bytes=0 selection
+  if [[ -f "$archive_input" ]]; then
+    bounds_text="$(select_boundaries "$archive_input")" || die "cannot inspect archive for byte selection"
+    existing_newest="${bounds_text%%$'\n'*}"
+  fi
+  if [[ -n "$suffix_line" ]]; then
+    tail -n "+$suffix_line" "$log_input" >"$scratch/byte-suffix"
+    suffix_bytes=$(($(file_size "$scratch/byte-suffix") + 1))
+  fi
+  printf '%s\n' "${heading_lines[@]}" >"$scratch/byte-headings"
+  # Classify normalized blanks/pointer lines in the renderer's locale first.
+  # The second, C-locale pass measures bytes: forcing C for classification too
+  # miscounts Unicode whitespace on multibyte-aware awk implementations.
+  selection="$(awk "$markdown_fences"'
+    {
+      blank = ($0 ~ /^[[:space:]]*$/)
+      line = (blank ? "" : $0)
+      quoted = fenced(line); drop = 0
+      if (!quoted) {
+        if (line ~ /^## Current Snapshot[[:space:]]*$/) in_snap = 1
+        else if (in_snap && line ~ /^## /) in_snap = 0
+        else if (in_snap && tolower(line) ~ /context-log rollover[[:space:]]*:/) drop = 1
+      }
+      printf "%d %d %s\n", blank, drop, $0
+    }
+  ' "$log_input" |
+    BYTE_NEWEST="$existing_newest" BYTE_BOUNDARY="$boundary" BYTE_ID="$rollover_id" \
+      LC_ALL=C awk -v target="$context_log_target" -v suffix="$suffix_bytes" '
+    BEGIN {
+      newest = ENVIRON["BYTE_NEWEST"]; have_max = (newest != "")
+      max_ts = substr(newest, 1, 16)
+      boundary = ENVIRON["BYTE_BOUNDARY"]; automatic = (boundary == "")
+      boundary_bytes = length(boundary)
+      if (automatic) { sub(/^.* - /, "", newest); boundary_bytes = length("through ") + length(newest) }
+      pointer_fixed = length("- Context-log rollover: `" ENVIRON["BYTE_ID"] "` — boundary: ") + 1
+    }
+    FILENAME == ARGV[1] { starts[$1] = ++n; next }
+    {
+      line = substr($0, 5)
+      if (FNR in starts) {
+        k = starts[FNR]
+        prefix[k - 1] = bytes - last_blank
+        heading = line
+        sub(/\r$/, "", heading); sub(/^### /, "", heading)
+        timestamps[k] = substr(heading, 1, 16)
+        sub(/^.* - /, "", heading); topic_bytes[k] = length(heading)
+      }
+      last_blank = substr($0, 1, 1) + 0
+      drop = substr($0, 3, 1) + 0
+      if (!drop) bytes += (last_blank ? 1 : length(line) + 1)
+    }
+    END {
+      for (k = n - 1; k >= 1; k--) {
+        if (!have_max || timestamps[k + 1] >= max_ts) {
+          max_ts = timestamps[k + 1]; have_max = 1
+          if (automatic) boundary_bytes = length("through ") + topic_bytes[k + 1]
+        }
+        size = prefix[k] + pointer_fixed + boundary_bytes + suffix
+        if (!best || size < best_size) { best = k; best_size = size }
+        if (!fit && size <= target) { fit = k; fit_size = size }
+      }
+      printf "%.0f %.0f %.0f %.0f %.0f\n", fit, fit_size, best, best_size, prefix[1] + suffix
+    }
+  ' "$scratch/byte-headings" -)" || die "cannot compute byte-retention candidates"
+  read -r keep predicted_bytes best_keep best_bytes mandatory_bytes <<<"$selection"
+  if [[ "$keep" -eq 0 ]]; then
+    if [[ "$allow_target_overage" == true && "$best_bytes" -le "$context_log_budget" && "$best_bytes" -lt "$input_bytes" ]]; then
+      keep="$best_keep" predicted_bytes="$best_bytes"
+      echo "Warning: target $context_log_target bytes is infeasible; --allow-target-overage retains $keep entries at $predicted_bytes bytes (trigger $context_log_budget); target missed." >&2
+    else
+      abort "cannot meet target $context_log_target bytes: best achievable $best_bytes bytes retaining $best_keep entries (trigger $context_log_budget; mandatory header/snapshot/newest/suffix excluding new pointer $mandatory_bytes bytes). Use --allow-target-overage only for a reducing result within trigger, or raise context_log_target to at least $best_bytes with a larger trigger."
+    fi
+  fi
+}
+
 if command -v sha256sum >/dev/null 2>&1; then
   hash_command=(sha256sum)
 elif command -v shasum >/dev/null 2>&1; then
@@ -772,11 +1026,20 @@ if [[ -e "$journal" || -L "$journal" ]]; then
   pending "pending transaction at $journal; run $recovery_command before starting another rollover"
 fi
 [[ -f "$context_log" ]] || die "context log not found: $context_log"
-[[ -n "$keep" ]] || die "--keep is required"
-[[ "$keep" =~ ^[0-9]+$ ]] || die "--keep must be a non-negative integer, got: $keep"
-[[ "$keep" -ge 1 ]] || die "--keep must be >= 1 (the newest entry is always kept)"
+if [[ "$to_budget" == true ]]; then
+  [[ "$keep_supplied" == false ]] || die "--keep and --to-budget are mutually exclusive"
+else
+  [[ "$byte_options" == false ]] || die "byte-mode options require --to-budget"
+  [[ -n "$keep" ]] || die "--keep or --to-budget is required"
+  [[ "$keep" =~ ^[0-9]+$ ]] || die "--keep must be a non-negative integer, got: $keep"
+  [[ "$keep" -ge 1 ]] || die "--keep must be >= 1 (the newest entry is always kept)"
+fi
 [[ -n "$archive_file" ]] || die "--archive is required"
 [[ -n "$manifest_file" ]] || die "--manifest is required"
+if [[ "$to_budget" == true ]]; then
+  resolve_byte_config
+  [[ "$quiet" == true ]] || echo "$byte_config_summary"
+fi
 [[ ! -d "$archive_file" ]] || die "--archive must be a file path, not an existing directory: $archive_file"
 [[ ! -d "$manifest_file" ]] || die "--manifest must be a file path, not an existing directory: $manifest_file"
 
@@ -884,7 +1147,13 @@ if [[ "${#excluded_lines[@]}" -gt 0 ]]; then
 fi
 [[ "$total_entries" -ge 1 ]] || abort "no dated entries found under \"## Entries\""
 
-if [[ "$total_entries" -le "$keep" ]]; then
+input_bytes="$(file_size "$log_input")" || die "cannot measure input bytes"
+if [[ "$to_budget" == true ]]; then
+  if [[ ("$ignore_trigger" == false && "$input_bytes" -le "$context_log_budget") || "$input_bytes" -le "$context_log_target" ]]; then
+    [[ "$quiet" == true ]] || echo "Nothing to roll over (byte mode): input=$input_bytes bytes; trigger=$context_log_budget; target=$context_log_target; kept=$total_entries; archived=0."
+    exit 0
+  fi
+elif [[ "$total_entries" -le "$keep" ]]; then
   [[ "$quiet" == "true" ]] || echo "Nothing to roll over: $total_entries entr(y/ies) <= --keep $keep."
   exit 0
 fi
@@ -906,7 +1175,31 @@ fi
 [[ "${#orphan_lines[@]}" -eq 0 ]] ||
   abort "orphaned top-level Next Prompt at line(s) ${orphan_lines[*]}; keep prompts nested under their entry before rolling over"
 
+if [[ "$to_budget" == true && "$total_entries" -lt 2 ]]; then
+  abort "cannot meet target $context_log_target bytes: input=$input_bytes bytes, retaining the only entry leaves nothing to archive (trigger $context_log_budget)"
+fi
+
 # --- build everything in a scratch dir (still no writes to real files) ---
+
+if [[ -z "$rollover_id" ]]; then
+  day="$(date +%Y-%m-%d)"
+  # Next sequence = max existing same-day suffix + 1, so a gap (e.g. -1, -3) never
+  # re-issues an in-use id (counting would). Default to 1 when none exist.
+  next_seq=1
+  if [[ -f "$manifest_input" ]]; then
+    next_seq="$(awk -v day="$day" "$markdown_fences"'
+      { if (fenced($0)) next }
+      $0 ~ ("^## rollover: " day "-[0-9]+[[:space:]]*$") {
+        s = $0; sub(/.*-/, "", s); sub(/[[:space:]]+$/, "", s)
+        if (s + 0 > max) max = s + 0
+      }
+      END { print max + 1 }
+    ' "$manifest_input")" || die "cannot determine next rollover id: $manifest_file"
+  fi
+  rollover_id="${day}-${next_seq}"
+fi
+
+if [[ "$to_budget" == true ]]; then select_byte_keep; fi
 
 archive_base="$(basename "$archive_file")"
 mkdir -p "$scratch/after/log" "$scratch/after/archive" "$scratch/after/manifest" || die "cannot create candidate staging"
@@ -986,23 +1279,6 @@ fi
 if [[ -z "$anchors" ]]; then
   anchors="${newest_archived##* - }; ${oldest_archived##* - }"
 fi
-if [[ -z "$rollover_id" ]]; then
-  day="$(date +%Y-%m-%d)"
-  # Next sequence = max existing same-day suffix + 1, so a gap (e.g. -1, -3) never
-  # re-issues an in-use id (counting would). Default to 1 when none exist.
-  next_seq=1
-  if [[ -f "$manifest_input" ]]; then
-    next_seq="$(awk -v day="$day" "$markdown_fences"'
-      { if (fenced($0)) next }
-      $0 ~ ("^## rollover: " day "-[0-9]+[[:space:]]*$") {
-        s = $0; sub(/.*-/, "", s); sub(/[[:space:]]+$/, "", s)
-        if (s + 0 > max) max = s + 0
-      }
-      END { print max + 1 }
-    ' "$manifest_input")" || die "cannot determine next rollover id: $manifest_file"
-  fi
-  rollover_id="${day}-${next_seq}"
-fi
 
 pointer_line="- Context-log rollover: \`${rollover_id}\` — boundary: ${boundary}"
 inject_pointer "$pointer_line" "$scratch/live_body" >"$new_log"
@@ -1013,6 +1289,12 @@ if [[ -n "$suffix_line" ]]; then
 fi
 
 # Build the new manifest: header + this (newest) record + existing records.
+if [[ "$to_budget" == true ]]; then
+  final_bytes="$(file_size "$new_log")" || die "cannot measure rendered log"
+  [[ "$final_bytes" -eq "$predicted_bytes" ]] || abort "byte-selection accounting mismatch: predicted $predicted_bytes, rendered $final_bytes"
+  [[ "$final_bytes" -le "$context_log_budget" && "$final_bytes" -lt "$input_bytes" ]] || abort "byte rollover must reduce the log and stay within trigger"
+  [[ "$final_bytes" -le "$context_log_target" || "$allow_target_overage" == true ]] || abort "rendered log exceeds target"
+fi
 new_record="$scratch/record"
 {
   printf '## rollover: %s\n' "$rollover_id"
@@ -1069,6 +1351,9 @@ else
 fi
 
 summary="Rolled over $context_log: kept $keep, archived $archived_count (id $rollover_id; boundary: $boundary)."
+if [[ "$to_budget" == true ]]; then
+  summary+=" Byte mode: input=$input_bytes; final=$final_bytes; trigger=$context_log_budget; target=$context_log_target bytes."
+fi
 
 if [[ "$dry_run" == "true" ]]; then
   echo "[dry-run] $summary"

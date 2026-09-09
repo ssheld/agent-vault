@@ -358,7 +358,7 @@ EOF
 }
 
 assert_generated_context_budget() {
-  local target="$1" label="$2" fixture output rc=0
+  local target="$1" label="$2" fixture output rc=0 i
   fixture="$tmp_root/context-budget-$label"
   mkdir -p "$fixture/agent-vault"
   head -c 50000 /dev/zero | tr '\0' x >"$fixture/agent-vault/context-log.md"
@@ -371,6 +371,17 @@ assert_generated_context_budget() {
   output="$("$target/scripts/check-memory-budget.sh" --repo "$fixture" --strict --format tsv 2>&1)" || rc=$?
   assert_exit_code 1 "$rc" "$label installed checker retains imported-log limit"
   assert_output_contains "$output" "$(printf 'claude\tagent-vault/context-log.md\tOVER\t50000\t')" "$label imported log remains over general limit"
+  printf '# Context Log\n\n## Usage Rules\n- Newest first.\n\n## Current Snapshot\n- Active: byte fixture\n\n## Entries\n\n' >"$fixture/agent-vault/context-log.md"
+  for i in 3 2 1; do
+    printf '### 2026-09-06 12:0%s local - codex - byte-entry %s\n' "$i" "$i" >>"$fixture/agent-vault/context-log.md"
+    head -c 25000 /dev/zero | tr '\0' x >>"$fixture/agent-vault/context-log.md"
+    printf '\n\n' >>"$fixture/agent-vault/context-log.md"
+  done
+  rc=0
+  output="$("$target/scripts/compact-context-log.sh" "$fixture/agent-vault/context-log.md" --to-budget --archive "$fixture/archive.md" --manifest "$fixture/manifest.md" --require-top-entry byte-entry 2>&1)" || rc=$?
+  assert_exit_code 0 "$rc" "$label installed compactor supports byte mode"
+  assert_output_contains "$output" 'kept 1, archived 2' "$label installed compactor retains complete entries"
+  assert_output_contains "$output" 'target=30000' "$label installed compactor shares target config"
 }
 
 # --- Test 1: new-project seeds executable managed helpers and the runbook ---

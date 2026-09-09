@@ -87,8 +87,9 @@ The checker uses the staged `agent-vault/memory-budget.config`, including when
 only that config is staged. The designated context log's protocol-read allowance
 defaults to 60,000 bytes; imported logs and other memory files still use the
 40,000-byte general default. `context_log_budget`, `context_log_target`, and
-`context_log_path` are accepted together. The 30,000-byte target is validated and
-reported but not yet enforced by the count-based compactor. Upgrade the checker
+`context_log_path` are accepted together. The 30,000-byte target is enforced only
+by explicit `compact-context-log.sh --to-budget`; `--keep N` stays count-based.
+Upgrade the checker
 before adding these keys; an older checker rejects unknown keys. No hook compacts
 files or rewrites configuration. An explicit `context_log_path` outside the
 effective `protocol_read` set is a configuration error; the hook prints that
