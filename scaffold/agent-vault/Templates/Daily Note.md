@@ -15,13 +15,13 @@ last_updated:
 
 ## Work Log
 <!-- Keep same-day work chronological. Append new entries or added session sections at the bottom. Prefer repo-relative paths where possible. -->
-- HH:MM - 
+- HH:MM -
 
 ## Decisions / Key Updates
-- 
+-
 
 ## Open Questions / Risks
-- 
+-
 
 ## Carry Forward
 <!-- Only list genuinely unfinished work. If a commit, push, or PR already happened in this session, record it in Work Log / Decisions above and do not repeat it here as pending. -->

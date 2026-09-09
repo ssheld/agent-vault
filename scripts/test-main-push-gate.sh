@@ -26,6 +26,15 @@ assert_output_contains() {
   fi
 }
 
+assert_output_excludes() {
+  local output="$1" unexpected="$2"
+  if [[ "$output" == *"$unexpected"* ]]; then
+    echo "Unexpected text in command output: $unexpected" >&2
+    printf '%s\n' "$output" >&2
+    exit 1
+  fi
+}
+
 assert_file_exists() {
   local file_path="$1"
 
@@ -105,8 +114,9 @@ run_pre_push() {
   local local_sha="$3"
   local remote_ref="$4"
   local remote_sha="$5"
+  shift 5
 
-  (cd "$repo_path" && printf '%s %s %s %s\n' "$local_ref" "$local_sha" "$remote_ref" "$remote_sha" | agent-vault/_assets/hooks/pre-push)
+  (cd "$repo_path" && printf '%s %s %s %s\n' "$local_ref" "$local_sha" "$remote_ref" "$remote_sha" | agent-vault/_assets/hooks/pre-push "$@")
 }
 
 run_pre_push_expect_failure() {
@@ -116,8 +126,9 @@ run_pre_push_expect_failure() {
   local remote_ref="$4"
   local remote_sha="$5"
   local output=""
+  shift 5
 
-  if output="$(run_pre_push "$repo_path" "$local_ref" "$local_sha" "$remote_ref" "$remote_sha" 2>&1)"; then
+  if output="$(run_pre_push "$repo_path" "$local_ref" "$local_sha" "$remote_ref" "$remote_sha" "$@" 2>&1)"; then
     echo "Expected pre-push hook to fail in $repo_path" >&2
     exit 1
   fi
@@ -298,6 +309,146 @@ git -C "$non_ff_repo" add remote/file.txt
 non_ff_remote_sha="$(git -C "$non_ff_repo" rev-parse HEAD)"
 non_ff_output="$(run_pre_push_expect_failure "$non_ff_repo" "refs/heads/main" "$non_ff_local_sha" "refs/heads/main" "$non_ff_remote_sha")"
 assert_output_contains "$non_ff_output" "Direct non-fast-forward push to main is not allowed."
+
+# A real remote-ahead commit is unavailable until the owner fetches. Diagnostic
+# calls themselves must not fetch or print either location argument.
+missing_origin="$tmp_root/missing-object-origin.git"
+missing_peer="$tmp_root/missing-object-peer"
+git clone --bare "$metadata_repo" "$missing_origin" >/dev/null 2>&1
+git -C "$metadata_repo" remote add origin "$missing_origin"
+git clone "$missing_origin" "$missing_peer" >/dev/null 2>&1
+git -C "$missing_peer" -c user.name=Test -c user.email=test@example.com -c core.hooksPath=/dev/null commit --allow-empty -m 'remote ahead' >/dev/null
+git -C "$missing_peer" push origin main >/dev/null 2>&1
+missing_remote_sha="$(git -C "$missing_peer" rev-parse HEAD)"
+for remote_kind in named unnamed unknown quoted; do
+  case "$remote_kind" in
+    named) remote_args=(origin "$missing_origin") ;;
+    unnamed) remote_args=() ;;
+    unknown) remote_args=(unconfigured "$missing_origin") ;;
+    quoted)
+      git -C "$metadata_repo" remote add "review'backup" "$missing_origin"
+      remote_args=("review'backup" "$missing_origin")
+      ;;
+  esac
+  missing_output="$(run_pre_push_expect_failure "$metadata_repo" refs/heads/main "$metadata_local_sha" refs/heads/main "$missing_remote_sha" "${remote_args[@]}")"
+  assert_output_contains "$missing_output" "Could not verify main push ancestry (Git exit 128)"
+  assert_output_contains "$missing_output" "Advertised remote main commit is unavailable locally: $missing_remote_sha"
+  assert_output_excludes "$missing_output" "non-fast-forward"
+  assert_output_excludes "$missing_output" "Use the PR flow"
+  assert_output_excludes "$missing_output" "$missing_origin"
+  if [[ "$remote_kind" == named || "$remote_kind" == quoted ]]; then
+    assert_output_contains "$missing_output" "$(printf 'git fetch -- %q main' "${remote_args[0]}")"
+  else
+    assert_output_contains "$missing_output" "Fetch main from the push destination"
+  fi
+done
+secret_url='https://synthetic-credential-marker@example.invalid/repository.git'
+missing_output="$(run_pre_push_expect_failure "$metadata_repo" refs/heads/main "$metadata_local_sha" refs/heads/main "$missing_remote_sha" "$secret_url" "$secret_url")"
+assert_output_contains "$missing_output" "Fetch main from the push destination"
+assert_output_excludes "$missing_output" "synthetic-credential-marker"
+assert_output_excludes "$missing_output" "example.invalid"
+if git -C "$metadata_repo" cat-file -e "${missing_remote_sha}^{commit}" 2>/dev/null; then
+  echo "Missing-object diagnostics unexpectedly fetched the remote object." >&2
+  exit 1
+fi
+git -C "$metadata_repo" fetch origin main >/dev/null 2>&1
+fetched_output="$(run_pre_push_expect_failure "$metadata_repo" refs/heads/main "$metadata_local_sha" refs/heads/main "$missing_remote_sha" origin "$missing_origin")"
+assert_output_contains "$fetched_output" "Direct non-fast-forward push to main is not allowed."
+assert_output_excludes "$fetched_output" "Could not verify"
+
+# Inject operational failures with both endpoint commits present. Incomplete
+# output must be rejected even when every path/commit emitted so far is allowed.
+probe="$tmp_root/git-probe"
+mkdir "$probe"
+PUSH_GATE_TEST_REAL_GIT="$(command -v git)"
+PUSH_GATE_TEST_COMMIT="$metadata_local_sha"
+export PUSH_GATE_TEST_REAL_GIT PUSH_GATE_TEST_COMMIT
+cat >"$probe/git" <<'EOF'
+#!/usr/bin/env bash
+case "${PUSH_GATE_TEST_FAILURE:-}:${1:-}:${2:-}" in
+  ancestry:merge-base:--is-ancestor) exit 128 ;;
+  commits-empty:rev-list:--reverse) exit 128 ;;
+  commits-partial:rev-list:--reverse)
+    printf '%s\n' "$PUSH_GATE_TEST_COMMIT"
+    exit 128
+    ;;
+  parents-empty:rev-list:--parents) exit 128 ;;
+  parents-partial:rev-list:--parents)
+    printf '%s\n' "$PUSH_GATE_TEST_COMMIT"
+    exit 128
+    ;;
+  diff-empty:diff:--no-renames | root-empty:diff-tree:--no-commit-id) exit 128 ;;
+  diff-partial:diff:--no-renames | root-partial:diff-tree:--no-commit-id)
+    printf 'agent-vault/context-log.md\n'
+    exit 128
+    ;;
+esac
+exec "$PUSH_GATE_TEST_REAL_GIT" "$@"
+EOF
+chmod +x "$probe/git"
+
+assert_inspection_failures() {
+  local repo_path="$1" base="$2" tip="$3" failure output remote_args
+  shift 3
+  remote_args=("$@")
+  for failure in ancestry commits-empty commits-partial parents-empty parents-partial diff-empty diff-partial; do
+    output="$(PATH="$probe:$PATH" PUSH_GATE_TEST_FAILURE="$failure" run_pre_push_expect_failure "$repo_path" refs/heads/main "$tip" refs/heads/main "$base" "${remote_args[@]}")"
+    assert_output_contains "$output" "Git exit 128"
+    assert_output_excludes "$output" "non-fast-forward"
+    assert_output_excludes "$output" "Use the PR flow"
+    assert_output_excludes "$output" "Advertised remote main commit is unavailable"
+    assert_output_excludes "$output" "synthetic-credential-marker"
+    assert_output_excludes "$output" "example.invalid"
+    assert_output_excludes "$output" "Fetch main"
+    assert_output_excludes "$output" "git fetch"
+    assert_output_excludes "$output" "If fetching"
+    assert_output_contains "$output" "Inspect local Git errors and repository objects before retrying."
+    case "$failure" in
+      ancestry) assert_output_contains "$output" "Could not verify main push ancestry" ;;
+      commits-*) assert_output_contains "$output" "Could not enumerate commits" ;;
+      parents-*) assert_output_contains "$output" "Could not inspect parents of commit" ;;
+      diff-*) assert_output_contains "$output" "Could not inspect files in commit" ;;
+    esac
+  done
+}
+assert_inspection_failures "$metadata_repo" "$metadata_remote_sha" "$metadata_local_sha"
+assert_inspection_failures "$metadata_repo" "$metadata_remote_sha" "$metadata_local_sha" origin "$missing_origin"
+assert_inspection_failures "$metadata_repo" "$metadata_remote_sha" "$metadata_local_sha" "$secret_url" "$secret_url"
+
+# Updating an installed stale hook delivers the same fail-closed behavior and
+# restores its executable bit, without requiring a fresh generated project.
+printf '#!/usr/bin/env bash\nexit 0\n' >"$metadata_repo/agent-vault/_assets/hooks/pre-push"
+chmod -x "$metadata_repo/agent-vault/_assets/hooks/pre-push"
+"$repo_root/scripts/update-project.sh" "$metadata_repo" >/dev/null
+assert_executable "$metadata_repo/agent-vault/_assets/hooks/pre-push"
+assert_inspection_failures "$metadata_repo" "$metadata_remote_sha" "$metadata_local_sha"
+run_pre_push "$metadata_repo" refs/heads/main "$metadata_local_sha" refs/heads/main "$metadata_remote_sha"
+
+# A fast-forward merge can introduce a genuine root commit through unrelated
+# history. Accept a runtime-note-only root, but fail closed if its diff fails.
+root_repo="$tmp_root/unrelated-root"
+seed_project "$root_repo"
+enable_gate "$root_repo"
+root_remote_sha="$(git -C "$root_repo" rev-parse HEAD)"
+git -C "$root_repo" checkout --orphan metadata-root >/dev/null 2>&1
+git -C "$root_repo" rm -rf . >/dev/null
+mkdir -p "$root_repo/agent-vault/daily"
+printf 'Imported metadata history.\n' >"$root_repo/agent-vault/daily/$today-imported.md"
+git -C "$root_repo" add .
+git -C "$root_repo" -c core.hooksPath=/dev/null commit -m 'metadata root' >/dev/null
+root_commit_sha="$(git -C "$root_repo" rev-parse HEAD)"
+git -C "$root_repo" checkout main >/dev/null 2>&1
+git -C "$root_repo" -c core.hooksPath=/dev/null merge --allow-unrelated-histories --no-ff metadata-root -m 'Merge metadata history' >/dev/null
+root_local_sha="$(git -C "$root_repo" rev-parse HEAD)"
+run_pre_push "$root_repo" refs/heads/main "$root_local_sha" refs/heads/main "$root_remote_sha"
+for failure in root-empty root-partial; do
+  root_output="$(PATH="$probe:$PATH" PUSH_GATE_TEST_FAILURE="$failure" run_pre_push_expect_failure "$root_repo" refs/heads/main "$root_local_sha" refs/heads/main "$root_remote_sha")"
+  assert_output_contains "$root_output" "Could not inspect files in commit $root_commit_sha (Git exit 128)"
+  assert_output_excludes "$root_output" "Use the PR flow"
+  assert_output_excludes "$root_output" "Fetch main"
+  assert_output_excludes "$root_output" "If fetching"
+  assert_output_contains "$root_output" "Inspect local Git errors and repository objects before retrying."
+done
 
 rename_repo="$tmp_root/rename-source-blocked"
 seed_project "$rename_repo"

@@ -48,6 +48,18 @@ assert_output_contains() {
   fi
 }
 
+assert_output_excludes() {
+  local output="$1" unexpected="$2" label="$3"
+  if [[ "$output" != *"$unexpected"* ]]; then
+    echo "PASS: $label"
+    passed=$((passed + 1))
+  else
+    echo "FAIL: $label - unexpected text: $unexpected" >&2
+    echo "  Actual output: $output" >&2
+    failed=$((failed + 1))
+  fi
+}
+
 assert_path_exists() {
   local path="$1"
   local label="$2"
@@ -147,11 +159,15 @@ expected_path="$working/.worktrees/codex-130-default-root"
 assert_path_exists "$expected_path" "default-root created target path"
 assert_path_under_tmp "$expected_path" "default-root stays inside temp root"
 assert_output_contains "$output" "cd $expected_path" "default-root prints cd hint"
+assert_output_contains "$output" "  Base: origin/main" "new branch reports default base"
+assert_equal "$(git -C "$working" rev-parse origin/main)" "$(git -C "$expected_path" rev-parse HEAD)" "new branch uses default base"
 rc=0
 output="$(run_new_worktree_default "$working" --agent codex --issue 130 --slug default-root 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "default-root rerun exits 0"
 assert_output_contains "$output" "Worktree already exists:" "default-root rerun reports existing path"
 assert_output_contains "$output" "$expected_path" "default-root rerun prints existing path"
+assert_output_contains "$output" "Reused branch at: $(git -C "$expected_path" rev-parse --short HEAD)" "live reuse reports tip"
+assert_output_excludes "$output" "  Base:" "live reuse does not claim a base"
 
 # --- Test 2: Environment root is honored and relative paths resolve from repo root ---
 working="$(setup_repo repo-env-root)"
@@ -281,12 +297,19 @@ output="$(run_new_worktree "$working" --agent codex --issue 126 --slug stale-rec
 assert_exit_code 0 "$rc" "stale-worktree initial create exits 0"
 expected_path="$tmp_root/wt/codex-126-stale-recreate"
 assert_path_exists "$expected_path" "stale-worktree initial path exists"
+git -C "$expected_path" -c user.name=Test -c user.email=test@example.com commit --allow-empty -m 'branch tip' >/dev/null
+stale_tip="$(git -C "$expected_path" rev-parse HEAD)"
+stale_short_tip="$(git -C "$expected_path" rev-parse --short HEAD)"
 rm -rf "$expected_path"
 rc=0
-output="$(run_new_worktree "$working" --agent codex --issue 126 --slug stale-recreate 2>&1)" || rc=$?
+output="$(run_new_worktree "$working" --agent codex --issue 126 --slug stale-recreate --base does-not-exist 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "stale-worktree recreate exits 0"
 assert_output_contains "$output" "Created worktree:" "stale-worktree rerun recreates path"
 assert_path_exists "$expected_path" "stale-worktree recreated target path"
+assert_equal "$stale_tip" "$(git -C "$expected_path" rev-parse HEAD)" "stale reuse preserves divergent tip"
+assert_output_contains "$output" "Reused branch at: $stale_short_tip" "stale reuse reports tip"
+assert_output_contains "$output" "--base is unused" "stale reuse explains unused invalid base"
+assert_output_excludes "$output" "  Base:" "stale reuse does not claim a base"
 
 # --- Test 12: Missing required args fail clearly ---
 working="$(setup_repo repo5)"
@@ -310,11 +333,75 @@ assert_output_contains "$output" "--agent must contain letters or numbers" "empt
 # --- Test 15: Bad base refs fail before creating the worktree root ---
 working="$(setup_repo repo6)"
 bad_base_root="$tmp_root/bad-base-root"
+snapshot_worktree_state "$working" "$tmp_root/bad-base-before"
 rc=0
 output="$("$helper_bash" "$working/scripts/new-worktree.sh" --root "$bad_base_root" --agent codex --issue 128 --slug bad-base --base does-not-exist 2>&1)" || rc=$?
 assert_exit_code 1 "$rc" "bad-base exits 1"
 assert_output_contains "$output" "Base ref not found: does-not-exist" "bad-base shows error"
 assert_path_missing "$bad_base_root" "bad-base does not create root"
+assert_worktree_state_unchanged "$working" "$tmp_root/bad-base-before" "bad creation base"
+
+# Explicit bases affect new branches, while branch reuse preserves its own tip.
+working="$(setup_repo reuse-base)"
+git -C "$working" checkout -b codex/143-reuse >/dev/null
+git -C "$working" -c user.name=Test -c user.email=test@example.com commit --allow-empty -m 'branch tip' >/dev/null
+reuse_tip="$(git -C "$working" rev-parse HEAD)"
+reuse_short_tip="$(git -C "$working" rev-parse --short HEAD)"
+git -C "$working" checkout main >/dev/null
+rc=0
+output="$(run_new_worktree_default "$working" --agent codex --issue 143 --slug explicit --base codex/143-reuse 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "explicit-base creates new branch"
+assert_output_contains "$output" "  Base: codex/143-reuse" "explicit-base reports actual base"
+assert_equal "$reuse_tip" "$(git -C "$working/.worktrees/codex-143-explicit" rev-parse HEAD)" "explicit-base sets new branch tip"
+for base in origin/main does-not-exist; do
+  rc=0
+  output="$(run_new_worktree_default "$working" --agent codex --issue 143 --slug reuse --base "$base" 2>&1)" || rc=$?
+  assert_exit_code 0 "$rc" "unattached branch reuse accepts unused $base"
+  assert_output_contains "$output" "Reused branch at: $reuse_short_tip" "branch reuse reports preserved tip ($base)"
+  assert_output_contains "$output" "--base is unused" "branch reuse explains unused base ($base)"
+  assert_output_excludes "$output" "  Base:" "branch reuse does not claim base ($base)"
+  assert_equal "$reuse_tip" "$(git -C "$working/.worktrees/codex-143-reuse" rev-parse HEAD)" "branch reuse preserves tip ($base)"
+  git -C "$working" worktree remove "$working/.worktrees/codex-143-reuse"
+done
+run_new_worktree_default "$working" --agent codex --issue 143 --slug reuse >/dev/null
+snapshot_worktree_state "$working" "$tmp_root/live-reuse-before"
+rc=0
+output="$(run_new_worktree_default "$working" --agent codex --issue 143 --slug reuse --base does-not-exist 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "live reuse accepts unused invalid base"
+assert_output_contains "$output" "Reused branch at: $reuse_short_tip" "live reuse reports divergent tip"
+assert_output_contains "$output" "--base is unused" "live reuse explains unused base"
+assert_output_excludes "$output" "  Base:" "live divergent reuse does not claim base"
+assert_worktree_state_unchanged "$working" "$tmp_root/live-reuse-before" "live reuse with unused base"
+for base_args in missing empty; do
+  rc=0
+  if [[ "$base_args" == missing ]]; then
+    output="$(run_new_worktree_default "$working" --agent codex --issue 143 --slug reuse --base 2>&1)" || rc=$?
+    assert_output_contains "$output" "Missing value for --base" "reuse still requires base argument"
+  else
+    output="$(run_new_worktree_default "$working" --agent codex --issue 143 --slug reuse --base '' 2>&1)" || rc=$?
+    assert_output_contains "$output" "--base must not be empty" "reuse rejects empty base argument"
+  fi
+  assert_exit_code 1 "$rc" "reuse validates $base_args base argument"
+done
+
+# Reuse needs no default base even when the primary checkout is detached.
+working="$(setup_repo detached-reuse)"
+git -C "$working" branch codex/143-detached
+git -C "$working" checkout --detach >/dev/null
+git -C "$working" branch -D main >/dev/null
+git -C "$working" remote remove origin
+rc=0
+output="$(run_new_worktree_default "$working" --agent codex --issue 143 --slug detached 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "detached primary reuses branch without default base"
+assert_output_contains "$output" "Reused branch at:" "detached reuse reports tip"
+assert_output_excludes "$output" "  Base:" "detached reuse does not claim base"
+snapshot_worktree_state "$working" "$tmp_root/no-default-before"
+rc=0
+output="$("$helper_bash" "$working/scripts/new-worktree.sh" --root "$tmp_root/no-default-root" --agent codex --issue 144 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "detached primary requires a base for a new branch"
+assert_output_contains "$output" "Could not determine a base ref" "missing default base is actionable"
+assert_path_missing "$tmp_root/no-default-root" "missing default base creates no root"
+assert_worktree_state_unchanged "$working" "$tmp_root/no-default-before" "missing default base"
 
 # --- Linked helper copies must create siblings, not children ---
 working="$(setup_repo linked-copy)"
@@ -518,6 +605,14 @@ assert_exit_code 1 "$rc" "registry failure rejects creation"
 assert_output_contains "$output" "Could not read Git worktree registry" "registry failure is observable"
 assert_path_missing "$tmp_root/failure-root" "registry failure creates no directory"
 assert_worktree_state_unchanged "$working" "$tmp_root/registry-failure" "registry failure"
+
+snapshot_worktree_state "$working" "$tmp_root/branch-probe-failure"
+rc=0
+output="$(PATH="$probe:$PATH" WORKTREE_TEST_FAIL_BRANCH_PROBE=1 run_new_worktree "$working" --root "$tmp_root/probe-failure-root" --agent codex --issue 151 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "branch probe failure rejects creation"
+assert_output_contains "$output" "Could not inspect branch codex/151 (Git exit 128)" "branch probe error is not treated as an absent branch"
+assert_path_missing "$tmp_root/probe-failure-root" "branch probe failure creates no directory"
+assert_worktree_state_unchanged "$working" "$tmp_root/branch-probe-failure" "branch probe failure"
 
 echo ""
 echo "Results: $passed passed, $failed failed"

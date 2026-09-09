@@ -90,6 +90,17 @@ The helper creates:
 Then it prints the `cd` command and a best-effort launch hint such as `codex`,
 `claude`, `gemini`, or `grok`.
 
+`--base REF` applies only when creating a branch. Without it, the helper uses
+`origin/main`, then `main`, then the current branch, in that order, and prints
+the chosen `Base:`. An invalid creation base fails before creating directories
+or pruning stale worktree records.
+
+If the branch already exists, the helper preserves its tip and prints its
+short commit ID as `Reused branch at:`. This also applies when reusing a live
+worktree or recreating a missing worktree. An explicit `--base` is reported as
+unused and need not resolve; reuse works even without an available default
+base. The helper does not reset or rebase existing branches.
+
 ## Custom Worktree Root
 Use `--root` to place worktrees somewhere else:
 

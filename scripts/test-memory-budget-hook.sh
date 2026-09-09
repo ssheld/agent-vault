@@ -98,6 +98,38 @@ stage_dup_snapshot() {
   git -C "$1" add agent-vault/context-log.md
 }
 
+# Both warning channels remain advisory and independently suppressible. Use a
+# general-budget file so context-log-specific limits cannot mask the overage.
+for suppression in neither memory rollover both; do
+  p="$(fresh_project "combined-$suppression")"
+  oversize >>"$p/agent-vault/project-context.md"
+  git -C "$p" add agent-vault/project-context.md
+  stage_dup_snapshot "$p"
+  skip_memory=0
+  skip_rollover=0
+  [[ "$suppression" != memory && "$suppression" != both ]] || skip_memory=1
+  [[ "$suppression" != rollover && "$suppression" != both ]] || skip_rollover=1
+  AGENT_VAULT_SKIP_METADATA_GATE=1 AGENT_VAULT_SKIP_MEMORY_BUDGET="$skip_memory" AGENT_VAULT_SKIP_ROLLOVER_CHECK="$skip_rollover" commit_capture "$p" git commit -qm combined
+  [[ "$HOOK_RC" -eq 0 ]] || fail "combined warnings blocked commit ($suppression)" "$HOOK_STDERR"
+  if [[ "$skip_memory" == 0 ]]; then
+    [[ "$HOOK_STDERR" == *"memory-budget warning"* ]] || fail "combined budget warning missing ($suppression)" "$HOOK_STDERR"
+  else
+    [[ "$HOOK_STDERR" != *"memory-budget warning"* ]] || fail "combined budget suppression failed ($suppression)" "$HOOK_STDERR"
+  fi
+  if [[ "$skip_rollover" == 0 ]]; then
+    [[ "$HOOK_STDERR" == *"context-log rollover warning"* ]] || fail "combined rollover warning missing ($suppression)" "$HOOK_STDERR"
+  else
+    [[ "$HOOK_STDERR" != *"context-log rollover warning"* ]] || fail "combined rollover suppression failed ($suppression)" "$HOOK_STDERR"
+  fi
+done
+
+p="$(fresh_project warning-suppression-keeps-gate)"
+oversize >>"$p/agent-vault/project-context.md"
+git -C "$p" add agent-vault/project-context.md
+stage_dup_snapshot "$p"
+AGENT_VAULT_SKIP_MEMORY_BUDGET=1 AGENT_VAULT_SKIP_ROLLOVER_CHECK=1 commit_capture "$p" git commit -qm gate-required
+[[ "$HOOK_RC" -ne 0 && "$HOOK_STDERR" == *"metadata gate failed"* ]] || fail "warning suppression bypassed metadata enforcement" "$HOOK_STDERR"
+
 # Case 5: a staged context-log with a duplicate snapshot prints a non-blocking
 # rollover warning naming the finding; the commit still succeeds.
 p="$(fresh_project case5)"

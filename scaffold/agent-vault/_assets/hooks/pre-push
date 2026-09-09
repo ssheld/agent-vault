@@ -34,6 +34,34 @@ reject_main_push() {
   exit 1
 }
 
+push_remote="${1:-}"
+
+reject_unverifiable_push() {
+  local reason="$1" status="$2" missing_remote_commit="${3:-}" remotes remote
+
+  echo "agent-vault main push gate failed." >&2
+  echo "$reason (Git exit $status)." >&2
+  if [[ -z "$missing_remote_commit" ]]; then
+    echo "Inspect local Git errors and repository objects before retrying." >&2
+    exit 1
+  fi
+  echo "Advertised remote main commit is unavailable locally: $missing_remote_commit." >&2
+  # Without a named remote, Git passes the destination location in both hook
+  # arguments. Never echo those arguments: URLs can contain credentials.
+  if [[ -n "$push_remote" ]] && remotes="$(git remote 2>/dev/null)"; then
+    while IFS= read -r remote; do
+      if [[ "$remote" == "$push_remote" ]]; then
+        printf 'Fetch main from the configured remote, then retry: git fetch -- %q main\n' "$remote" >&2
+        echo "If fetching does not resolve this, inspect local Git errors and repository objects." >&2
+        exit 1
+      fi
+    done <<<"$remotes"
+  fi
+  echo "Fetch main from the push destination, then retry." >&2
+  echo "If fetching does not resolve this, inspect local Git errors and repository objects." >&2
+  exit 1
+}
+
 runtime_note_classifier_loaded="false"
 
 ensure_runtime_note_classifier() {
@@ -54,18 +82,6 @@ ensure_runtime_note_classifier() {
   runtime_note_classifier_loaded="true"
 }
 
-collect_commit_changed_files() {
-  local commit_sha="$1"
-  local first_parent=""
-
-  first_parent="$(git rev-parse "$commit_sha^1" 2>/dev/null || true)"
-  if [[ -n "$first_parent" ]]; then
-    git diff --no-renames --name-only "$first_parent" "$commit_sha"
-  else
-    git diff-tree --no-commit-id --name-only -r --no-renames --root "$commit_sha"
-  fi
-}
-
 while read -r _local_ref local_sha remote_ref remote_sha; do
   [[ "$remote_ref" == "refs/heads/main" ]] || continue
 
@@ -77,26 +93,58 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
     reject_main_push "Direct creation of main is not allowed."
   fi
 
-  if ! git merge-base --is-ancestor "$remote_sha" "$local_sha"; then
-    reject_main_push "Direct non-fast-forward push to main is not allowed."
-  fi
+  ancestry_status=0
+  git merge-base --is-ancestor "$remote_sha" "$local_sha" || ancestry_status=$?
+  case "$ancestry_status" in
+    0) ;;
+    1) reject_main_push "Direct non-fast-forward push to main is not allowed." ;;
+    *)
+      missing_remote_commit=""
+      if ! git cat-file -e "${remote_sha}^{commit}" 2>/dev/null; then
+        missing_remote_commit="$remote_sha"
+      fi
+      reject_unverifiable_push "Could not verify main push ancestry" "$ancestry_status" "$missing_remote_commit"
+      ;;
+  esac
 
   ensure_runtime_note_classifier
 
   # Check each commit, not just endpoint trees, so blocked files cannot be
   # changed and reverted inside the pushed range.
+  # Capture results only after checking exit status: process substitutions
+  # would silently accept empty or partial output from a failed Git command.
+  inspection_status=0
+  commits="$(git rev-list --reverse "$remote_sha..$local_sha")" || inspection_status=$?
+  if [[ "$inspection_status" -ne 0 ]]; then
+    reject_unverifiable_push "Could not enumerate commits for main push" "$inspection_status"
+  fi
   blocked_files=()
   while IFS= read -r commit_sha; do
     [[ -n "$commit_sha" ]] || continue
 
+    inspection_status=0
+    parents="$(git rev-list --parents -n 1 "$commit_sha")" || inspection_status=$?
+    if [[ "$inspection_status" -ne 0 ]]; then
+      reject_unverifiable_push "Could not inspect parents of commit $commit_sha" "$inspection_status"
+    fi
+    read -r _commit first_parent _other_parents <<<"$parents"
+    inspection_status=0
+    if [[ -n "$first_parent" ]]; then
+      changed_files="$(git diff --no-renames --name-only "$first_parent" "$commit_sha")" || inspection_status=$?
+    else
+      changed_files="$(git diff-tree --no-commit-id --name-only -r --no-renames --root "$commit_sha")" || inspection_status=$?
+    fi
+    if [[ "$inspection_status" -ne 0 ]]; then
+      reject_unverifiable_push "Could not inspect files in commit $commit_sha" "$inspection_status"
+    fi
     while IFS= read -r file_path; do
       [[ -n "$file_path" ]] || continue
 
       if ! is_runtime_note_file "$file_path"; then
         blocked_files+=("$file_path")
       fi
-    done < <(collect_commit_changed_files "$commit_sha")
-  done < <(git rev-list --reverse "$remote_sha..$local_sha")
+    done <<<"$changed_files"
+  done <<<"$commits"
 
   if [[ "${#blocked_files[@]}" -gt 0 ]]; then
     echo "agent-vault main push gate failed." >&2

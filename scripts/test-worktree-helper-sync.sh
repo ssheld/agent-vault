@@ -202,6 +202,13 @@ assert_generated_safety() {
   assert_exit_code 0 "$rc" "$label linked-copy creation"
   assert_path_exists "$target/.worktrees/codex-137/.git" "$label creates primary sibling"
   assert_output_contains "$output" "Primary: $target" "$label identifies primary"
+  git -C "$target" branch codex/143 main
+  rc=0
+  output="$("$helper_bash" "$target/scripts/new-worktree.sh" --agent codex --issue 143 --base unavailable-base 2>&1)" || rc=$?
+  assert_exit_code 0 "$rc" "$label installed helper reuses branch with invalid unused base"
+  assert_output_contains "$output" "Reused branch at: $(git -C "$target" rev-parse --short main)" "$label installed helper reports reused tip"
+  assert_output_contains "$output" "--base is unused" "$label installed helper explains unused base"
+  git -C "$target" worktree remove "$target/.worktrees/codex-143"
   inner="$outer/.worktrees/inner"
   git -C "$target" worktree add -b codex/inner "$inner" main >/dev/null
   printf 'fixture data\n' >"$inner/sentinel"

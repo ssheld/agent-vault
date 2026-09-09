@@ -128,8 +128,18 @@ and verifies both downloads with pinned SHA-256 digests.
 
 CI runs the same command via `.github/workflows/style-check.yml`.
 
+Tracked Markdown (`.md`) and Cursor rules (`.mdc`) under `scaffold/` must have no
+trailing spaces or tabs. Use a backslash at the end of a line for an intentional
+Markdown hard break. Check
+the source templates with `bash scripts/check-scaffold-markdown-whitespace.sh`.
+The scaffold regression workflow enforces this for all scaffold changes,
+including files under hidden directories such as `scaffold/root/.github/` and
+`scaffold/root/.cursor/rules/`.
+This source convention does not rewrite project-owned notes or update backups.
+
 ## Scaffold Regression Checks
 Run the scaffold regression scripts locally when changing bootstrap, sync, or tracked hook behavior:
+- `bash scripts/test-scaffold-markdown-whitespace.sh`
 - `bash scripts/test-gitignore-management.sh`
 - `bash scripts/test-coding-standards-sync.sh`
 - `bash scripts/test-decision-template-sync.sh`
@@ -310,6 +320,12 @@ The tracked `pre-commit` hook enforces the baseline session artifacts and valida
 - `git -C <repo-path> config --local agent-vault.allowMetadataOnlyMainPush true`
 
 That shortcut allows recording history after PR merges while keeping source code, config, scripts, root docs, policy files, templates, hook assets, and durable project docs such as `agent-vault/README.md`, `plan.md`, `coding-standards.md`, `project-context.md`, `project-commands.md`, and `handoff.md` on the PR path.
+The pre-commit hook also reports advisory memory-budget and structural
+context-log rollover warnings against staged content. They remain active when
+the metadata gate is bypassed and have separate suppression variables; see the
+[hook documentation](scaffold/agent-vault/_assets/hooks/README.md#intentional-bypass)
+for triggers, partial-staging guidance, and suppression commands.
+
 When syncing older generated repos, `update-project.sh` now auto-migrates recognized legacy `agent-vault/context-log.md` layouts into the validator-compatible top-level `## Current Snapshot` / `## Entries` shape before syncing the stricter hook. If the layout is not recognized, the script leaves the file unchanged and prints a manual-remediation warning instead of guessing.
 It also inserts the review-only / external-feedback usage rule (issue #129) into an existing runtime `agent-vault/context-log.md` when its active `## Usage Rules` section predates the rule: the rule line is copied verbatim from the scaffold context log, the previous file is backed up under `agent-vault/context/updates/<timestamp>/`, and the insert is idempotent. When no active `## Usage Rules` section sits above `## Current Snapshot`, the script prints a skip notice instead of editing archived or unrecognized content.
 

@@ -57,6 +57,10 @@ if [ "${3-}" = symbolic-ref ] && [ "${WORKTREE_TEST_FAIL_SYMBOLIC-}" = 1 ]; then
   echo 'injected symbolic-ref failure' >&2
   exit 128
 fi
+if [ "${3-}" = show-ref ] && [ "${WORKTREE_TEST_FAIL_BRANCH_PROBE-}" = 1 ]; then
+  echo 'injected branch probe failure' >&2
+  exit 128
+fi
 exec "$WORKTREE_TEST_REAL_GIT" "$@"
 EOF
   chmod +x "$destination/git"

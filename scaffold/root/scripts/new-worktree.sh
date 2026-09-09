@@ -23,8 +23,9 @@ Options:
   --agent NAME   Agent label, for example: codex, claude, gemini, grok
   --issue N      Issue number
   --slug TEXT    Optional short slug, for example: feature-slice
-  --base REF     Optional base ref. Defaults to origin/main when available,
-                 otherwise main, otherwise the current branch.
+  --base REF     Base for a new branch only; unused when reusing a branch.
+                 Defaults to origin/main when available, otherwise main,
+                 otherwise the current branch.
   --root DIR     Optional worktree root. Relative paths are resolved from the
                  primary checkout. Overrides AGENT_VAULT_WORKTREE_ROOT.
                  Default: <primary checkout>/.worktrees
@@ -228,6 +229,35 @@ default_base_ref() {
   git -C "$PROJECT_DIR" branch --show-current
 }
 
+branch_exists() {
+  local status=0
+  git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$BRANCH_NAME" || status=$?
+  case "$status" in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) die "Could not inspect branch $BRANCH_NAME (Git exit $status)." ;;
+  esac
+}
+
+validate_base_ref() {
+  if [[ -z "$BASE_REF" ]]; then
+    BASE_REF="$(default_base_ref)"
+  fi
+  [[ -n "$BASE_REF" ]] || die "Could not determine a base ref"
+  git -C "$PROJECT_DIR" rev-parse --verify --quiet "${BASE_REF}^{commit}" >/dev/null ||
+    die "Base ref not found: $BASE_REF"
+}
+
+print_reused_branch() {
+  local tip
+  tip="$(git -C "$PROJECT_DIR" rev-parse --verify --short "refs/heads/$BRANCH_NAME^{commit}")" ||
+    die "Could not read reused branch tip: $BRANCH_NAME"
+  echo "  Reused branch at: $tip"
+  if [[ "$BASE_SUPPLIED" == true ]]; then
+    echo "  --base is unused: it applies only when creating a branch."
+  fi
+}
+
 ensure_safe_layout() {
   local target="$1" reuse_index="$2" i registered
   path_contains "$COMMON_DIR" "$target" &&
@@ -288,6 +318,7 @@ AGENT=""
 ISSUE=""
 SLUG=""
 BASE_REF=""
+BASE_SUPPLIED=false
 ROOT_DIR="${AGENT_VAULT_WORKTREE_ROOT:-}"
 
 while [[ $# -gt 0 ]]; do
@@ -310,6 +341,8 @@ while [[ $# -gt 0 ]]; do
     --base)
       [[ $# -ge 2 ]] || die "Missing value for --base"
       BASE_REF="$2"
+      [[ -n "$BASE_REF" ]] || die "--base must not be empty"
+      BASE_SUPPLIED=true
       shift 2
       ;;
     --root)
@@ -371,6 +404,7 @@ if [[ "$existing_index" -ge 0 && -d "$EXISTING_WORKTREE" ]]; then
   [[ "$SOURCE_CHECKOUT" == "$PROJECT_DIR" ]] || echo "  Primary: $PROJECT_DIR"
   echo "  Path: $EXISTING_WORKTREE"
   echo "  Branch: $BRANCH_NAME"
+  print_reused_branch
   print_next_steps "$EXISTING_WORKTREE" "$NORMALIZED_AGENT"
   exit 0
 fi
@@ -379,12 +413,11 @@ ensure_safe_layout "$WORKTREE_PATH" "$existing_index"
 [[ ! -e "$WORKTREE_PATH" && ! -L "$WORKTREE_PATH" ]] ||
   die "Target path already exists: $WORKTREE_PATH"
 
-if [[ -z "$BASE_REF" ]]; then
-  BASE_REF="$(default_base_ref)"
+# Probe before pruning or creating directories so a bad creation base leaves
+# the repository untouched. Reuse needs no resolvable (or default) base.
+if ! branch_exists; then
+  validate_base_ref
 fi
-[[ -n "$BASE_REF" ]] || die "Could not determine a base ref"
-git -C "$PROJECT_DIR" rev-parse --verify --quiet "${BASE_REF}^{commit}" >/dev/null ||
-  die "Base ref not found: $BASE_REF"
 
 if [[ "$existing_index" -ge 0 ]]; then
   [[ "${WORKTREE_LOCKED[$existing_index]}" == false ]] ||
@@ -397,17 +430,26 @@ load_worktrees
 find_branch_index "$BRANCH_NAME"
 [[ "$WORKTREE_INDEX" -lt 0 ]] || die "Branch still has a registered worktree: $BRANCH_NAME"
 ensure_safe_layout "$WORKTREE_PATH" -1
-mkdir -p "$ROOT_DIR"
 
-if git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
+if branch_exists; then
+  mkdir -p "$ROOT_DIR"
   git -C "$PROJECT_DIR" worktree add "$WORKTREE_PATH" "$BRANCH_NAME"
+  branch_created=false
 else
+  # Recheck if the branch disappeared after the first probe.
+  validate_base_ref
+  mkdir -p "$ROOT_DIR"
   git -C "$PROJECT_DIR" worktree add "$WORKTREE_PATH" -b "$BRANCH_NAME" "$BASE_REF"
+  branch_created=true
 fi
 
 echo "Created worktree:"
 [[ "$SOURCE_CHECKOUT" == "$PROJECT_DIR" ]] || echo "  Primary: $PROJECT_DIR"
 echo "  Path: $WORKTREE_PATH"
 echo "  Branch: $BRANCH_NAME"
-echo "  Base: $BASE_REF"
+if [[ "$branch_created" == true ]]; then
+  echo "  Base: $BASE_REF"
+else
+  print_reused_branch
+fi
 print_next_steps "$WORKTREE_PATH" "$NORMALIZED_AGENT"

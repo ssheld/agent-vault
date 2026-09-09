@@ -13,9 +13,9 @@ topic:
 ## Current State
 
 ## What Needs to Happen Next
-1. 
-2. 
-3. 
+1.
+2.
+3.
 
 ## Validation Remaining
 -
@@ -25,13 +25,13 @@ topic:
 
 ## Relevant Files
 <!-- Prefer repo-relative paths where possible. -->
-- 
+-
 
 ## Decisions Made This Session
-- 
+-
 
 ## Open Questions for Human
-- 
+-
 
 ## Suggested Next Prompt
 - Start from the canonical prompt in `agent-vault/handoff.md`.
