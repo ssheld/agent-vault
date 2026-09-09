@@ -179,6 +179,7 @@ This source convention does not rewrite project-owned notes or update backups.
 ## Scaffold Regression Checks
 Run the scaffold regression scripts locally when changing bootstrap, sync, or tracked hook behavior:
 - `bash scripts/test-scaffold-markdown-whitespace.sh`
+- `bash scripts/test-root-readme-seeding.sh`
 - `bash scripts/test-gitignore-management.sh`
 - `bash scripts/test-coding-standards-sync.sh`
 - `bash scripts/test-decision-template-sync.sh`
@@ -275,13 +276,35 @@ HOOK_TEST_BASH=/bin/bash bash scripts/test-main-push-gate.sh
   marker, or when created by `update-project.sh` because it was missing):
   - `<repo>/scripts/new-worktree.sh`
   - `<repo>/scripts/remove-worktree.sh`
+  - `<repo>/scripts/check-memory-budget.sh`
+  - `<repo>/scripts/check-context-log-rollover.sh`
+  - `<repo>/scripts/compact-context-log.sh`
+  - `<repo>/scripts/check-lessons-archive.sh`
 - Seeded if missing:
+  - `<repo>/README.md` (when no root README entry exists)
   - `<repo>/.github/pull_request_template.md`
   - `<repo>/docs/design.md`
   - `<repo>/docs/runbooks/parallel-agent-worktrees.md`
   - `<repo>/agent-vault/project-context.md`
   - `<repo>/agent-vault/project-commands.md`
   - `<repo>/agent-vault/lessons.md`
+
+The root README is project-owned after seeding. Both scripts preserve any root
+entry named `README` or `README.*`, ignoring case, including alternative formats
+and backups such as `readme.rst` or `README.old`. Files (including empty files),
+directories, symlinks (including dangling ones), and multiple matches all suppress
+creation. Migration and sync flags never replace a README. Normal updates are
+silent for a single regular file named exactly `README.md`; other matches receive
+an explanatory skip notice.
+
+When seeding a missing root README, `update-project.sh` uses the canonical
+repository directory name as the heading and reports that choice. It does not
+infer a display name from project notes. An unusable heading (empty, `/`, or
+containing an ASCII control character) skips just the README seed and reports a
+notice; the rest of the update continues. `--dry-run` reports the planned seed and
+created count without writing the README or temporary files. Discovery, rendering,
+and publication errors fail the script. README publication refuses an occupied
+final path, including a directory or symlink that appears after discovery.
 
 `<repo>/agent-vault/coding-standards.md` remains project-owned by default. `update-project.sh` does not replace it unless you explicitly pass `--sync-coding-standards`.
 
@@ -403,7 +426,7 @@ When running `new-project.sh` with `--migrate-existing-root-md`:
   at `<repo>/.cursor/rules/agent-vault.mdc` when that path is missing.
 - The `CLAUDE.md` and `GEMINI.md` root wrappers include `agent-vault/CLAUDE.md` and `agent-vault/GEMINI.md` so migrated legacy guidance remains part of root entrypoint context.
 
-Without this flag, `new-project.sh` leaves pre-existing root files unchanged and prints a notice.
+Without this flag, `new-project.sh` leaves pre-existing root policy files unchanged and prints a notice. The flag only migrates policy wrappers; existing READMEs remain project-owned.
 
 ## Design Docs and Diagrams
 Generated projects get a starter `docs/design.md` that uses Mermaid fenced code blocks as the default diagram format.
@@ -432,6 +455,7 @@ Generated projects get a starter `docs/design.md` that uses Mermaid fenced code 
 - `Templates/` (copied from template source; instantiated notes belong outside this folder)
 
 It also creates project-root files when missing:
+- `<repo-path>/README.md` -> project-name heading and relative links to `agent-vault/README.md` and `docs/design.md`; canonical project memory remains under `agent-vault/`
 - `<repo-path>/AGENTS.md` -> contains PR review guidance (inline) for Codex GitHub reviews, points workflow execution to `agent-vault/AGENTS.md`, and directly tells Codex to read `agent-vault/lessons.md` at session start
 - `<repo-path>/.cursor/rules/agent-vault.mdc` -> small always-applied Cursor project rule that points Cursor IDE and Cursor CLI back to root `AGENTS.md` and the Agent Vault startup files
 - `<repo-path>/CLAUDE.md` -> imports `agent-vault/CLAUDE.md` and `agent-vault/review-policy.md`
@@ -442,4 +466,13 @@ It also creates project-root files when missing:
 - `<repo-path>/scripts/new-worktree.sh` and `<repo-path>/scripts/remove-worktree.sh` -> managed helpers for parallel-agent Git worktree setup and cleanup
 - Bootstrap behavior: `new-project.sh` hydrates project metadata placeholders (`repo_reference`, active branch, dates) in the baseline `agent-vault/` docs, seeds non-empty baseline content in `agent-vault/README.md`, `plan.md`, `coding-standards.md`, and `context-log.md`, copies structured starter templates for `project-context.md` and `project-commands.md`, and copies scaffold helper docs such as `agent-vault/design-log/README.md` plus `docs/design.md`.
 
-If root files already exist, the script leaves them unchanged unless `--migrate-existing-root-md` is provided.
+`new-project.sh` uses the supplied project name for the root README heading,
+with the same literal Markdown substitution as the vault README. Markdown
+punctuation remains supported. Project names containing ASCII control characters
+(including newlines, tabs, and DEL) are rejected before any project files are
+written. The root README is seeded after `docs/design.md`. Its links remain
+static: if an existing symlink prevents seeding the design document, the owner
+may need to supply that document or adjust the link for the custom layout.
+
+Existing root files are preserved. `--migrate-existing-root-md` only permits
+migration of the policy wrappers (`AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`).

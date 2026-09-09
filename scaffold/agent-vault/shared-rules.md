@@ -181,7 +181,7 @@ Use the canonical ordering for each artifact type below instead of guessing base
 | `agent-vault/context/handoffs/` notes | Read the note referenced by the latest `context-log.md` entry first; otherwise read the most recent handoff note. |
 
 ## Template Usage Rules
-- Use the bootstrap files in place. Do not create duplicate `README.md`, `plan.md`, `coding-standards.md`, `context-log.md`, `open-questions.md`, or `decision-log.md` notes elsewhere.
+- Use the bootstrap files in place. Do not create duplicate `README.md`, `plan.md`, `coding-standards.md`, `context-log.md`, `open-questions.md`, or `decision-log.md` notes elsewhere. A project-root `README.md` may introduce the project and link to canonical documentation; keep project notes and session state under `agent-vault/`.
 - In committed memory artifacts, prefer repo-relative paths and portable command examples such as `agent-vault/...`, `docs/...`, `./scripts/...`, or `<repo-root>/...`. Machine-specific absolute paths such as `/Users/...`, `/home/...`, or `C:\...` are acceptable only when the local path itself is relevant debugging or environment context.
 - Create or update `agent-vault/daily/YYYY-MM-DD.md` on the first substantive work session of each local day. Reuse the same file for later sessions that day. Skip daily notes for trivial one-off requests.
 - Add a design-log note for every substantive work session.

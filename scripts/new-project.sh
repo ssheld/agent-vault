@@ -5,6 +5,8 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=./lib/tracked-hooks.sh
 source "$script_dir/lib/tracked-hooks.sh"
+# shellcheck source=./lib/root-readme.sh
+source "$script_dir/lib/root-readme.sh"
 
 usage() {
   echo "Usage: $0 <project-name> <repo-path> [--migrate-existing-root-md]"
@@ -84,6 +86,7 @@ infer_active_branch() {
 }
 
 find_existing_root_file() {
+  # Policy-wrapper ambiguity errors; root-readme.sh instead preserves all READMEs.
   local repo_root="$1"
   local canonical_name="$2"
   local count=0
@@ -270,6 +273,11 @@ if [[ -z "$project_name" || -z "$repo_path_input" ]]; then
   exit 1
 fi
 
+if ! root_readme_valid_heading "$project_name"; then
+  echo "Error: invalid project name; use a nonempty, single-line name without ASCII control characters." >&2
+  exit 1
+fi
+
 repo_path="$(expand_path "$repo_path_input")"
 if [[ "$repo_path_input" == /~/* ]]; then
   echo "Warning: interpreted '$repo_path_input' as '$repo_path'." >&2
@@ -317,6 +325,7 @@ if [[ ! -d "$root_scaffold_dir" ]]; then
 fi
 
 for required in \
+  "$root_scaffold_dir/README.md" \
   "$root_scaffold_dir/AGENTS.md" \
   "$root_scaffold_dir/CLAUDE.md" \
   "$root_scaffold_dir/GEMINI.md" \
@@ -476,6 +485,20 @@ process_root_policy_file "GEMINI.md" "$project_dir/GEMINI.md" "$ROOT_GEMINI_MARK
 seed_root_file_if_missing "$root_scaffold_dir/.cursor/rules/agent-vault.mdc" "$canonical_repo_path/.cursor/rules/agent-vault.mdc"
 seed_root_file_if_missing "$root_scaffold_dir/.github/pull_request_template.md" "$canonical_repo_path/.github/pull_request_template.md"
 seed_root_file_if_missing "$root_scaffold_dir/docs/design.md" "$canonical_repo_path/docs/design.md"
+readme_result="$(seed_root_readme "$root_scaffold_dir/README.md" "$canonical_repo_path" "$project_name")"
+case "$readme_result" in
+  seeded) echo "Created: README.md" ;;
+  canonical | preserve) echo "Notice: README entry already exists; left unchanged." >&2 ;;
+  symlink-path) echo "Notice: README.md has a symlinked path component; template seed skipped." >&2 ;;
+  invalid-heading)
+    echo "Error: cannot seed README.md: project name is not a usable heading." >&2
+    exit 1
+    ;;
+  *)
+    echo "Error: unexpected root README seeding result." >&2
+    exit 1
+    ;;
+esac
 seed_root_file_if_missing "$root_scaffold_dir/docs/runbooks/parallel-agent-worktrees.md" "$canonical_repo_path/docs/runbooks/parallel-agent-worktrees.md"
 seed_root_executable_file_if_missing "$root_scaffold_dir/scripts/new-worktree.sh" "$canonical_repo_path/scripts/new-worktree.sh"
 seed_root_executable_file_if_missing "$root_scaffold_dir/scripts/remove-worktree.sh" "$canonical_repo_path/scripts/remove-worktree.sh"

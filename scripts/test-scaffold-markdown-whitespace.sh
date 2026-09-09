@@ -20,6 +20,7 @@ git -C "$fixture" init -q
 paths=(
   'scaffold/agent-vault/Templates/Daily Note.md'
   'scaffold/agent-vault/README.md'
+  'scaffold/root/README.md'
   'scaffold/root/docs/design.md'
   'scaffold/root/.github/pull_request_template.md'
   'scaffold/root/.cursor/rules/agent-vault.mdc'

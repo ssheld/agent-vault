@@ -5,6 +5,8 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=./lib/tracked-hooks.sh
 source "$script_dir/lib/tracked-hooks.sh"
+# shellcheck source=./lib/root-readme.sh
+source "$script_dir/lib/root-readme.sh"
 
 usage() {
   echo "Usage: $0 <repo-path> [--dry-run] [--migrate-root] [--migrate-root-scripts] [--sync-templates] [--sync-coding-standards]"
@@ -131,6 +133,7 @@ vault_scaffold_dir="$template_root/scaffold/agent-vault"
 root_scaffold_dir="$template_root/scaffold/root"
 
 for required in \
+  "$root_scaffold_dir/README.md" \
   "$root_scaffold_dir/AGENTS.md" \
   "$root_scaffold_dir/CLAUDE.md" \
   "$root_scaffold_dir/GEMINI.md" \
@@ -1028,6 +1031,34 @@ sync_root_wrapper_if_managed "$root_scaffold_dir/GEMINI.md" "$canonical_repo_pat
 sync_cursor_rule_if_managed "$root_scaffold_dir/.cursor/rules/agent-vault.mdc" "$canonical_repo_path/.cursor/rules/agent-vault.mdc" "$CURSOR_AGENT_VAULT_RULE_MARKER"
 seed_if_missing "$root_scaffold_dir/.github/pull_request_template.md" "$canonical_repo_path/.github/pull_request_template.md"
 seed_if_missing "$root_scaffold_dir/docs/design.md" "$canonical_repo_path/docs/design.md"
+readme_result="$(seed_root_readme "$root_scaffold_dir/README.md" "$canonical_repo_path" "${canonical_repo_path##*/}" "$dry_run")"
+case "$readme_result" in
+  seeded)
+    if [[ "$dry_run" == true ]]; then
+      echo "Seed: README.md (new template; heading from directory name)"
+    else
+      echo "Seeded: README.md (new template; heading from directory name)"
+    fi
+    created=$((created + 1))
+    ;;
+  preserve)
+    echo "Skip: README.md (another README name/type or multiple entries match; preserved)"
+    skipped=$((skipped + 1))
+    ;;
+  symlink-path)
+    echo "Skip: README.md (symlinked path component; preserved)"
+    skipped=$((skipped + 1))
+    ;;
+  invalid-heading)
+    echo "Skip: README.md (directory name is not a usable heading)"
+    skipped=$((skipped + 1))
+    ;;
+  canonical) ;;
+  *)
+    echo "Error: unexpected root README seeding result." >&2
+    exit 1
+    ;;
+esac
 seed_if_missing "$root_scaffold_dir/docs/runbooks/parallel-agent-worktrees.md" "$canonical_repo_path/docs/runbooks/parallel-agent-worktrees.md"
 sync_root_helper_script_if_managed "$root_scaffold_dir/scripts/new-worktree.sh" "$canonical_repo_path/scripts/new-worktree.sh" "$NEW_WORKTREE_HELPER_MARKER"
 sync_root_helper_script_if_managed "$root_scaffold_dir/scripts/remove-worktree.sh" "$canonical_repo_path/scripts/remove-worktree.sh" "$REMOVE_WORKTREE_HELPER_MARKER"
