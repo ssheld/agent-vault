@@ -1045,11 +1045,19 @@ case "$readme_result" in
     echo "Skip: README.md (another README name/type or multiple entries match; preserved)"
     skipped=$((skipped + 1))
     ;;
+  symlink-path)
+    echo "Skip: README.md (symlinked path component; preserved)"
+    skipped=$((skipped + 1))
+    ;;
   invalid-heading)
     echo "Skip: README.md (directory name is not a usable heading)"
     skipped=$((skipped + 1))
     ;;
   canonical) ;;
+  *)
+    echo "Error: unexpected root README seeding result." >&2
+    exit 1
+    ;;
 esac
 seed_if_missing "$root_scaffold_dir/docs/runbooks/parallel-agent-worktrees.md" "$canonical_repo_path/docs/runbooks/parallel-agent-worktrees.md"
 sync_root_helper_script_if_managed "$root_scaffold_dir/scripts/new-worktree.sh" "$canonical_repo_path/scripts/new-worktree.sh" "$NEW_WORKTREE_HELPER_MARKER"

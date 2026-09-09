@@ -5,7 +5,14 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/agent-vault-readme-test.XXXXXX")"
 tmp_root="$(cd "$tmp_root" && pwd -P)"
-trap 'rm -rf "$tmp_root"' EXIT
+read_only_root=""
+cleanup() {
+  if [[ -n "$read_only_root" ]]; then
+    chmod u+w "$read_only_root"
+  fi
+  rm -rf "$tmp_root"
+}
+trap cleanup EXIT
 assertions=0
 output=""
 
@@ -84,6 +91,17 @@ assert_no_temps() {
   [[ -z "$found" ]] || fail "README temporary file leaked: $found"
   assertions=$((assertions + 1))
 }
+
+# A caller must define the write-path validator, even when sourcing the library
+# directly. Diagnose that contract error before attempting discovery or writes.
+missing_validator="$tmp_root/missing-validator"
+init_repo "$missing_validator"
+snapshot "$missing_validator" >"$tmp_root/missing-validator.snapshot"
+run 1 bash -c 'source "$1"; seed_root_readme "$2" "$3" Heading' _ "$repo_root/scripts/lib/root-readme.sh" "$repo_root/scaffold/root/README.md" "$missing_validator"
+assert_contains 'root-readme.sh requires the caller to define validate_write_path'
+assert_not_contains 'outside the repository root'
+assert_not_contains 'command not found'
+assert_snapshot "$missing_validator" "$tmp_root/missing-validator.snapshot"
 
 # Fresh generation: exactly the project heading and two navigation links.
 fresh="$tmp_root/fresh project"
@@ -280,7 +298,7 @@ done
 empty_title="$tmp_root/empty-title"
 init_repo "$empty_title"
 for name in '' /; do
-  run 0 bash -c 'source "$1"; seed_root_readme "$2" "$3" "$4" true' _ "$repo_root/scripts/lib/root-readme.sh" "$repo_root/scaffold/root/README.md" "$empty_title" "$name"
+  run 0 bash -c 'source "$1"; validate_write_path() { return 0; }; seed_root_readme "$2" "$3" "$4" true' _ "$repo_root/scripts/lib/root-readme.sh" "$repo_root/scaffold/root/README.md" "$empty_title" "$name"
   assert_equal invalid-heading "$output" 'degenerate derived heading'
   assert_absent "$empty_title/README.md"
 done
@@ -307,6 +325,58 @@ for flag in '' --dry-run; do
   assert_snapshot "$legacy" "$tmp_root/missing-update.snapshot"
 done
 
+# Real scenarios cover seeded/canonical/preserve/invalid-heading above and the
+# symlink-path race below. Substitute the helper only for outcomes unreachable
+# through current CLI inputs: bootstrap's invalid heading and unknown values.
+outcome_source="$tmp_root/outcome-source"
+mkdir "$outcome_source"
+cp -R "$repo_root/scripts" "$repo_root/scaffold" "$outcome_source/"
+cat >>"$outcome_source/scripts/lib/root-readme.sh" <<'SHIM'
+seed_root_readme() {
+  printf '%s\n' "$README_TEST_OUTCOME"
+}
+SHIM
+for entrypoint in new update update-dry-run; do
+  for outcome in invalid-heading unknown-outcome ''; do
+    target="$tmp_root/outcome-$entrypoint-${outcome:-empty}"
+    init_repo "$target"
+    expected=1
+    if [[ "$entrypoint" == new ]]; then
+      command=(bash "$outcome_source/scripts/new-project.sh" 'Valid heading' "$target")
+    else
+      run 0 bash "$repo_root/scripts/new-project.sh" 'Outcome fixture' "$target"
+      rm "$target/README.md"
+      command=(bash "$outcome_source/scripts/update-project.sh" "$target")
+      [[ "$outcome" != invalid-heading ]] || expected=0
+      if [[ "$entrypoint" == update-dry-run ]]; then
+        command+=(--dry-run)
+        snapshot "$target" >"$tmp_root/outcome.snapshot"
+      fi
+    fi
+    run "$expected" env README_TEST_OUTCOME="$outcome" "${command[@]}"
+    if [[ "$outcome" == invalid-heading ]]; then
+      if [[ "$entrypoint" == new ]]; then
+        assert_contains 'Error: cannot seed README.md: project name is not a usable heading.'
+      else
+        assert_contains 'Skip: README.md (directory name is not a usable heading)'
+        assert_contains '- skipped: 1'
+        assert_contains '- created: 0'
+      fi
+    else
+      assert_contains 'Error: unexpected root README seeding result.'
+    fi
+    assert_not_contains 'README entry already exists'
+    assert_not_contains 'Created: README.md'
+    assert_not_contains 'Seeded: README.md'
+    assert_not_contains 'Seed: README.md'
+    assert_absent "$target/README.md"
+    assert_no_temps "$target"
+    if [[ "$entrypoint" == update-dry-run ]]; then
+      assert_snapshot "$target" "$tmp_root/outcome.snapshot"
+    fi
+  done
+done
+
 # The shim injects failures at the existing interpreter boundary, without
 # adding test switches to production code. Other Perl hydration runs normally.
 real_perl="$(command -v perl)"
@@ -314,10 +384,25 @@ mkdir "$tmp_root/bin"
 cat >"$tmp_root/bin/perl" <<'SHIM'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "${1:-}" == -e && "${2:-}" == *'opendir(my $dir'* && "${3:-}" == "$README_FAULT_REPO" && "$README_FAULT" == enumeration ]]; then
-  printf 'missing\n'
-  echo 'injected README enumeration failure' >&2
-  exit 71
+if [[ "${1:-}" == -e && "${2:-}" == *'opendir(my $dir'* && "${3:-}" == "$README_FAULT_REPO" ]]; then
+  case "$README_FAULT" in
+    enumeration)
+      printf 'missing\n'
+      echo 'injected README enumeration failure' >&2
+      exit 71
+      ;;
+    validation-symlink)
+      presence="$("$README_REAL_PERL" "$@")"
+      ln -s "$README_FAULT_OUTSIDE" "$README_FAULT_REPO/README.md"
+      printf '%s\n' "$presence"
+      exit 0
+      ;;
+    read-only-root)
+      # Earlier bootstrap seeds need a writable root. Remove write permission
+      # at discovery so the real mktemp, before rendering/publication, fails.
+      chmod a-w "$README_FAULT_REPO"
+      ;;
+  esac
 fi
 if [[ "${1:-}" == -e && "${2:-}" == *'read($source'* && "${3:-}" == "$README_FAULT_SOURCE" && "$README_FAULT" == render ]]; then
   printf '# partial rendered output\n'
@@ -341,7 +426,11 @@ SHIM
 chmod +x "$tmp_root/bin/perl"
 
 for entrypoint in new update; do
-  for fault in enumeration render publication file directory symlink dangling; do
+  for fault in enumeration render publication file directory symlink dangling validation-symlink read-only-root; do
+    if [[ "$fault" == read-only-root && "$EUID" -eq 0 ]]; then
+      echo 'Read-only root fixture requires an unprivileged user; root bypasses write permissions.'
+      continue
+    fi
     target="$tmp_root/fault-$entrypoint-$fault"
     outside="$tmp_root/fault-outside-$entrypoint-$fault"
     init_repo "$target"
@@ -355,10 +444,21 @@ for entrypoint in new update; do
     else
       command=(bash "$repo_root/scripts/new-project.sh" 'Fault fixture' "$target")
     fi
+    if [[ "$fault" == read-only-root ]]; then
+      read_only_root="$target"
+    fi
     status=0
-    output="$(env PATH="$tmp_root/bin:$PATH" README_REAL_PERL="$real_perl" README_FAULT="$fault" README_FAULT_REPO="$target" README_FAULT_OUTSIDE="$outside" README_FAULT_SOURCE="$repo_root/scaffold/root/README.md" "${command[@]}" 2>&1)" || status=$?
-    [[ "$status" -ne 0 ]] || fail "$entrypoint swallowed $fault failure: $output"
-    assertions=$((assertions + 1))
+    output="$(env LC_ALL=C PATH="$tmp_root/bin:$PATH" README_REAL_PERL="$real_perl" README_FAULT="$fault" README_FAULT_REPO="$target" README_FAULT_OUTSIDE="$outside" README_FAULT_SOURCE="$repo_root/scaffold/root/README.md" "${command[@]}" 2>&1)" || status=$?
+    if [[ -n "$read_only_root" ]]; then
+      chmod u+w "$read_only_root"
+      read_only_root=""
+    fi
+    if [[ "$fault" == validation-symlink ]]; then
+      assert_equal 0 "$status" 'symlink preservation exit status'
+    else
+      [[ "$status" -ne 0 ]] || fail "$entrypoint swallowed $fault failure: $output"
+      assertions=$((assertions + 1))
+    fi
     assert_not_contains 'Created: README.md'
     assert_not_contains 'Seeded: README.md'
     case "$fault" in
@@ -381,6 +481,23 @@ for entrypoint in new update; do
         ;;
       symlink) assert_equal "$outside" "$(readlink "$target/README.md")" 'late directory symlink preserved' ;;
       dangling) assert_equal "$outside/missing" "$(readlink "$target/README.md")" 'late dangling symlink preserved' ;;
+      validation-symlink)
+        assert_equal "$outside" "$(readlink "$target/README.md")" 'symlink found by path validation preserved'
+        if [[ "$entrypoint" == new ]]; then
+          assert_contains 'Notice: README.md has a symlinked path component; template seed skipped.'
+        else
+          assert_contains 'Skip: README.md (symlinked path component; preserved)'
+          assert_contains '- skipped: 1'
+          assert_contains '- created: 0'
+        fi
+        assert_not_contains 'another README name/type'
+        ;;
+      read-only-root)
+        assert_contains 'mktemp:'
+        assert_contains 'Permission denied'
+        assert_not_contains 'cannot publish root README'
+        assert_absent "$target/README.md"
+        ;;
     esac
     assert_no_temps "$target"
     assert_snapshot "$outside" "$tmp_root/fault-outside.snapshot"

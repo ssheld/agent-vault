@@ -72,6 +72,10 @@ root_readme_publish() (
 seed_root_readme() {
   local source_path="$1" repo_root="$2" heading="$3" dry_run_mode="${4:-false}"
   local presence path_status=0
+  if ! declare -F validate_write_path >/dev/null; then
+    echo 'Error: root-readme.sh requires the caller to define validate_write_path.' >&2
+    return 1
+  fi
   presence="$(root_readme_presence "$repo_root")" || return
   case "$presence" in
     canonical | preserve)
@@ -90,7 +94,7 @@ seed_root_readme() {
   fi
   validate_write_path "$repo_root/README.md" || path_status=$?
   if [[ "$path_status" -eq 1 ]]; then
-    echo 'preserve'
+    echo 'symlink-path'
     return
   fi
   if [[ "$path_status" -ne 0 ]]; then

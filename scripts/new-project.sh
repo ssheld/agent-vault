@@ -486,11 +486,19 @@ seed_root_file_if_missing "$root_scaffold_dir/.cursor/rules/agent-vault.mdc" "$c
 seed_root_file_if_missing "$root_scaffold_dir/.github/pull_request_template.md" "$canonical_repo_path/.github/pull_request_template.md"
 seed_root_file_if_missing "$root_scaffold_dir/docs/design.md" "$canonical_repo_path/docs/design.md"
 readme_result="$(seed_root_readme "$root_scaffold_dir/README.md" "$canonical_repo_path" "$project_name")"
-if [[ "$readme_result" == seeded ]]; then
-  echo "Created: README.md"
-else
-  echo "Notice: README entry already exists; left unchanged." >&2
-fi
+case "$readme_result" in
+  seeded) echo "Created: README.md" ;;
+  canonical | preserve) echo "Notice: README entry already exists; left unchanged." >&2 ;;
+  symlink-path) echo "Notice: README.md has a symlinked path component; template seed skipped." >&2 ;;
+  invalid-heading)
+    echo "Error: cannot seed README.md: project name is not a usable heading." >&2
+    exit 1
+    ;;
+  *)
+    echo "Error: unexpected root README seeding result." >&2
+    exit 1
+    ;;
+esac
 seed_root_file_if_missing "$root_scaffold_dir/docs/runbooks/parallel-agent-worktrees.md" "$canonical_repo_path/docs/runbooks/parallel-agent-worktrees.md"
 seed_root_executable_file_if_missing "$root_scaffold_dir/scripts/new-worktree.sh" "$canonical_repo_path/scripts/new-worktree.sh"
 seed_root_executable_file_if_missing "$root_scaffold_dir/scripts/remove-worktree.sh" "$canonical_repo_path/scripts/remove-worktree.sh"
