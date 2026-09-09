@@ -16,6 +16,40 @@ The agent-facing policy lives in `scaffold/agent-vault/shared-rules.md` (and its
 `scaffold/agent-vault/AGENTS.md` mirror) under **Memory Size Budgets &
 Compaction**. This page is the operator/maintainer reference.
 
+## Bash runtime and upgrading
+
+All four memory helpers require **Bash 4.4+**. The 4.4 floor includes the change
+that makes empty-array expansion safe under `set -u`, in addition to the helpers'
+associative arrays and namerefs. CI exercises real Bash 4.4.12 plus current
+Linux/macOS Bash; it does not claim testing of 4.4.0.
+
+Unsupported interpreters exit **2** before argument/config parsing, temporary
+files, or transaction inspection/cleanup. This includes `--help`, `--quiet`,
+dry-run, and recovery: the runtime diagnostic always explains the remedy.
+Exit 2 is also used for usage/config/read failures; it alone does not identify
+an unsupported interpreter. Normal supported-runtime statuses are unchanged.
+
+Install a current Bash and select it explicitly or put its bin directory first
+on the `PATH` used by your terminal/Git client. On macOS, for example:
+
+```bash
+brew install bash
+"$(brew --prefix)/bin/bash" scripts/check-memory-budget.sh
+"$(brew --prefix)/bin/bash" scripts/compact-context-log.sh agent-vault/context-log.md --recover
+```
+
+The compactor uses that same Bash executable for its isolated checker child,
+even if bare `bash` on `PATH` is older. An unsupported invocation leaves pending
+transactions untouched; select a supported Bash before following recovery
+instructions. No helper installs Bash or changes your environment automatically.
+See [Bash setup](../README.md#bash-requirements).
+
+Existing generated projects must run a managed refresh using this template's
+`scripts/update-project.sh <repo-path>` to receive guards and the deletion-only
+hook fix. On stock macOS Bash, applicable optional pre-commit checks now emit a
+clear unsupported-interpreter advisory. The Bash-3.2-compatible metadata gate
+still runs, with both warning bypasses independent of metadata enforcement.
+
 ## The three budget buckets
 
 Memory is not one pool. Agents load it differently, so the budget report

@@ -100,7 +100,7 @@ warn_context_log_rollover() {
   [[ "$staged" == "true" ]] || return 0
 
   # Validate the staged blob (the index, not the working tree).
-  local tmp_file rollover_output
+  local tmp_file rollover_output rollover_rc=0 rollover_diagnostic
   tmp_file="$(mktemp "${TMPDIR:-/tmp}/agent-vault-rollover-staged.XXXXXX")" || return 0
   if ! git show ":agent-vault/context-log.md" >"$tmp_file" 2>/dev/null; then
     rm -f "$tmp_file"
@@ -109,11 +109,24 @@ warn_context_log_rollover() {
   if rollover_output="$(scripts/check-context-log-rollover.sh "$tmp_file" --quiet 2>&1)"; then
     rm -f "$tmp_file"
     return 0
+  else
+    rollover_rc=$?
   fi
   rm -f "$tmp_file"
 
   echo "agent-vault context-log rollover warning (non-blocking; staged agent-vault/context-log.md; set AGENT_VAULT_SKIP_ROLLOVER_CHECK=1 to silence):" >&2
-  printf '%s\n' "$rollover_output" | grep '^- ' >&2 || true
+  # Status 1 is a validation finding; status 2 also covers usage/config/read
+  # errors, not just unsupported Bash. Never guess the cause from the status.
+  rollover_diagnostic="$rollover_output"
+  if [[ "$rollover_rc" -eq 1 ]]; then
+    rollover_diagnostic="$(printf '%s\n' "$rollover_output" | grep '^- ' || true)"
+    [[ -n "$rollover_diagnostic" ]] || rollover_diagnostic="$rollover_output"
+  fi
+  if [[ "$rollover_diagnostic" == *[![:space:]]* ]]; then
+    printf '%s\n' "$rollover_diagnostic" >&2
+  else
+    printf 'Checker exited %s without usable diagnostic output.\n' "$rollover_rc" >&2
+  fi
   # This reflects the STAGED blob, which can differ from the working tree on a
   # partial-stage; point at the staged content, not the working-tree file.
   echo "The full report is on the STAGED content; inspect exactly what is staged with:" >&2
@@ -294,7 +307,10 @@ while IFS= read -r file_path; do
 done < <(git diff --cached --name-only --diff-filter=ACMRTUXB)
 
 has_context_log="false"
-for file_path in "${non_deleted_staged_files[@]}"; do
+# Counted iteration is safe for an empty array under Bash 3.2 nounset. Do not
+# skip the metadata gate: substantive deletion-only changes still require it.
+for ((file_index = 0; file_index < ${#non_deleted_staged_files[@]}; file_index++)); do
+  file_path="${non_deleted_staged_files[$file_index]}"
   if [[ "$file_path" == "agent-vault/context-log.md" ]]; then
     has_context_log="true"
     break
@@ -333,7 +349,8 @@ fi
 has_daily_note="false"
 has_design_log="false"
 
-for file_path in "${non_deleted_staged_files[@]}"; do
+for ((file_index = 0; file_index < ${#non_deleted_staged_files[@]}; file_index++)); do
+  file_path="${non_deleted_staged_files[$file_index]}"
   case "$file_path" in
     agent-vault/daily/*.md)
       if [[ "$file_path" != "agent-vault/daily/README.md" ]]; then

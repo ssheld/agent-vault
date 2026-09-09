@@ -16,6 +16,13 @@ The helpers only create or remove Git worktrees.
 
 ## Requirements
 
+The Bash 3.2 baseline below applies to worktree helpers and generated hooks,
+not memory helpers: `check-memory-budget.sh`, `check-context-log-rollover.sh`,
+`compact-context-log.sh`, and `check-lessons-archive.sh` require Bash 4.4+.
+See `agent-vault/_assets/hooks/README.md` for interpreter setup and advisory
+hook behavior. Existing projects receive managed helper fixes through
+`update-project.sh`; this runbook itself is seed-only.
+
 The two worktree helpers require Git 2.36+ and Bash 3.2+. They reject unsupported
 Git before changing directories, branches, or worktrees. Upgrade Git and ensure
 the supported executable is first on `PATH`. Git 2.36 added the NUL-delimited

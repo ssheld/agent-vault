@@ -32,6 +32,45 @@ The generated vault is plain Markdown and works directly in Obsidian.
 - Use `agent-vault/` as the project memory area.
 - Keep code in normal source folders and context in `agent-vault/`.
 
+## Bash Requirements
+
+| Surface | Minimum |
+| --- | --- |
+| Memory helpers: `check-memory-budget.sh`, `check-context-log-rollover.sh`, `compact-context-log.sh`, `check-lessons-archive.sh` | Bash 4.4 |
+| Generated `pre-commit`, `pre-push`, runtime-note classifier, and worktree helpers | Bash 3.2 |
+| Contributor regression suites | Bash 4.4 |
+
+The memory helpers use associative arrays, namerefs, and Bash 4.4's empty-array
+behavior under `set -u`. A real 4.3.30/4.4.12 comparison demonstrates that boundary;
+see the [Bash maintainer's explanation](https://lists.gnu.org/archive/html/bug-bash/2019-05/msg00024.html).
+Older Bash fails immediately with exit 2 and installation guidance, even for
+help, quiet, dry-run, or recovery invocations. Hooks still enforce metadata on
+stock macOS Bash; an unavailable optional memory check is a visible, non-blocking
+advisory, not successful validation.
+
+Install a **current** Bash rather than the historical CI version. On macOS:
+
+```bash
+brew install bash
+bash_bin="$(brew --prefix)/bin"
+"$bash_bin/bash" --version
+# Select it for this terminal, including Git hooks using /usr/bin/env bash:
+export PATH="$bash_bin:$PATH"
+command -v bash
+bash -c 'echo "$BASH_VERSION"'
+# Or explicitly select the interpreter for an individual generated helper:
+"$bash_bin/bash" scripts/check-memory-budget.sh
+```
+
+Installing Bash alone does not change every terminal/GUI Git client's `PATH`.
+Verify the environment used by that client. Helpers do not search Homebrew paths,
+install software, or re-execute themselves. Do not replace `/bin/bash` or change
+your login shell just for these helpers. See [Homebrew Bash](https://formulae.brew.sh/formula/bash).
+
+Existing projects receive the deletion-only hook fix and helper guards through
+a managed `scripts/update-project.sh <repo-path>` refresh from this template.
+Custom/unmanaged scripts and custom hook paths remain preserved.
+
 ## Workflow
 1. Clone this template repo once:
    - `git clone https://github.com/ssheld/agent-vault.git`
@@ -191,8 +230,20 @@ adding the new config keys. See
 CI runs these checks via `.github/workflows/scaffold-regression-checks.yml` on
 both `ubuntu-latest` and `macos-latest`, so GNU-vs-BSD userland assumptions in
 the shell scripts fail in CI instead of surfacing on contributor machines.
-Locally the suites need bash 4+ (macOS ships bash 3.2 at `/bin/bash`; use
-Homebrew bash).
+The full suite also runs with pinned Bash 4.4.12 on native Ubuntu 24.04, using
+checksum-verified Bash/libtinfo files extracted from a digest-pinned image.
+This is tested 4.4.x coverage, not a claim that 4.4.0 was exercised. macOS adds
+real stock-Bash 3.2 hook and unsupported-helper checks. The five 3.2-supported
+files get syntax checks; the 4.4-only helpers are not constrained to 3.2 syntax.
+Locally the suites need Bash 4.4+ (use Homebrew Bash on macOS).
+
+```bash
+bash scripts/test-bash-compatibility.sh
+# On macOS: modern test driver, stock-shell targets, real Git/shebang checks.
+HOOK_TEST_BASH=/bin/bash UNSUPPORTED_TEST_BASH=/bin/bash bash scripts/test-bash-compatibility.sh
+HOOK_TEST_BASH=/bin/bash bash scripts/test-session-metadata-hook.sh
+HOOK_TEST_BASH=/bin/bash bash scripts/test-main-push-gate.sh
+```
 
 ## Updating Existing Repos
 `update-project.sh` updates these managed scaffold files:
