@@ -565,6 +565,40 @@ assert_exit_code 1 "$rc" "relative-pth exits 1"
 assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "relative-pth reports the binding"
 assert_path_exists "$worktree_path" "relative-pth preserves worktree"
 
+# --- Hidden .pth records are disabled and must not block removal ---
+# site.addsitedir() selects `name.endswith(".pth") and not name.startswith(".")`,
+# so a record such as .disabled.pth is inert. Both entry forms are covered: the
+# relative one, which only became reachable when relative resolution was fixed,
+# and the absolute one, which the guard already treated as active before that.
+for hidden_entry_kind in relative absolute; do
+  working="$(setup_repo "repo-hidden-pth-$hidden_entry_kind")"
+  worktree_path="$(create_worktree "$working" "codex/202-hidden-$hidden_entry_kind" "codex-202-hidden-$hidden_entry_kind")"
+  site_packages="$working/.venv/lib/python3.10/site-packages"
+  mkdir -p "$site_packages" "$worktree_path/src"
+  if [[ "$hidden_entry_kind" == relative ]]; then
+    printf '%s\n' "../../../../../wt/$(basename "$worktree_path")/src" >"$site_packages/.disabled.pth"
+  else
+    printf '%s\n' "$worktree_path/src" >"$site_packages/.disabled.pth"
+  fi
+  rc=0
+  output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch "codex/202-hidden-$hidden_entry_kind" 2>&1)" || rc=$?
+  assert_exit_code 0 "$rc" "hidden-pth-$hidden_entry_kind exits 0"
+  assert_path_missing "$worktree_path" "hidden-pth-$hidden_entry_kind removes the worktree"
+done
+
+# The same target in a visible .pth file must still refuse, so the filter keys on
+# the hidden basename and not on the entry value.
+working="$(setup_repo repo-hidden-pth-visible-counterpart)"
+worktree_path="$(create_worktree "$working" "codex/203-visible-counterpart" "codex-203-visible-counterpart")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$site_packages" "$worktree_path/src"
+printf '%s\n' "../../../../../wt/$(basename "$worktree_path")/src" >"$site_packages/editable_project.pth"
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/203-visible-counterpart 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "visible-counterpart exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "visible-counterpart reports the binding"
+assert_path_exists "$worktree_path" "visible-counterpart preserves worktree"
+
 # A relative entry pointing somewhere else must still not block removal.
 working="$(setup_repo repo-relative-pth-unrelated)"
 worktree_path="$(create_worktree "$working" "codex/201-relative-pth-other" "codex-201-relative-pth-other")"

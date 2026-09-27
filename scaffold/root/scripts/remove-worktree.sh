@@ -270,6 +270,11 @@ find_shared_editable_binding() {
   BOUND_EDITABLE_PATH=""
   [[ -d "$venv_dir" ]] || return 0
 
+  # Python's site.addsitedir() selects `name.endswith(".pth") and not
+  # name.startswith(".")`, so a disabled record such as .disabled.pth is not an
+  # active binding and must not block cleanup. This matters more now that relative
+  # entries resolve: a relative entry in a hidden file used to be skipped by
+  # accident, while an absolute one was already treated as active.
   while IFS= read -r -d '' pth_file; do
     # Python resolves a relative .pth entry against the directory holding the
     # .pth file, not the caller's working directory. Resolve first, then test:
@@ -288,7 +293,7 @@ find_shared_editable_binding() {
         return 0
       fi
     done <"$pth_file"
-  done < <(find "$venv_dir" -type f -path '*/site-packages/*.pth' -print0 2>/dev/null)
+  done < <(find "$venv_dir" -type f -path '*/site-packages/*.pth' ! -name '.*' -print0 2>/dev/null)
 
   return 0
 }
