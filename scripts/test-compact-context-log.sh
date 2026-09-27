@@ -71,7 +71,7 @@ count_entries() {
       if (run >= 3 && (m == "~" || !index(rest, "`"))) {
         marker = m; length_open = run; next
       }
-      if (l ~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] local - /) c++ }
+      if (l ~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] (local|[A-Z][A-Za-z][A-Za-z]*|[+-][0-9][0-9]([0-9][0-9])?) - /) c++ }
     END { print c + 0 }
   ' "$1"
 }
@@ -158,6 +158,47 @@ cmp -s "$d/legacy-record" "$d/retained-record" || fail 'rollover rewrote legacy 
 [[ "$(grep -c '^- archive_path_base: manifest$' "$d/manifest.md")" == 1 ]] || fail 'only newest record should be marked'
 "$checker" "$d/log.md" --manifest "$d/manifest.md" --quiet 2>"$d/warning"
 [[ ! -s "$d/warning" ]] || fail 'marked newest record emitted legacy warning'
+
+# Entries whose headings carry real `date +%Z` zones instead of the literal
+# `local` must survive two successive rollovers with exact boundaries. A reader
+# that failed to recognize a zone would skip those entries rather than fail, so
+# the boundary assertions below are what would actually catch the regression:
+# after --keep 2 the newest archived entry is the numeric-offset one, which can
+# only be selected if `+0545` parses.
+d="$tmp_root/mixed-zone-rollover"
+mkdir -p "$d"
+make_log "$d/log.md"
+sed -e 's/^### \(2026-05-30 09:00\) local - /### \1 ChST - /' \
+  -e 's/^### \(2026-05-29 11:00\) local - /### \1 EDT - /' \
+  -e 's/^### \(2026-05-28 10:00\) local - /### \1 +0545 - /' \
+  -e 's/^### \(2026-05-27 10:00\) local - /### \1 UTC - /' \
+  "$d/log.md" >"$d/log.next"
+mv "$d/log.next" "$d/log.md"
+[[ "$(count_entries "$d/log.md")" == 5 ]] || fail 'mixed-zone log should still count 5 entries'
+cp "$d/log.md" "$d/before"
+run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" \
+  --rollover-id zones-1 --require-top-entry 'rollover session' --dry-run
+assert_rc 0 "$COMPACT_RC" 'mixed-zone preview'
+cmp -s "$d/log.md" "$d/before" || fail 'mixed-zone preview changed the log'
+run_compact "$d/log.md" --keep 2 --archive "$d/archive.md" --manifest "$d/manifest.md" \
+  --rollover-id zones-1 --require-top-entry 'rollover session'
+assert_rc 0 "$COMPACT_RC" 'mixed-zone rollover'
+assert_file_contains "$d/archive.md" '### 2026-05-28 10:00 +0545 - codex - older work' \
+  'archive preserves the numeric-offset entry verbatim'
+assert_file_contains "$d/manifest.md" '- newest_archived: 2026-05-28 10:00 +0545 - codex - older work' \
+  'newest archived boundary resolves through a numeric offset'
+assert_file_contains "$d/manifest.md" '- oldest_archived: 2026-05-26 09:00 local - bootstrap - initial project setup' \
+  'oldest archived boundary still resolves through a local heading'
+[[ "$(count_entries "$d/log.md")" == 2 ]] || fail 'mixed-zone rollover should retain 2 entries'
+"$checker" "$d/log.md" --archive "$d/archive.md" --manifest "$d/manifest.md" --quiet
+# A second successive rollover must archive the remaining mixed-case entry.
+run_compact "$d/log.md" --keep 1 --archive "$d/archive.md" --manifest "$d/manifest.md" \
+  --rollover-id zones-2 --require-top-entry 'rollover session'
+assert_rc 0 "$COMPACT_RC" 'second mixed-zone rollover'
+assert_file_contains "$d/manifest.md" '- newest_archived: 2026-05-29 11:00 EDT - claude - feature work' \
+  'second rollover boundary resolves through a mixed-case zone'
+[[ "$(count_entries "$d/log.md")" == 1 ]] || fail 'second rollover should retain 1 entry'
+"$checker" "$d/log.md" --archive "$d/archive.md" --manifest "$d/manifest.md" --quiet
 
 # Bound both selection and counting, then append the untouched suffix after
 # pointer rewriting. Exercise LF/CRLF and an unterminated final suffix line.
