@@ -119,6 +119,32 @@ replace_first_context_log_zone() {
   perl -0pi -e 's/^(### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}) local - /$1 '"$replacement_zone"' - /m' "$file_path"
 }
 
+# Insert a fenced block holding one arbitrary line just after the newest entry
+# heading, so the fenced content sits inside the "## Entries" section.
+insert_context_log_fence() {
+  local file_path="$1"
+  local fenced_line="$2"
+
+  awk -v fenced_line="$fenced_line" '
+    { print }
+    !inserted && /^### / {
+      print ""
+      print "```"
+      print fenced_line
+      print "```"
+      inserted = 1
+    }
+  ' "$file_path" >"$file_path.fence"
+  mv "$file_path.fence" "$file_path"
+}
+
+append_context_log_entry() {
+  local file_path="$1"
+  local heading="$2"
+
+  printf '\n### %s\n- Body.\n' "$heading" >>"$file_path"
+}
+
 clear_context_log_entries() {
   local file_path="$1"
 
@@ -497,6 +523,30 @@ replace_first_context_log_zone "$lowercase_zone_repo/agent-vault/context-log.md"
 git -C "$lowercase_zone_repo" add agent-vault/context-log.md
 lowercase_zone_output="$(run_hook_expect_failure "$lowercase_zone_repo")"
 assert_output_contains "$lowercase_zone_output" 'entry headings must start with `YYYY-MM-DD HH:MM local - <agent> - <topic>`'
+
+# A fenced block inside an entry is documentation, not structure. The scanners
+# must apply the same fence rules as the rollover checker and the compactor.
+# Without them a fenced "### ..." line was reported as an invalid heading.
+fenced_entry_repo="$tmp_root/context-log-fenced-entry"
+init_repo "$fenced_entry_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$fenced_entry_repo" >/dev/null
+insert_context_log_fence "$fenced_entry_repo/agent-vault/context-log.md" '### Example heading'
+git -C "$fenced_entry_repo" add agent-vault/context-log.md
+run_hook_expect_success "$fenced_entry_repo"
+
+# The more dangerous direction: a fenced "## ..." line used to terminate the
+# entry scan, so entries below it were never validated and an out-of-order entry
+# passed the gate. The appended entry is newer than the one above it, so the
+# newest-first check must still fire.
+fenced_section_repo="$tmp_root/context-log-fenced-section"
+init_repo "$fenced_section_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$fenced_section_repo" >/dev/null
+insert_context_log_fence "$fenced_section_repo/agent-vault/context-log.md" '## Example'
+append_context_log_entry "$fenced_section_repo/agent-vault/context-log.md" \
+  '2099-03-19 08:32 EDT - codex - newer entry below an older one'
+git -C "$fenced_section_repo" add agent-vault/context-log.md
+fenced_section_output="$(run_hook_expect_failure "$fenced_section_repo")"
+assert_output_contains "$fenced_section_output" 'must keep entries newest-first'
 
 empty_entries_repo="$tmp_root/context-log-empty-entries"
 init_repo "$empty_entries_repo"

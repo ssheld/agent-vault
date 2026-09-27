@@ -162,6 +162,37 @@ fi
 # shellcheck source=./lib/runtime-note.sh
 source "agent-vault/_assets/hooks/lib/runtime-note.sh"
 
+# Tests check marker integrity, equality, and caller behavior.
+# BEGIN markdown fences
+markdown_fences='
+    function reset_fence() { fence_marker = ""; fence_length = 0; fence_line = 0 }
+    function fenced(line, candidate, marker, run, tail) {
+      candidate = line
+      sub(/\r$/, "", candidate)
+      sub(/^ ? ? ?/, "", candidate)
+      marker = substr(candidate, 1, 1)
+      run = 0
+      if (marker == "`" || marker == "~") {
+        while (substr(candidate, run + 1, 1) == marker) run++
+      }
+      tail = substr(candidate, run + 1)
+      if (fence_marker != "") {
+        if (marker == fence_marker && run >= fence_length && tail ~ /^[ \t]*$/) {
+          fence_marker = ""
+        }
+        return 1
+      }
+      if (run < 3) return 0
+      if (marker == "`" && index(tail, "`") != 0) return 0
+      fence_marker = marker
+      fence_length = run
+      fence_line = FNR
+      return 1
+    }
+    FNR == 1 { reset_fence() }
+'
+# END markdown fences
+
 extract_context_log_frontmatter_value() {
   local file_path="$1"
   local field_name="$2"
@@ -190,7 +221,8 @@ extract_context_log_frontmatter_value() {
 extract_context_log_snapshot_last_updated() {
   local file_path="$1"
 
-  awk '
+  awk "$markdown_fences"'
+    { if (fenced($0)) next }
     /^## Current Snapshot$/ {
       in_snapshot = 1
       next
@@ -211,7 +243,8 @@ extract_context_log_snapshot_last_updated() {
 collect_context_log_entry_timestamps() {
   local file_path="$1"
 
-  awk '
+  awk "$markdown_fences"'
+    { if (fenced($0)) next }
     /^## Entries$/ {
       in_entries = 1
       next
