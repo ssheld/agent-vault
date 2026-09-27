@@ -138,6 +138,29 @@ insert_context_log_fence() {
   mv "$file_path.fence" "$file_path"
 }
 
+# Open a fence that never validly closes, just after the newest entry heading. A
+# weak closer shorter than the opener does not close it, which is why the opener
+# length matters and not merely the presence of a later delimiter line.
+open_context_log_fence() {
+  local file_path="$1"
+  local opener="$2"
+  local weak_closer="${3:-}"
+
+  awk -v opener="$opener" -v weak_closer="$weak_closer" '
+    { print }
+    !inserted && /^### / {
+      print ""
+      print opener
+      print "example"
+      if (weak_closer != "") {
+        print weak_closer
+      }
+      inserted = 1
+    }
+  ' "$file_path" >"$file_path.fence"
+  mv "$file_path.fence" "$file_path"
+}
+
 append_context_log_entry() {
   local file_path="$1"
   local heading="$2"
@@ -547,6 +570,27 @@ append_context_log_entry "$fenced_section_repo/agent-vault/context-log.md" \
 git -C "$fenced_section_repo" add agent-vault/context-log.md
 fenced_section_output="$(run_hook_expect_failure "$fenced_section_repo")"
 assert_output_contains "$fenced_section_output" 'must keep entries newest-first'
+
+# Fence awareness must not become its own bypass. An unterminated fence makes
+# fenced() swallow every later line, so the heading and newest-first checks would
+# silently stop applying for the rest of the log. The validator must reject the
+# open fence instead. The rollover checker also notices it, but that hook warning
+# is non-blocking, so the blocking validator needs its own check. Both openers
+# below stay open: the second has a closer shorter than its opener.
+unterminated_fence_index=0
+for unterminated_opener in '```:' '````:```'; do
+  unterminated_fence_index=$((unterminated_fence_index + 1))
+  unterminated_repo="$tmp_root/context-log-unterminated-fence-$unterminated_fence_index"
+  init_repo "$unterminated_repo"
+  "$repo_root/scripts/new-project.sh" "hook-test" "$unterminated_repo" >/dev/null
+  open_context_log_fence "$unterminated_repo/agent-vault/context-log.md" \
+    "${unterminated_opener%%:*}" "${unterminated_opener##*:}"
+  append_context_log_entry "$unterminated_repo/agent-vault/context-log.md" \
+    '2099-03-19 08:32 local - codex - newer entry below an older one'
+  git -C "$unterminated_repo" add agent-vault/context-log.md
+  unterminated_output="$(run_hook_expect_failure "$unterminated_repo")"
+  assert_output_contains "$unterminated_output" 'has an unterminated Markdown fence opened on line'
+done
 
 empty_entries_repo="$tmp_root/context-log-empty-entries"
 init_repo "$empty_entries_repo"

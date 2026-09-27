@@ -263,6 +263,11 @@ collect_context_log_entry_timestamps() {
 
       printf "__INVALID__\t%s\n", $0
     }
+    END {
+      if (fence_marker != "") {
+        printf "__UNTERMINATED_FENCE__\t%d\n", fence_line
+      }
+    }
   ' "$file_path"
 }
 
@@ -288,6 +293,12 @@ validate_staged_context_log() {
 
   while IFS= read -r current_entry_line; do
     [[ -n "$current_entry_line" ]] || continue
+
+    if [[ "$current_entry_line" == __UNTERMINATED_FENCE__* ]]; then
+      errors+=("$file_path has an unterminated Markdown fence opened on line ${current_entry_line#*$'\t'}; entry and newest-first validation cannot see past it, so close the fence and recommit.")
+      continue
+    fi
+
     has_entries="true"
 
     if [[ "$current_entry_line" == __INVALID__* ]]; then
