@@ -301,12 +301,17 @@ print_next_steps() {
   local worktree_path="$1"
   local normalized_agent="$2"
   local hint
+  local quoted_path
 
   hint="$(launch_hint "$normalized_agent")"
+  # The path is printed for the reader to copy, so it must survive a shell
+  # round-trip: spaces would split the argument and text such as $() would be
+  # evaluated. %q emits an escaped form and leaves ordinary paths unchanged.
+  quoted_path="$(printf '%q' "$worktree_path")"
 
   echo ""
   echo "Next:"
-  echo "  cd $worktree_path"
+  echo "  cd $quoted_path"
   if [[ -n "$hint" ]]; then
     echo "  $hint"
   else

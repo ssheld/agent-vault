@@ -263,6 +263,7 @@ find_shared_editable_binding() {
   local target_path="$1"
   local venv_dir="$PROJECT_DIR/.venv"
   local pth_file=""
+  local pth_dir=""
   local bound_path=""
   local line=""
 
@@ -270,11 +271,16 @@ find_shared_editable_binding() {
   [[ -d "$venv_dir" ]] || return 0
 
   while IFS= read -r -d '' pth_file; do
+    # Python resolves a relative .pth entry against the directory holding the
+    # .pth file, not the caller's working directory. Resolve first, then test:
+    # checking the raw entry against $PWD skips a live binding whenever this
+    # helper runs from anywhere other than that site-packages directory.
+    pth_dir="$(dirname "$pth_file")"
     while IFS= read -r line || [[ -n "$line" ]]; do
       [[ -n "$line" ]] || continue
       [[ "$line" != \#* ]] || continue
+      [[ "$line" == /* ]] || line="$pth_dir/$line"
       [[ -d "$line" ]] || continue
-      [[ "$line" == /* ]] || line="$PWD/$line"
       canonical_path "$line"
       bound_path="$CANONICAL_PATH"
       if [[ "$bound_path" == "$target_path" || "$bound_path" == "$target_path/"* ]]; then
