@@ -545,6 +545,71 @@ rc=0
 output="$(PATH="$probe:$PATH" WORKTREE_TEST_GIT_VERSION='git version 2.39.3 (Apple Git-146)' "$helper_bash" "$working/scripts/remove-worktree.sh" --branch codex/disposable --delete-branch 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "vendor-suffixed Git permits safe removal"
 
+# --- Relative .pth entries resolve against site-packages, not the caller's cwd ---
+# Python resolves a relative .pth entry against the directory holding the .pth
+# file. Testing the raw entry against $PWD instead skipped a live binding and
+# removed the worktree while reporting success, breaking the shared environment.
+# The entry below is valid from site-packages and is not a directory from the
+# checkout the helper runs in, so only correct resolution can detect it.
+working="$(setup_repo repo-relative-pth)"
+worktree_path="$(create_worktree "$working" "codex/200-relative-pth" "codex-200-relative-pth")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$site_packages" "$worktree_path/src"
+# site-packages -> ... -> $tmp_root is five levels up; the worktree lives in wt/.
+printf '%s\n' "../../../../../wt/$(basename "$worktree_path")/src" >"$site_packages/editable_project.pth"
+[[ ! -d "$working/../../../../../wt/$(basename "$worktree_path")/src" ]] ||
+  echo "WARNING: relative .pth fixture also resolves from the checkout; the case is not isolating resolution" >&2
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/200-relative-pth 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "relative-pth exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "relative-pth reports the binding"
+assert_path_exists "$worktree_path" "relative-pth preserves worktree"
+
+# --- Hidden .pth records are disabled and must not block removal ---
+# site.addsitedir() selects `name.endswith(".pth") and not name.startswith(".")`,
+# so a record such as .disabled.pth is inert. Both entry forms are covered: the
+# relative one, which only became reachable when relative resolution was fixed,
+# and the absolute one, which the guard already treated as active before that.
+for hidden_entry_kind in relative absolute; do
+  working="$(setup_repo "repo-hidden-pth-$hidden_entry_kind")"
+  worktree_path="$(create_worktree "$working" "codex/202-hidden-$hidden_entry_kind" "codex-202-hidden-$hidden_entry_kind")"
+  site_packages="$working/.venv/lib/python3.10/site-packages"
+  mkdir -p "$site_packages" "$worktree_path/src"
+  if [[ "$hidden_entry_kind" == relative ]]; then
+    printf '%s\n' "../../../../../wt/$(basename "$worktree_path")/src" >"$site_packages/.disabled.pth"
+  else
+    printf '%s\n' "$worktree_path/src" >"$site_packages/.disabled.pth"
+  fi
+  rc=0
+  output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch "codex/202-hidden-$hidden_entry_kind" 2>&1)" || rc=$?
+  assert_exit_code 0 "$rc" "hidden-pth-$hidden_entry_kind exits 0"
+  assert_path_missing "$worktree_path" "hidden-pth-$hidden_entry_kind removes the worktree"
+done
+
+# The same target in a visible .pth file must still refuse, so the filter keys on
+# the hidden basename and not on the entry value.
+working="$(setup_repo repo-hidden-pth-visible-counterpart)"
+worktree_path="$(create_worktree "$working" "codex/203-visible-counterpart" "codex-203-visible-counterpart")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$site_packages" "$worktree_path/src"
+printf '%s\n' "../../../../../wt/$(basename "$worktree_path")/src" >"$site_packages/editable_project.pth"
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/203-visible-counterpart 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "visible-counterpart exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "visible-counterpart reports the binding"
+assert_path_exists "$worktree_path" "visible-counterpart preserves worktree"
+
+# A relative entry pointing somewhere else must still not block removal.
+working="$(setup_repo repo-relative-pth-unrelated)"
+worktree_path="$(create_worktree "$working" "codex/201-relative-pth-other" "codex-201-relative-pth-other")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$site_packages" "$tmp_root/wt/unrelated-relative/src" "$worktree_path/src"
+printf '%s\n' "../../../../../wt/unrelated-relative/src" >"$site_packages/editable_project.pth"
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/201-relative-pth-other 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "relative-pth-unrelated exits 0"
+assert_path_missing "$worktree_path" "relative-pth-unrelated removes the worktree"
+
 echo ""
 echo "Results: $passed passed, $failed failed"
 if [[ "$failed" -gt 0 ]]; then

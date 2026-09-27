@@ -614,6 +614,23 @@ assert_output_contains "$output" "Could not inspect branch codex/151 (Git exit 1
 assert_path_missing "$tmp_root/probe-failure-root" "branch probe failure creates no directory"
 assert_worktree_state_unchanged "$working" "$tmp_root/branch-probe-failure" "branch probe failure"
 
+# --- Printed cd hint survives a shell round-trip for awkward roots ---
+# The hint exists to be copied, so a path containing spaces or shell syntax must
+# be emitted escaped. Unescaped, spaces split the argument and text such as $()
+# is evaluated by the reader's shell.
+working="$(setup_repo repo-quoted-hint)"
+awkward_root="$tmp_root/needs quoting \$(touch pwned)"
+rc=0
+output="$(run_new_worktree_with_env_root "$working" "$awkward_root" --agent codex --issue 300 --slug quoted 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "quoted-hint exits 0"
+expected_path="$awkward_root/codex-300-quoted"
+assert_path_exists "$expected_path" "quoted-hint creates the worktree"
+# The escaped form, not the raw path, is what must appear after "cd ".
+assert_output_contains "$output" "cd $(printf '%q' "$expected_path")" "quoted-hint escapes the printed path"
+assert_output_excludes "$output" "cd $expected_path" "quoted-hint does not print the raw path"
+assert_path_missing "$tmp_root/pwned" "quoted-hint does not execute embedded command substitution"
+assert_path_missing "$working/pwned" "quoted-hint leaves no artifact in the checkout"
+
 echo ""
 echo "Results: $passed passed, $failed failed"
 if [[ "$failed" -gt 0 ]]; then
