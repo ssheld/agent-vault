@@ -47,7 +47,7 @@ git config core.hooksPath agent-vault/_assets/hooks
   - Rejects staged `agent-vault/` path changes when the generated `agent-vault/`
     directory or shared runtime metadata classifier is missing.
   - Validates staged `agent-vault/context-log.md` content:
-    - entry headings must use `YYYY-MM-DD HH:MM local - <agent> - <topic>`
+    - entry headings must use `YYYY-MM-DD HH:MM local - <agent> - <topic>`, where `local` may instead be a timezone abbreviation such as `EDT`
     - entries must remain newest-first
     - frontmatter and Current Snapshot `Last updated` must match the top entry date
   - This is a baseline gate only. Conditional artifacts such as `open-questions.md`, decision records, handoff notes, and `lessons.md` still depend on the actual session outcome.

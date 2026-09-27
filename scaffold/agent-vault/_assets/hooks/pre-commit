@@ -220,10 +220,10 @@ collect_context_log_entry_timestamps() {
       exit
     }
     in_entries && /^### / {
-      if (match($0, /^### ([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]) local - /)) {
+      if (match($0, /^### ([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]) (local|[A-Z][A-Z][A-Z]*) - /)) {
         timestamp = $0
         sub(/^### /, "", timestamp)
-        sub(/ local - .*$/, "", timestamp)
+        sub(/ (local|[A-Z][A-Z][A-Z]*) - .*$/, "", timestamp)
         print timestamp
         next
       }
@@ -258,7 +258,7 @@ validate_staged_context_log() {
     has_entries="true"
 
     if [[ "$current_entry_line" == __INVALID__* ]]; then
-      errors+=("$file_path entry headings must start with \`YYYY-MM-DD HH:MM local - <agent> - <topic>\`; found: ${current_entry_line#*$'\t'}")
+      errors+=("$file_path entry headings must start with \`YYYY-MM-DD HH:MM local - <agent> - <topic>\` (a timezone abbreviation such as \`EDT\` may replace \`local\`); found: ${current_entry_line#*$'\t'}")
       continue
     fi
 

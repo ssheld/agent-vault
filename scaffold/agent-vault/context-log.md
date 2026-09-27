@@ -8,7 +8,7 @@ last_updated: __DATE__
 
 ## Usage Rules
 - Newest entry at top.
-- Entry headings must start with `YYYY-MM-DD HH:MM local - <agent> - <topic>`.
+- Entry headings must start with `YYYY-MM-DD HH:MM local - <agent> - <topic>`. A timezone abbreviation such as `EDT` may replace `local`.
 - Keep entries short and concrete.
 - Reference files and PRs instead of pasting long diffs.
 - Prefer repo-relative paths where possible.

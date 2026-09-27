@@ -110,6 +110,15 @@ replace_first_context_log_heading() {
   perl -0pi -e 's/^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} local - .*$/### '"$replacement_heading"'/m' "$file_path"
 }
 
+# Swap the zone field only, leaving the timestamp and topic intact so the
+# freshness assertions keep comparing the same date.
+replace_first_context_log_zone() {
+  local file_path="$1"
+  local replacement_zone="$2"
+
+  perl -0pi -e 's/^(### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}) local - /$1 '"$replacement_zone"' - /m' "$file_path"
+}
+
 clear_context_log_entries() {
   local file_path="$1"
 
@@ -462,6 +471,25 @@ replace_first_context_log_heading "$invalid_heading_repo/agent-vault/context-log
 git -C "$invalid_heading_repo" add agent-vault/context-log.md
 invalid_heading_output="$(run_hook_expect_failure "$invalid_heading_repo")"
 assert_output_contains "$invalid_heading_output" 'entry headings must start with `YYYY-MM-DD HH:MM local - <agent> - <topic>`'
+
+# A real timezone abbreviation is accepted in place of the literal `local`, so a
+# log written as "14:44 EDT" validates without rewriting project history.
+timezone_heading_repo="$tmp_root/context-log-timezone-heading"
+init_repo "$timezone_heading_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$timezone_heading_repo" >/dev/null
+replace_first_context_log_zone "$timezone_heading_repo/agent-vault/context-log.md" "EDT"
+git -C "$timezone_heading_repo" add agent-vault/context-log.md
+run_hook_expect_success "$timezone_heading_repo"
+
+# Only `local` or an uppercase abbreviation counts; a lowercase zone stays invalid
+# so the relaxed pattern cannot swallow arbitrary text before the agent field.
+lowercase_zone_repo="$tmp_root/context-log-lowercase-zone"
+init_repo "$lowercase_zone_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$lowercase_zone_repo" >/dev/null
+replace_first_context_log_zone "$lowercase_zone_repo/agent-vault/context-log.md" "edt"
+git -C "$lowercase_zone_repo" add agent-vault/context-log.md
+lowercase_zone_output="$(run_hook_expect_failure "$lowercase_zone_repo")"
+assert_output_contains "$lowercase_zone_output" 'entry headings must start with `YYYY-MM-DD HH:MM local - <agent> - <topic>`'
 
 empty_entries_repo="$tmp_root/context-log-empty-entries"
 init_repo "$empty_entries_repo"
