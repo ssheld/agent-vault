@@ -472,17 +472,24 @@ git -C "$invalid_heading_repo" add agent-vault/context-log.md
 invalid_heading_output="$(run_hook_expect_failure "$invalid_heading_repo")"
 assert_output_contains "$invalid_heading_output" 'entry headings must start with `YYYY-MM-DD HH:MM local - <agent> - <topic>`'
 
-# A real timezone abbreviation is accepted in place of the literal `local`, so a
-# log written as "14:44 EDT" validates without rewriting project history.
-timezone_heading_repo="$tmp_root/context-log-timezone-heading"
-init_repo "$timezone_heading_repo"
-"$repo_root/scripts/new-project.sh" "hook-test" "$timezone_heading_repo" >/dev/null
-replace_first_context_log_zone "$timezone_heading_repo/agent-vault/context-log.md" "EDT"
-git -C "$timezone_heading_repo" add agent-vault/context-log.md
-run_hook_expect_success "$timezone_heading_repo"
+# Real `date +%Z` output is accepted in place of the literal `local`, so an agent
+# validates without rewriting project history whatever zone it runs in. The cases
+# below are all genuine outputs: `ChST` (Pacific/Guam, Pacific/Saipan) is mixed
+# case, and zones with no abbreviation emit a numeric offset (Asia/Kathmandu gives
+# `+0545`), so neither an all-uppercase nor an alphabetic-only pattern suffices.
+accepted_zone_index=0
+for accepted_zone in "EDT" "ChST" "+0545"; do
+  accepted_zone_index=$((accepted_zone_index + 1))
+  accepted_zone_repo="$tmp_root/context-log-zone-$accepted_zone_index"
+  init_repo "$accepted_zone_repo"
+  "$repo_root/scripts/new-project.sh" "hook-test" "$accepted_zone_repo" >/dev/null
+  replace_first_context_log_zone "$accepted_zone_repo/agent-vault/context-log.md" "$accepted_zone"
+  git -C "$accepted_zone_repo" add agent-vault/context-log.md
+  run_hook_expect_success "$accepted_zone_repo"
+done
 
-# Only `local` or an uppercase abbreviation counts; a lowercase zone stays invalid
-# so the relaxed pattern cannot swallow arbitrary text before the agent field.
+# A zone must still start uppercase, so a lowercase spelling stays invalid and the
+# pattern cannot swallow arbitrary lowercase text before the agent field.
 lowercase_zone_repo="$tmp_root/context-log-lowercase-zone"
 init_repo "$lowercase_zone_repo"
 "$repo_root/scripts/new-project.sh" "hook-test" "$lowercase_zone_repo" >/dev/null

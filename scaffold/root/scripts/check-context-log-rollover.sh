@@ -112,7 +112,7 @@ Section headings are matched exactly (a distinct heading such as
 are tolerated. Live entry-heading style is enforced by the pre-commit hook, not
 here; archive boundary verification counts only canonical
 "### YYYY-MM-DD HH:MM local - <agent> - <topic>" entry headings, where
-"local" may instead be a timezone abbreviation such as "EDT".
+"local" may instead be a zone such as "EDT", "ChST", or "+0545".
 
 All structural scans ignore fenced examples, including pointer and manifest
 fields. Fences open with 3+ backticks or tildes and 0-3 leading spaces; only the
@@ -353,7 +353,7 @@ EOF
       text = line
       sub(/^#+[[:space:]]+/, "", text)
       if (text !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/) next
-      if (line ~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] (local|[A-Z][A-Z][A-Z]*) - /) {
+      if (line ~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] (local|[A-Z][A-Za-z][A-Za-z]*|[+-][0-9][0-9]([0-9][0-9])?) - /) {
         seen_entry = 1
         next
       }
@@ -474,8 +474,8 @@ EOF
 
   # Archive entry-heading extremes + presence of the named newest/oldest headings.
   # An "entry heading" is a canonical "### YYYY-MM-DD HH:MM local - <agent> -
-  # <topic>" heading outside a fence, where "local" may instead be a timezone
-  # abbreviation such as "EDT" (the shape the pre-commit hook enforces and
+  # <topic>" heading outside a fence, where "local" may instead be a zone such
+  # as "EDT", "ChST", or "+0545" (the shape the pre-commit hook enforces and
   # the compactor splits on); a nested sub-heading that merely starts with a date
   # is body text, not a boundary. The leading "YYYY-MM-DD HH:MM" is the timestamp,
   # so lexical compare gives chronological order and a shared minute is unambiguous.
@@ -492,7 +492,7 @@ EOF
     {
       line = strip($0)
       # mawk has no interval expressions ({4}), so digits are spelled out.
-      if (line !~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] (local|[A-Z][A-Z][A-Z]*) - /) next
+      if (line !~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] (local|[A-Z][A-Za-z][A-Za-z]*|[+-][0-9][0-9]([0-9][0-9])?) - /) next
       sub(/^### /, "", line)
       ts = substr(line, 1, 16)
       n++

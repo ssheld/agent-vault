@@ -457,7 +457,7 @@ strip_trailing_blanks() {
 
 # Entry layout inside the "## Entries" section (fence-aware).
 # Only canonical entry headings ("### YYYY-MM-DD HH:MM local - <agent> - <topic>",
-# where "local" may instead be a timezone abbreviation such as "EDT" -- the shape
+# where "local" may instead be a zone such as "EDT", "ChST", or "+0545" -- the shape
 # the pre-commit hook enforces) count: a nested sub-heading that merely
 # starts with a date must never become a split boundary or inflate the entry count.
 inspect_entries() {
@@ -469,7 +469,7 @@ inspect_entries() {
       if (!started) next
       if (!end && line ~ /^##?([[:space:]]|$)/) end = NR
       if (line ~ /^##?[[:space:]]+(Suggested[[:space:]]+)?Next Prompt[[:space:]]*$/) print "orphan", NR
-      if (line !~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] (local|[A-Z][A-Z][A-Z]*) - /) next
+      if (line !~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] (local|[A-Z][A-Za-z][A-Za-z]*|[+-][0-9][0-9]([0-9][0-9])?) - /) next
       print (end ? "excluded" : "entry"), NR
     }
     END { print "end", (end ? end : NR + 1); if (end) print "suffix", end }
@@ -499,7 +499,7 @@ first_entry_line() {
     { if (fenced($0)) next }
     {
       line = $0; sub(/\r$/, "", line)
-      if (line !~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] (local|[A-Z][A-Z][A-Z]*) - /) next
+      if (line !~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] (local|[A-Z][A-Za-z][A-Za-z]*|[+-][0-9][0-9]([0-9][0-9])?) - /) next
       if (!seen) print NR
       seen = 1
     }
@@ -540,7 +540,7 @@ select_boundaries() {
     { if (fenced($0)) next }
     {
       line = $0; sub(/\r$/, "", line)
-      if (line !~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] (local|[A-Z][A-Z][A-Z]*) - /) next
+      if (line !~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] (local|[A-Z][A-Za-z][A-Za-z]*|[+-][0-9][0-9]([0-9][0-9])?) - /) next
       sub(/^### /, "", line)
       ts = substr(line, 1, 16); n++
       if (n == 1 || ts > max_ts) { max_ts = ts; max_h = line }
@@ -861,7 +861,7 @@ overlapping_entry() {
       if (!quoted && (line ~ /^##[[:space:]]/ || (live && line ~ /^##?([[:space:]]|$)/))) {
         flush(); active = (!live || line ~ /^## Entries[[:space:]]*$/)
       }
-      if (!quoted && active && line ~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] (local|[A-Z][A-Z][A-Z]*) - /) {
+      if (!quoted && active && line ~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] (local|[A-Z][A-Za-z][A-Za-z]*|[+-][0-9][0-9]([0-9][0-9])?) - /) {
         flush(); heading = line; entry = $0 "\n"
       } else if (entry != "") entry = entry $0 "\n"
     }

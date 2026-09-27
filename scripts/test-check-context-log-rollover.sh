@@ -554,6 +554,61 @@ EOF
 expect_result 1 "is not the archive's newest entry" \
   "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-2026.md" --manifest "$tmp_root/manifest-stale-newest.md"
 
+# An archive whose headings carry real `date +%Z` zones rather than the literal
+# `local`: ChST is mixed case (Pacific/Guam) and +0545 is the numeric offset form
+# (Asia/Kathmandu). Non-canonical headings are silently skipped rather than
+# flagged, so a reader-pattern regression here would hide entries instead of
+# failing loudly. The paired cases below pin that: the boundaries can only be
+# correct if all three headings are visible to the checker.
+cat >"$tmp_root/context-log-2026-zones.md" <<'EOF'
+# Context Log Archive (2026)
+
+## Current Snapshot — SUPERSEDED (archived 2026-05-30; see live log for current state)
+- Active branch: `old-branch`
+
+### 2026-05-29 17:00 ChST - claude - mixed-zone newest entry
+- Body.
+
+### 2026-03-15 09:00 EDT - codex - mixed-zone middle entry
+- Body.
+
+### 2026-01-04 09:00 +0545 - bootstrap - mixed-zone oldest entry
+- Body.
+EOF
+
+# Same id and boundary as the good pointer, so only the zone handling is isolated.
+cat >"$tmp_root/manifest-zones.md" <<'EOF'
+# Context Log Rollover Manifest
+
+## rollover: 2026-05-29-1
+- archive_file: agent-vault/context/archive/context-log-2026-zones.md
+- boundary: through PR-A net-of-excepted (recent-window top before rollover)
+- newest_archived: 2026-05-29 17:00 ChST - claude - mixed-zone newest entry
+- oldest_archived: 2026-01-04 09:00 +0545 - bootstrap - mixed-zone oldest entry
+- kept: 5
+- archived: 3
+- anchors: mixed-zone newest entry; mixed-zone oldest entry
+EOF
+expect_result 0 "passed" "$tmp_root/good-rollover-live.md" \
+  --archive "$tmp_root/context-log-2026-zones.md" --manifest "$tmp_root/manifest-zones.md"
+
+# Naming the middle entry as newest must still be caught in a mixed-zone archive.
+cat >"$tmp_root/manifest-zones-stale.md" <<'EOF'
+# Context Log Rollover Manifest
+
+## rollover: 2026-05-29-1
+- archive_file: agent-vault/context/archive/context-log-2026-zones.md
+- boundary: through PR-A net-of-excepted (recent-window top before rollover)
+- newest_archived: 2026-03-15 09:00 EDT - codex - mixed-zone middle entry
+- oldest_archived: 2026-01-04 09:00 +0545 - bootstrap - mixed-zone oldest entry
+- kept: 5
+- archived: 3
+- anchors: mixed-zone middle entry; mixed-zone oldest entry
+EOF
+expect_result 1 "is not the archive's newest entry" \
+  "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-2026-zones.md" \
+  --manifest "$tmp_root/manifest-zones-stale.md"
+
 # Two archived entries share a minute; newest_archived names the lower/stale one.
 # Same timestamp as the actual newest, so a timestamp-only check would miss it --
 # the full-heading comparison must still catch it (the same-minute ambiguity this
