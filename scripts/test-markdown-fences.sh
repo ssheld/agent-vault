@@ -162,8 +162,19 @@ extract_fences() {
     END { if (begins != 1 || ends != 1 || active || bad) exit 1 }
   ' "$1"
 }
-for helper in check-context-log-rollover compact-context-log check-lessons-archive check-memory-budget; do
-  extract_fences "$repo_root/scaffold/root/scripts/$helper.sh" >"$tmp_root/$helper.block" || fail "invalid fence markers: $helper"
+# The tracked pre-commit hook carries the same block: its context-log scanners
+# must ignore fenced examples exactly like the helpers do, so it belongs in this
+# parity check even though it lives outside scaffold/root/scripts.
+fence_carriers=(
+  "scaffold/root/scripts/check-context-log-rollover.sh"
+  "scaffold/root/scripts/compact-context-log.sh"
+  "scaffold/root/scripts/check-lessons-archive.sh"
+  "scaffold/root/scripts/check-memory-budget.sh"
+  "scaffold/agent-vault/_assets/hooks/pre-commit"
+)
+for carrier in "${fence_carriers[@]}"; do
+  helper="$(basename "$carrier" .sh)"
+  extract_fences "$repo_root/$carrier" >"$tmp_root/$helper.block" || fail "invalid fence markers: $carrier"
   check cmp -s "$tmp_root/check-context-log-rollover.block" "$tmp_root/$helper.block"
 done
 for damage in missing duplicate reversed; do

@@ -395,7 +395,7 @@ classify_context_log_layout() {
 
   snapshot_line="$(first_matching_line_number "$file_path" '^## Current Snapshot$')"
   entries_line="$(first_matching_line_number "$file_path" '^## Entries$')"
-  entry_heading_line="$(first_matching_line_number "$file_path" '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} local')"
+  entry_heading_line="$(first_matching_line_number "$file_path" '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} (local|[A-Z][A-Za-z]{1,5}|[+-][0-9]{2}([0-9]{2})?)')"
   legacy_entry_heading_line="$(first_matching_line_number "$file_path" '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} local — ')"
 
   if grep -Eq '^## (Legacy Unindexed Entries|Historical Snapshot|Historical Indexed Entries)$' "$file_path"; then

@@ -162,6 +162,37 @@ fi
 # shellcheck source=./lib/runtime-note.sh
 source "agent-vault/_assets/hooks/lib/runtime-note.sh"
 
+# Tests check marker integrity, equality, and caller behavior.
+# BEGIN markdown fences
+markdown_fences='
+    function reset_fence() { fence_marker = ""; fence_length = 0; fence_line = 0 }
+    function fenced(line, candidate, marker, run, tail) {
+      candidate = line
+      sub(/\r$/, "", candidate)
+      sub(/^ ? ? ?/, "", candidate)
+      marker = substr(candidate, 1, 1)
+      run = 0
+      if (marker == "`" || marker == "~") {
+        while (substr(candidate, run + 1, 1) == marker) run++
+      }
+      tail = substr(candidate, run + 1)
+      if (fence_marker != "") {
+        if (marker == fence_marker && run >= fence_length && tail ~ /^[ \t]*$/) {
+          fence_marker = ""
+        }
+        return 1
+      }
+      if (run < 3) return 0
+      if (marker == "`" && index(tail, "`") != 0) return 0
+      fence_marker = marker
+      fence_length = run
+      fence_line = FNR
+      return 1
+    }
+    FNR == 1 { reset_fence() }
+'
+# END markdown fences
+
 extract_context_log_frontmatter_value() {
   local file_path="$1"
   local field_name="$2"
@@ -190,7 +221,8 @@ extract_context_log_frontmatter_value() {
 extract_context_log_snapshot_last_updated() {
   local file_path="$1"
 
-  awk '
+  awk "$markdown_fences"'
+    { if (fenced($0)) next }
     /^## Current Snapshot$/ {
       in_snapshot = 1
       next
@@ -211,7 +243,8 @@ extract_context_log_snapshot_last_updated() {
 collect_context_log_entry_timestamps() {
   local file_path="$1"
 
-  awk '
+  awk "$markdown_fences"'
+    { if (fenced($0)) next }
     /^## Entries$/ {
       in_entries = 1
       next
@@ -220,15 +253,20 @@ collect_context_log_entry_timestamps() {
       exit
     }
     in_entries && /^### / {
-      if (match($0, /^### ([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]) local - /)) {
+      if (match($0, /^### ([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]) (local|[A-Z][A-Za-z][A-Za-z]*|[+-][0-9][0-9]([0-9][0-9])?) - /)) {
         timestamp = $0
         sub(/^### /, "", timestamp)
-        sub(/ local - .*$/, "", timestamp)
+        sub(/ (local|[A-Z][A-Za-z][A-Za-z]*|[+-][0-9][0-9]([0-9][0-9])?) - .*$/, "", timestamp)
         print timestamp
         next
       }
 
       printf "__INVALID__\t%s\n", $0
+    }
+    END {
+      if (fence_marker != "") {
+        printf "__UNTERMINATED_FENCE__\t%d\n", fence_line
+      }
     }
   ' "$file_path"
 }
@@ -255,10 +293,16 @@ validate_staged_context_log() {
 
   while IFS= read -r current_entry_line; do
     [[ -n "$current_entry_line" ]] || continue
+
+    if [[ "$current_entry_line" == __UNTERMINATED_FENCE__* ]]; then
+      errors+=("$file_path has an unterminated Markdown fence opened on line ${current_entry_line#*$'\t'}; entry and newest-first validation cannot see past it, so close the fence and recommit.")
+      continue
+    fi
+
     has_entries="true"
 
     if [[ "$current_entry_line" == __INVALID__* ]]; then
-      errors+=("$file_path entry headings must start with \`YYYY-MM-DD HH:MM local - <agent> - <topic>\`; found: ${current_entry_line#*$'\t'}")
+      errors+=("$file_path entry headings must start with \`YYYY-MM-DD HH:MM local - <agent> - <topic>\` (\`local\` may instead be a zone such as \`EDT\`, \`ChST\`, or \`+0545\`); found: ${current_entry_line#*$'\t'}")
       continue
     fi
 

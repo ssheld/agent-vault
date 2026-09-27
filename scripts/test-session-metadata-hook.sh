@@ -110,6 +110,64 @@ replace_first_context_log_heading() {
   perl -0pi -e 's/^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} local - .*$/### '"$replacement_heading"'/m' "$file_path"
 }
 
+# Swap the zone field only, leaving the timestamp and topic intact so the
+# freshness assertions keep comparing the same date.
+replace_first_context_log_zone() {
+  local file_path="$1"
+  local replacement_zone="$2"
+
+  perl -0pi -e 's/^(### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}) local - /$1 '"$replacement_zone"' - /m' "$file_path"
+}
+
+# Insert a fenced block holding one arbitrary line just after the newest entry
+# heading, so the fenced content sits inside the "## Entries" section.
+insert_context_log_fence() {
+  local file_path="$1"
+  local fenced_line="$2"
+
+  awk -v fenced_line="$fenced_line" '
+    { print }
+    !inserted && /^### / {
+      print ""
+      print "```"
+      print fenced_line
+      print "```"
+      inserted = 1
+    }
+  ' "$file_path" >"$file_path.fence"
+  mv "$file_path.fence" "$file_path"
+}
+
+# Open a fence that never validly closes, just after the newest entry heading. A
+# weak closer shorter than the opener does not close it, which is why the opener
+# length matters and not merely the presence of a later delimiter line.
+open_context_log_fence() {
+  local file_path="$1"
+  local opener="$2"
+  local weak_closer="${3:-}"
+
+  awk -v opener="$opener" -v weak_closer="$weak_closer" '
+    { print }
+    !inserted && /^### / {
+      print ""
+      print opener
+      print "example"
+      if (weak_closer != "") {
+        print weak_closer
+      }
+      inserted = 1
+    }
+  ' "$file_path" >"$file_path.fence"
+  mv "$file_path.fence" "$file_path"
+}
+
+append_context_log_entry() {
+  local file_path="$1"
+  local heading="$2"
+
+  printf '\n### %s\n- Body.\n' "$heading" >>"$file_path"
+}
+
 clear_context_log_entries() {
   local file_path="$1"
 
@@ -462,6 +520,77 @@ replace_first_context_log_heading "$invalid_heading_repo/agent-vault/context-log
 git -C "$invalid_heading_repo" add agent-vault/context-log.md
 invalid_heading_output="$(run_hook_expect_failure "$invalid_heading_repo")"
 assert_output_contains "$invalid_heading_output" 'entry headings must start with `YYYY-MM-DD HH:MM local - <agent> - <topic>`'
+
+# Real `date +%Z` output is accepted in place of the literal `local`, so an agent
+# validates without rewriting project history whatever zone it runs in. The cases
+# below are all genuine outputs: `ChST` (Pacific/Guam, Pacific/Saipan) is mixed
+# case, and zones with no abbreviation emit a numeric offset (Asia/Kathmandu gives
+# `+0545`), so neither an all-uppercase nor an alphabetic-only pattern suffices.
+accepted_zone_index=0
+for accepted_zone in "EDT" "ChST" "+0545"; do
+  accepted_zone_index=$((accepted_zone_index + 1))
+  accepted_zone_repo="$tmp_root/context-log-zone-$accepted_zone_index"
+  init_repo "$accepted_zone_repo"
+  "$repo_root/scripts/new-project.sh" "hook-test" "$accepted_zone_repo" >/dev/null
+  replace_first_context_log_zone "$accepted_zone_repo/agent-vault/context-log.md" "$accepted_zone"
+  git -C "$accepted_zone_repo" add agent-vault/context-log.md
+  run_hook_expect_success "$accepted_zone_repo"
+done
+
+# A zone must still start uppercase, so a lowercase spelling stays invalid and the
+# pattern cannot swallow arbitrary lowercase text before the agent field.
+lowercase_zone_repo="$tmp_root/context-log-lowercase-zone"
+init_repo "$lowercase_zone_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$lowercase_zone_repo" >/dev/null
+replace_first_context_log_zone "$lowercase_zone_repo/agent-vault/context-log.md" "edt"
+git -C "$lowercase_zone_repo" add agent-vault/context-log.md
+lowercase_zone_output="$(run_hook_expect_failure "$lowercase_zone_repo")"
+assert_output_contains "$lowercase_zone_output" 'entry headings must start with `YYYY-MM-DD HH:MM local - <agent> - <topic>`'
+
+# A fenced block inside an entry is documentation, not structure. The scanners
+# must apply the same fence rules as the rollover checker and the compactor.
+# Without them a fenced "### ..." line was reported as an invalid heading.
+fenced_entry_repo="$tmp_root/context-log-fenced-entry"
+init_repo "$fenced_entry_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$fenced_entry_repo" >/dev/null
+insert_context_log_fence "$fenced_entry_repo/agent-vault/context-log.md" '### Example heading'
+git -C "$fenced_entry_repo" add agent-vault/context-log.md
+run_hook_expect_success "$fenced_entry_repo"
+
+# The more dangerous direction: a fenced "## ..." line used to terminate the
+# entry scan, so entries below it were never validated and an out-of-order entry
+# passed the gate. The appended entry is newer than the one above it, so the
+# newest-first check must still fire.
+fenced_section_repo="$tmp_root/context-log-fenced-section"
+init_repo "$fenced_section_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$fenced_section_repo" >/dev/null
+insert_context_log_fence "$fenced_section_repo/agent-vault/context-log.md" '## Example'
+append_context_log_entry "$fenced_section_repo/agent-vault/context-log.md" \
+  '2099-03-19 08:32 EDT - codex - newer entry below an older one'
+git -C "$fenced_section_repo" add agent-vault/context-log.md
+fenced_section_output="$(run_hook_expect_failure "$fenced_section_repo")"
+assert_output_contains "$fenced_section_output" 'must keep entries newest-first'
+
+# Fence awareness must not become its own bypass. An unterminated fence makes
+# fenced() swallow every later line, so the heading and newest-first checks would
+# silently stop applying for the rest of the log. The validator must reject the
+# open fence instead. The rollover checker also notices it, but that hook warning
+# is non-blocking, so the blocking validator needs its own check. Both openers
+# below stay open: the second has a closer shorter than its opener.
+unterminated_fence_index=0
+for unterminated_opener in '```:' '````:```'; do
+  unterminated_fence_index=$((unterminated_fence_index + 1))
+  unterminated_repo="$tmp_root/context-log-unterminated-fence-$unterminated_fence_index"
+  init_repo "$unterminated_repo"
+  "$repo_root/scripts/new-project.sh" "hook-test" "$unterminated_repo" >/dev/null
+  open_context_log_fence "$unterminated_repo/agent-vault/context-log.md" \
+    "${unterminated_opener%%:*}" "${unterminated_opener##*:}"
+  append_context_log_entry "$unterminated_repo/agent-vault/context-log.md" \
+    '2099-03-19 08:32 local - codex - newer entry below an older one'
+  git -C "$unterminated_repo" add agent-vault/context-log.md
+  unterminated_output="$(run_hook_expect_failure "$unterminated_repo")"
+  assert_output_contains "$unterminated_output" 'has an unterminated Markdown fence opened on line'
+done
 
 empty_entries_repo="$tmp_root/context-log-empty-entries"
 init_repo "$empty_entries_repo"
