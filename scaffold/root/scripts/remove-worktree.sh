@@ -259,49 +259,141 @@ ensure_deletable_branch() {
   fi
 }
 
-# Extract the directories a setuptools finder-style (PEP 660) editable record maps.
+# Extract the paths a setuptools finder-style (PEP 660) editable record maps.
 # The generated module is metadata, not configuration, and this runs inside a
 # destructive cleanup path, so it is parsed statically: sourcing it or handing it to
 # an interpreter here would execute whatever the file happens to contain.
-# `MAPPING` holds package directories and `NAMESPACES` holds lists of them, both on
-# a single line, annotated on newer setuptools and bare on older releases. Every
-# quoted literal on those lines is emitted and the caller filters; a dict key is a
-# package name, which cannot resolve to a path inside the target worktree.
+# `MAPPING` holds package or module paths and `NAMESPACES` holds lists of them, both
+# on a single line, annotated on newer setuptools and bare on older releases.
+# Values are Python `repr` output, so the source spelling is not the path: a
+# backslash arrives doubled, and when a path holds both quote characters `repr`
+# single-quotes it and escapes the inner quote. The scanner therefore tracks
+# escapes when finding the closing quote and decodes the literal before emitting
+# it. Output is NUL-delimited because a decoded path may legally contain a newline.
+# Every literal is emitted and the caller filters: a dict key is a package name,
+# which cannot resolve to a path inside the target worktree.
 finder_record_paths() {
   local finder_module_file="$1"
 
   [[ -f "$finder_module_file" ]] || return 0
 
   awk '
-    /^[[:space:]]*(MAPPING|NAMESPACES)[[:space:]]*(:[^=]*)?=/ {
-      rest = $0
-      while (match(rest, /\047[^\047]*\047|"[^"]*"/)) {
-        token = substr(rest, RSTART + 1, RLENGTH - 2)
-        if (token != "") {
-          print token
+    BEGIN { SQ = sprintf("%c", 39); DQ = "\"" }
+
+    function hexval(c,   position) {
+      position = index("0123456789abcdef", tolower(c))
+      return position - 1
+    }
+
+    function decode(raw,   out, i, n, c, high, low) {
+      out = ""
+      i = 1
+      n = length(raw)
+      while (i <= n) {
+        c = substr(raw, i, 1)
+        if (c != "\\" || i == n) {
+          out = out c
+          i++
+          continue
         }
-        rest = substr(rest, RSTART + RLENGTH)
+        i++
+        c = substr(raw, i, 1)
+        if (c == "n") {
+          out = out "\n"
+        } else if (c == "t") {
+          out = out "\t"
+        } else if (c == "r") {
+          out = out "\r"
+        } else if (c == "\\" || c == SQ || c == DQ) {
+          out = out c
+        } else if (c == "x") {
+          high = hexval(substr(raw, i + 1, 1))
+          low = hexval(substr(raw, i + 2, 1))
+          if (high >= 0 && low >= 0 && (high * 16 + low) > 0) {
+            out = out sprintf("%c", high * 16 + low)
+            i += 2
+          } else {
+            out = out "\\x"
+          }
+        } else {
+          # Python keeps the backslash for an unrecognized escape.
+          out = out "\\" c
+        }
+        i++
+      }
+      return out
+    }
+
+    /^[[:space:]]*(MAPPING|NAMESPACES)[[:space:]]*(:[^=]*)?=/ {
+      rest = substr($0, index($0, "=") + 1)
+      i = 1
+      n = length(rest)
+      while (i <= n) {
+        c = substr(rest, i, 1)
+        if (c != SQ && c != DQ) {
+          i++
+          continue
+        }
+        quote = c
+        i++
+        raw = ""
+        while (i <= n) {
+          c = substr(rest, i, 1)
+          if (c == "\\" && i < n) {
+            raw = raw substr(rest, i, 2)
+            i += 2
+            continue
+          }
+          if (c == quote) {
+            i++
+            break
+          }
+          raw = raw c
+          i++
+        }
+        value = decode(raw)
+        if (value != "") {
+          printf "%s%c", value, 0
+        }
       }
     }
   ' "$finder_module_file" 2>/dev/null
 }
 
 # Record the binding and succeed when one candidate resolves inside the target.
-# Relative candidates resolve against the .pth directory, matching Python. Finder
-# values may name a file rather than a directory, so existence is the test here;
-# literal .pth entries keep their stricter directory check at the call site.
+# Relative candidates resolve against the .pth directory, matching Python.
+#
+# An existing directory is canonicalized whole, preserving symlink resolution for
+# literal .pth entries. Otherwise the containing directory is canonicalized and the
+# leaf appended, because a finder maps a top-level py-module to an extensionless
+# stem: `py-modules = ["mymodule"]` yields `.../mymodule` while the file is
+# `mymodule.py`, and the finder resolves that stem through Python's module
+# suffixes, which are interpreter- and platform-specific. Requiring the leaf to
+# exist would miss that binding. Anchoring on the directory also keeps
+# canonical_path away from regular files, which it refuses by design.
 editable_candidate_binds_target() {
   local candidate="$1"
   local pth_dir="$2"
   local target_path="$3"
+  local candidate_dir=""
+  local candidate_base=""
 
   [[ -n "$candidate" ]] || return 1
   [[ "$candidate" == /* ]] || candidate="$pth_dir/$candidate"
-  [[ -e "$candidate" ]] || return 1
 
-  canonical_path "$candidate"
-  if [[ "$CANONICAL_PATH" == "$target_path" || "$CANONICAL_PATH" == "$target_path/"* ]]; then
-    BOUND_EDITABLE_PATH="$CANONICAL_PATH"
+  if [[ -d "$candidate" ]]; then
+    canonical_path "$candidate"
+    candidate="$CANONICAL_PATH"
+  else
+    candidate_dir="$(dirname "$candidate")"
+    candidate_base="$(basename "$candidate")"
+    [[ -d "$candidate_dir" ]] || return 1
+    canonical_path "$candidate_dir"
+    candidate="${CANONICAL_PATH%/}/$candidate_base"
+  fi
+
+  if [[ "$candidate" == "$target_path" || "$candidate" == "$target_path/"* ]]; then
+    BOUND_EDITABLE_PATH="$candidate"
     return 0
   fi
 
@@ -350,7 +442,7 @@ find_shared_editable_binding() {
           *) continue ;;
         esac
 
-        while IFS= read -r candidate; do
+        while IFS= read -r -d '' candidate; do
           if editable_candidate_binds_target "$candidate" "$pth_dir" "$target_path"; then
             return 0
           fi

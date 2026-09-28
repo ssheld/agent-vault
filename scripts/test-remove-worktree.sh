@@ -767,6 +767,70 @@ output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch co
 assert_exit_code 0 "$rc" "finder-hidden exits 0"
 assert_path_missing "$worktree_path" "finder-hidden removes the worktree"
 
+# --- Finder mappings for a top-level py-module are extensionless stems ---
+# setuptools maps `py-modules = ["mymodule"]` to `.../mymodule` while the file on
+# disk is `mymodule.py`, and its finder resolves that stem through Python's module
+# suffixes. Those suffixes are interpreter- and platform-specific
+# (`.cpython-314-darwin.so` on this machine), so requiring the mapped leaf to exist
+# misses a live binding. The containing directory is what anchors the decision.
+working="$(setup_repo repo-finder-stem-inside)"
+worktree_path="$(create_worktree "$working" "codex/220-finder-stem" "codex-220-finder-stem")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+printf 'V = 1\n' >"$worktree_path/mymodule.py"
+# Commit it: an untracked file would make git refuse on a dirty worktree instead,
+# which would mask whether the editable-binding guard fired at all.
+git -C "$worktree_path" add mymodule.py >/dev/null
+git -C "$worktree_path" commit -qm "add module" >/dev/null
+write_finder_record "$site_packages" "__editable___mymodule_0_1_0_finder" "__editable__.mymodule-0.1.0.pth" \
+  "'mymodule': '$worktree_path/mymodule'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/220-finder-stem 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "finder-stem-inside exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "finder-stem-inside reports the binding"
+assert_path_exists "$worktree_path" "finder-stem-inside preserves worktree"
+
+# A stem outside the target must keep permitting removal.
+working="$(setup_repo repo-finder-stem-outside)"
+worktree_path="$(create_worktree "$working" "codex/221-finder-stem-out" "codex-221-finder-stem-out")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$tmp_root/wt/stem-elsewhere"
+printf 'V = 1\n' >"$tmp_root/wt/stem-elsewhere/mymodule.py"
+write_finder_record "$site_packages" "__editable___mymodule_0_1_0_finder" "__editable__.mymodule-0.1.0.pth" \
+  "'mymodule': '$tmp_root/wt/stem-elsewhere/mymodule'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/221-finder-stem-out 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "finder-stem-outside exits 0"
+assert_path_missing "$worktree_path" "finder-stem-outside removes the worktree"
+
+# --- Finder values are Python repr output and must be decoded, not used raw ---
+# A path containing a backslash is serialized doubled, so the raw source spelling
+# names a different path than the one on disk.
+working="$(setup_repo repo-finder-backslash)"
+worktree_path="$(create_worktree "$working" "codex/222-finder-backslash" "codex-222-finder-backslash")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$worktree_path/back\\slash/pkg"
+write_finder_record "$site_packages" "__editable___bs_0_1_0_finder" "__editable__.bs-0.1.0.pth" \
+  "'pkg': '$worktree_path/back\\\\slash/pkg'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/222-finder-backslash 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "finder-backslash exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "finder-backslash reports the binding"
+assert_path_exists "$worktree_path" "finder-backslash preserves worktree"
+
+# When a path holds both quote characters, repr single-quotes it and escapes the
+# single quote, so a scanner that stops at the first quote truncates the value.
+working="$(setup_repo repo-finder-quotes)"
+worktree_path="$(create_worktree "$working" "codex/223-finder-quotes" "codex-223-finder-quotes")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$worktree_path/both'\"q/pkg"
+write_finder_record "$site_packages" "__editable___q_0_1_0_finder" "__editable__.q-0.1.0.pth" \
+  "'pkg': '$worktree_path/both\\'\"q/pkg'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/223-finder-quotes 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "finder-quotes exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "finder-quotes reports the binding"
+assert_path_exists "$worktree_path" "finder-quotes preserves worktree"
+
 echo ""
 echo "Results: $passed passed, $failed failed"
 if [[ "$failed" -gt 0 ]]; then
