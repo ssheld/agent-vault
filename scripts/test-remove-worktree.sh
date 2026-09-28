@@ -48,6 +48,21 @@ assert_output_contains() {
   fi
 }
 
+assert_output_excludes() {
+  local output="$1"
+  local unexpected_text="$2"
+  local label="$3"
+
+  if [[ "$output" != *"$unexpected_text"* ]]; then
+    echo "PASS: $label"
+    passed=$((passed + 1))
+  else
+    echo "FAIL: $label - unexpected text: $unexpected_text" >&2
+    echo "  Actual output: $output" >&2
+    failed=$((failed + 1))
+  fi
+}
+
 assert_path_exists() {
   local path="$1"
   local label="$2"
@@ -122,6 +137,42 @@ create_detached_worktree() {
   mkdir -p "$(dirname "$worktree_path")"
   git -C "$working" worktree add --detach "$worktree_path" main >/dev/null
   printf '%s\n' "$worktree_path"
+}
+
+# Write a setuptools finder-style (PEP 660) editable record: a .pth carrying only
+# an import statement, plus the generated finder module it imports. This is what
+# `pip install -e .` emits for a flat-layout project, verified against setuptools
+# 84.0.0. Pass annotate=bare to emit the older unannotated `MAPPING = {...}` form.
+write_finder_record() {
+  local site_packages="$1"
+  local module_name="$2"
+  local pth_name="$3"
+  local mapping_body="$4"
+  local namespaces_body="$5"
+  local annotate="${6:-annotated}"
+
+  mkdir -p "$site_packages"
+  if [[ "$annotate" == "annotated" ]]; then
+    {
+      printf 'MAPPING: dict[str, str] = {%s}\n' "$mapping_body"
+      printf 'NAMESPACES: dict[str, list[str]] = {%s}\n' "$namespaces_body"
+    } >"$site_packages/$module_name.py"
+  else
+    {
+      printf 'MAPPING = {%s}\n' "$mapping_body"
+      printf 'NAMESPACES = {%s}\n' "$namespaces_body"
+    } >"$site_packages/$module_name.py"
+  fi
+  printf 'import %s; %s.install()\n' "$module_name" "$module_name" >"$site_packages/$pth_name"
+}
+
+# The non-editable import-style .pth that ships in most venvs. Must be tolerated.
+write_distutils_precedence_pth() {
+  local site_packages="$1"
+
+  mkdir -p "$site_packages"
+  printf "%s\n" "import os; var = 'SETUPTOOLS_USE_DISTUTILS'; enabled = os.environ.get(var, 'local') == 'local'; enabled and __import__('_distutils_hack').add_shim();" \
+    >"$site_packages/distutils-precedence.pth"
 }
 
 # --- Test 1: Refuse removal when shared .venv still points into the worktree ---
@@ -609,6 +660,245 @@ rc=0
 output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/201-relative-pth-other 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "relative-pth-unrelated exits 0"
 assert_path_missing "$worktree_path" "relative-pth-unrelated removes the worktree"
+
+# --- Finder-style (PEP 660) editable records are real bindings ---
+# A flat-layout `pip install -e .` writes no path into the .pth at all, only an
+# import of a generated finder module whose MAPPING/NAMESPACES hold the paths.
+# The literal-entry logic cannot see those, so the guard silently allowed removal
+# of a worktree the shared environment was importing from. The .pth content is
+# never executed here: this is a destructive cleanup path, so it is parsed
+# statically.
+working="$(setup_repo repo-finder-inside)"
+worktree_path="$(create_worktree "$working" "codex/210-finder-inside" "codex-210-finder-inside")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$worktree_path/mypkg"
+write_finder_record "$site_packages" "__editable___mypkg_0_1_0_finder" "__editable__.mypkg-0.1.0.pth" \
+  "'mypkg': '$worktree_path/mypkg'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/210-finder-inside 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "finder-inside exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "finder-inside reports the binding"
+assert_path_exists "$worktree_path" "finder-inside preserves worktree"
+
+# A finder mapping outside the target must not block removal.
+working="$(setup_repo repo-finder-outside)"
+worktree_path="$(create_worktree "$working" "codex/211-finder-outside" "codex-211-finder-outside")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$tmp_root/wt/finder-elsewhere/otherpkg"
+write_finder_record "$site_packages" "__editable___otherpkg_0_1_0_finder" "__editable__.otherpkg-0.1.0.pth" \
+  "'otherpkg': '$tmp_root/wt/finder-elsewhere/otherpkg'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/211-finder-outside 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "finder-outside exits 0"
+assert_path_missing "$worktree_path" "finder-outside removes the worktree"
+
+# NAMESPACES values are lists, and a namespace-only record is still a binding.
+working="$(setup_repo repo-finder-namespaces)"
+worktree_path="$(create_worktree "$working" "codex/212-finder-ns" "codex-212-finder-ns")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$worktree_path/nspkg"
+write_finder_record "$site_packages" "__editable___nspkg_0_1_0_finder" "__editable__.nspkg-0.1.0.pth" \
+  "" "'nspkg': ['$worktree_path/nspkg']"
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/212-finder-ns 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "finder-namespaces exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "finder-namespaces reports the binding"
+assert_path_exists "$worktree_path" "finder-namespaces preserves worktree"
+
+# Older setuptools emits MAPPING without a type annotation.
+working="$(setup_repo repo-finder-bare)"
+worktree_path="$(create_worktree "$working" "codex/213-finder-bare" "codex-213-finder-bare")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$worktree_path/barepkg"
+write_finder_record "$site_packages" "__editable___barepkg_0_1_0_finder" "__editable__.barepkg-0.1.0.pth" \
+  "'barepkg': '$worktree_path/barepkg'" "" "bare"
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/213-finder-bare 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "finder-bare exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "finder-bare reports the binding"
+assert_path_exists "$worktree_path" "finder-bare preserves worktree"
+
+# distutils-precedence.pth is an import-style record that is not editable at all.
+# It must be ignored without error and must not disturb a real finder record.
+working="$(setup_repo repo-finder-distutils)"
+worktree_path="$(create_worktree "$working" "codex/214-finder-distutils" "codex-214-finder-distutils")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$worktree_path/mypkg"
+write_distutils_precedence_pth "$site_packages"
+write_finder_record "$site_packages" "__editable___mypkg_0_1_0_finder" "__editable__.mypkg-0.1.0.pth" \
+  "'mypkg': '$worktree_path/mypkg'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/214-finder-distutils 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "finder-distutils exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "finder-distutils still reports the binding"
+assert_output_excludes "$output" "_distutils_hack" "finder-distutils does not surface the unrelated record"
+
+# distutils-precedence.pth on its own must leave removal untouched.
+working="$(setup_repo repo-distutils-only)"
+worktree_path="$(create_worktree "$working" "codex/215-distutils-only" "codex-215-distutils-only")"
+write_distutils_precedence_pth "$working/.venv/lib/python3.10/site-packages"
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/215-distutils-only 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "distutils-only exits 0"
+assert_path_missing "$worktree_path" "distutils-only removes the worktree"
+
+# A .pth importing a finder module that is absent must be skipped, not fatal.
+working="$(setup_repo repo-finder-missing)"
+worktree_path="$(create_worktree "$working" "codex/216-finder-missing" "codex-216-finder-missing")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$site_packages"
+printf 'import __editable___ghost_0_1_0_finder; __editable___ghost_0_1_0_finder.install()\n' \
+  >"$site_packages/__editable__.ghost-0.1.0.pth"
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/216-finder-missing 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "finder-missing exits 0"
+assert_path_missing "$worktree_path" "finder-missing removes the worktree"
+assert_output_excludes "$output" "No such file" "finder-missing reports no interpreter error"
+
+# A hidden record stays inert even when it carries a finder import.
+working="$(setup_repo repo-finder-hidden)"
+worktree_path="$(create_worktree "$working" "codex/217-finder-hidden" "codex-217-finder-hidden")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$worktree_path/mypkg"
+write_finder_record "$site_packages" "__editable___hidden_0_1_0_finder" ".disabled.pth" \
+  "'mypkg': '$worktree_path/mypkg'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/217-finder-hidden 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "finder-hidden exits 0"
+assert_path_missing "$worktree_path" "finder-hidden removes the worktree"
+
+# --- Finder mappings for a top-level py-module are extensionless stems ---
+# setuptools maps `py-modules = ["mymodule"]` to `.../mymodule` while the file on
+# disk is `mymodule.py`, and its finder resolves that stem through Python's module
+# suffixes. Those suffixes are interpreter- and platform-specific
+# (`.cpython-314-darwin.so` on this machine), so requiring the mapped leaf to exist
+# misses a live binding. The containing directory is what anchors the decision.
+working="$(setup_repo repo-finder-stem-inside)"
+worktree_path="$(create_worktree "$working" "codex/220-finder-stem" "codex-220-finder-stem")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+printf 'V = 1\n' >"$worktree_path/mymodule.py"
+# Commit it: an untracked file would make git refuse on a dirty worktree instead,
+# which would mask whether the editable-binding guard fired at all.
+git -C "$worktree_path" add mymodule.py >/dev/null
+git -C "$worktree_path" commit -qm "add module" >/dev/null
+write_finder_record "$site_packages" "__editable___mymodule_0_1_0_finder" "__editable__.mymodule-0.1.0.pth" \
+  "'mymodule': '$worktree_path/mymodule'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/220-finder-stem 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "finder-stem-inside exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "finder-stem-inside reports the binding"
+assert_path_exists "$worktree_path" "finder-stem-inside preserves worktree"
+
+# A stem outside the target must keep permitting removal.
+working="$(setup_repo repo-finder-stem-outside)"
+worktree_path="$(create_worktree "$working" "codex/221-finder-stem-out" "codex-221-finder-stem-out")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$tmp_root/wt/stem-elsewhere"
+printf 'V = 1\n' >"$tmp_root/wt/stem-elsewhere/mymodule.py"
+write_finder_record "$site_packages" "__editable___mymodule_0_1_0_finder" "__editable__.mymodule-0.1.0.pth" \
+  "'mymodule': '$tmp_root/wt/stem-elsewhere/mymodule'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/221-finder-stem-out 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "finder-stem-outside exits 0"
+assert_path_missing "$worktree_path" "finder-stem-outside removes the worktree"
+
+# --- Finder values are Python repr output and must be decoded, not used raw ---
+# A path containing a backslash is serialized doubled, so the raw source spelling
+# names a different path than the one on disk.
+working="$(setup_repo repo-finder-backslash)"
+worktree_path="$(create_worktree "$working" "codex/222-finder-backslash" "codex-222-finder-backslash")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$worktree_path/back\\slash/pkg"
+write_finder_record "$site_packages" "__editable___bs_0_1_0_finder" "__editable__.bs-0.1.0.pth" \
+  "'pkg': '$worktree_path/back\\\\slash/pkg'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/222-finder-backslash 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "finder-backslash exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "finder-backslash reports the binding"
+assert_path_exists "$worktree_path" "finder-backslash preserves worktree"
+
+# When a path holds both quote characters, repr single-quotes it and escapes the
+# single quote, so a scanner that stops at the first quote truncates the value.
+working="$(setup_repo repo-finder-quotes)"
+worktree_path="$(create_worktree "$working" "codex/223-finder-quotes" "codex-223-finder-quotes")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$worktree_path/both'\"q/pkg"
+write_finder_record "$site_packages" "__editable___q_0_1_0_finder" "__editable__.q-0.1.0.pth" \
+  "'pkg': '$worktree_path/both\\'\"q/pkg'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/223-finder-quotes 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "finder-quotes exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "finder-quotes reports the binding"
+assert_path_exists "$worktree_path" "finder-quotes preserves worktree"
+
+# --- repr escapes denote codepoints, so decoding must produce UTF-8 bytes ---
+# `repr` leaves printable non-ASCII alone but escapes non-printables: U+00A0 becomes
+# `\xa0` and U+200B becomes `​`. Emitting the numeric value as a single byte
+# yields `a0` where the filename holds `c2 a0`, and an unrecognized `\u` passes
+# through verbatim. Either way the candidate names a path that does not exist and
+# the binding is missed.
+nbsp_char=$' '
+working="$(setup_repo repo-finder-nbsp)"
+worktree_path="$(create_worktree "$working" "codex/225-finder-nbsp" "codex-225-finder-nbsp")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$worktree_path/nb${nbsp_char}sp/pkg"
+write_finder_record "$site_packages" "__editable___nbsp_0_1_0_finder" "__editable__.nbsp-0.1.0.pth" \
+  "'pkg': '$worktree_path/nb\\xa0sp/pkg'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/225-finder-nbsp 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "finder-nbsp exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "finder-nbsp reports the binding"
+assert_path_exists "$worktree_path" "finder-nbsp preserves worktree"
+
+zwsp_char=$'​'
+working="$(setup_repo repo-finder-zwsp)"
+worktree_path="$(create_worktree "$working" "codex/226-finder-zwsp" "codex-226-finder-zwsp")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$worktree_path/zw${zwsp_char}sp/pkg"
+write_finder_record "$site_packages" "__editable___zwsp_0_1_0_finder" "__editable__.zwsp-0.1.0.pth" \
+  "'pkg': '$worktree_path/zw\\u200bsp/pkg'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/226-finder-zwsp 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "finder-zwsp exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "finder-zwsp reports the binding"
+assert_path_exists "$worktree_path" "finder-zwsp preserves worktree"
+
+# --- Splitting the candidate must not lose a trailing newline ---
+# A worktree name may legally end in a newline. Command substitution strips
+# trailing newlines from `dirname` output, so the extensionless-stem branch would
+# check the wrong parent and skip the binding. The path is built without a
+# command-substitution round-trip here, since that would strip it too.
+newline_worktree_name=$'module-wt\n'
+working="$(setup_repo repo-finder-newline)"
+mkdir -p "$tmp_root/wt"
+newline_worktree_path="$tmp_root/wt/$newline_worktree_name"
+git -C "$working" worktree add -b codex/227-finder-newline "$newline_worktree_path" main >/dev/null 2>&1
+site_packages="$working/.venv/lib/python3.10/site-packages"
+printf 'V = 1\n' >"$newline_worktree_path/mymodule.py"
+git -C "$newline_worktree_path" add mymodule.py >/dev/null
+git -C "$newline_worktree_path" commit -qm "add module" >/dev/null
+write_finder_record "$site_packages" "__editable___nl_0_1_0_finder" "__editable__.nl-0.1.0.pth" \
+  "'mymodule': '$tmp_root/wt/module-wt\\n/mymodule'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/227-finder-newline 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "finder-newline-stem exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "finder-newline-stem reports the binding"
+assert_path_exists "$newline_worktree_path" "finder-newline-stem preserves worktree"
+
+# Control: a package directory under the same newline-ending worktree takes the
+# existing-directory branch and must keep refusing.
+working="$(setup_repo repo-finder-newline-dir)"
+mkdir -p "$tmp_root/wt"
+newline_dir_worktree_path="$tmp_root/wt/pkg-wt"$'\n'
+git -C "$working" worktree add -b codex/228-finder-newline-dir "$newline_dir_worktree_path" main >/dev/null 2>&1
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$newline_dir_worktree_path/pkg"
+write_finder_record "$site_packages" "__editable___nld_0_1_0_finder" "__editable__.nld-0.1.0.pth" \
+  "'pkg': '$tmp_root/wt/pkg-wt\\n/pkg'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/228-finder-newline-dir 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "finder-newline-dir exits 1"
+assert_path_exists "$newline_dir_worktree_path" "finder-newline-dir preserves worktree"
 
 echo ""
 echo "Results: $passed passed, $failed failed"

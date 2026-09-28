@@ -259,13 +259,199 @@ ensure_deletable_branch() {
   fi
 }
 
+# Extract the paths a setuptools finder-style (PEP 660) editable record maps.
+# The generated module is metadata, not configuration, and this runs inside a
+# destructive cleanup path, so it is parsed statically: sourcing it or handing it to
+# an interpreter here would execute whatever the file happens to contain.
+# `MAPPING` holds package or module paths and `NAMESPACES` holds lists of them, both
+# on a single line, annotated on newer setuptools and bare on older releases.
+# Values are Python `repr` output, so the source spelling is not the path: a
+# backslash arrives doubled, and when a path holds both quote characters `repr`
+# single-quotes it and escapes the inner quote. The scanner therefore tracks
+# escapes when finding the closing quote and decodes the literal before emitting
+# it. Output is NUL-delimited because a decoded path may legally contain a newline.
+# Every literal is emitted and the caller filters: a dict key is a package name,
+# which cannot resolve to a path inside the target worktree.
+finder_record_paths() {
+  local finder_module_file="$1"
+
+  [[ -f "$finder_module_file" ]] || return 0
+
+  LC_ALL=C awk '
+    BEGIN { SQ = sprintf("%c", 39); DQ = "\"" }
+
+    function hexval(c,   position) {
+      position = index("0123456789abcdef", tolower(c))
+      return position - 1
+    }
+
+    function hexnum(s, count,   i, value, digit) {
+      if (length(s) < count) {
+        return -1
+      }
+      value = 0
+      for (i = 1; i <= count; i++) {
+        digit = hexval(substr(s, i, 1))
+        if (digit < 0) {
+          return -1
+        }
+        value = value * 16 + digit
+      }
+      return value
+    }
+
+    # A repr escape names a codepoint; the filename holds its UTF-8 encoding. Emit
+    # the bytes explicitly so the result does not depend on the locale awk runs in.
+    # Lone surrogates in DC80..DCFF are Python surrogateescape placeholders for
+    # bytes that would not decode, so they map back to that single byte.
+    function utf8(code) {
+      if (code >= 56448 && code <= 56575) {
+        return sprintf("%c", code - 56320)
+      }
+      if (code < 128) {
+        return sprintf("%c", code)
+      }
+      if (code < 2048) {
+        return sprintf("%c%c", 192 + int(code / 64), 128 + (code % 64))
+      }
+      if (code < 65536) {
+        return sprintf("%c%c%c", 224 + int(code / 4096), \
+          128 + int((code % 4096) / 64), 128 + (code % 64))
+      }
+      return sprintf("%c%c%c%c", 240 + int(code / 262144), \
+        128 + int((code % 262144) / 4096), 128 + int((code % 4096) / 64), \
+        128 + (code % 64))
+    }
+
+    function decode(raw,   out, i, n, c, width, code) {
+      out = ""
+      i = 1
+      n = length(raw)
+      while (i <= n) {
+        c = substr(raw, i, 1)
+        if (c != "\\" || i == n) {
+          out = out c
+          i++
+          continue
+        }
+        i++
+        c = substr(raw, i, 1)
+        if (c == "n") {
+          out = out "\n"
+        } else if (c == "t") {
+          out = out "\t"
+        } else if (c == "r") {
+          out = out "\r"
+        } else if (c == "\\" || c == SQ || c == DQ) {
+          out = out c
+        } else if (c == "x" || c == "u" || c == "U") {
+          width = (c == "x") ? 2 : ((c == "u") ? 4 : 8)
+          code = hexnum(substr(raw, i + 1, width), width)
+          if (code > 0) {
+            out = out utf8(code)
+            i += width
+          } else {
+            out = out "\\" c
+          }
+        } else {
+          # Python keeps the backslash for an unrecognized escape.
+          out = out "\\" c
+        }
+        i++
+      }
+      return out
+    }
+
+    /^[[:space:]]*(MAPPING|NAMESPACES)[[:space:]]*(:[^=]*)?=/ {
+      rest = substr($0, index($0, "=") + 1)
+      i = 1
+      n = length(rest)
+      while (i <= n) {
+        c = substr(rest, i, 1)
+        if (c != SQ && c != DQ) {
+          i++
+          continue
+        }
+        quote = c
+        i++
+        raw = ""
+        while (i <= n) {
+          c = substr(rest, i, 1)
+          if (c == "\\" && i < n) {
+            raw = raw substr(rest, i, 2)
+            i += 2
+            continue
+          }
+          if (c == quote) {
+            i++
+            break
+          }
+          raw = raw c
+          i++
+        }
+        value = decode(raw)
+        if (value != "") {
+          printf "%s%c", value, 0
+        }
+      }
+    }
+  ' "$finder_module_file" 2>/dev/null
+}
+
+# Record the binding and succeed when one candidate resolves inside the target.
+# Relative candidates resolve against the .pth directory, matching Python.
+#
+# An existing directory is canonicalized whole, preserving symlink resolution for
+# literal .pth entries. Otherwise the containing directory is canonicalized and the
+# leaf appended, because a finder maps a top-level py-module to an extensionless
+# stem: `py-modules = ["mymodule"]` yields `.../mymodule` while the file is
+# `mymodule.py`, and the finder resolves that stem through Python's module
+# suffixes, which are interpreter- and platform-specific. Requiring the leaf to
+# exist would miss that binding. Anchoring on the directory also keeps
+# canonical_path away from regular files, which it refuses by design.
+editable_candidate_binds_target() {
+  local candidate="$1"
+  local pth_dir="$2"
+  local target_path="$3"
+  local candidate_dir=""
+  local candidate_base=""
+
+  [[ -n "$candidate" ]] || return 1
+  [[ "$candidate" == /* ]] || candidate="$pth_dir/$candidate"
+
+  if [[ -d "$candidate" ]]; then
+    canonical_path "$candidate"
+    candidate="$CANONICAL_PATH"
+  else
+    # Split with parameter expansion, as canonical_path does. `$(dirname ...)`
+    # strips trailing newlines from its output, so a component ending in one would
+    # resolve against the wrong parent and the binding would be skipped.
+    candidate_base="${candidate##*/}"
+    candidate_dir="${candidate%/*}"
+    [[ -n "$candidate_dir" ]] || candidate_dir="/"
+    [[ -n "$candidate_base" ]] || return 1
+    [[ -d "$candidate_dir" ]] || return 1
+    canonical_path "$candidate_dir"
+    candidate="${CANONICAL_PATH%/}/$candidate_base"
+  fi
+
+  if [[ "$candidate" == "$target_path" || "$candidate" == "$target_path/"* ]]; then
+    BOUND_EDITABLE_PATH="$candidate"
+    return 0
+  fi
+
+  return 1
+}
+
 find_shared_editable_binding() {
   local target_path="$1"
   local venv_dir="$PROJECT_DIR/.venv"
   local pth_file=""
   local pth_dir=""
-  local bound_path=""
   local line=""
+  local resolved=""
+  local finder_module=""
+  local candidate=""
 
   BOUND_EDITABLE_PATH=""
   [[ -d "$venv_dir" ]] || return 0
@@ -280,16 +466,45 @@ find_shared_editable_binding() {
     # .pth file, not the caller's working directory. Resolve first, then test:
     # checking the raw entry against $PWD skips a live binding whenever this
     # helper runs from anywhere other than that site-packages directory.
-    pth_dir="$(dirname "$pth_file")"
+    pth_dir="${pth_file%/*}"
+    [[ -n "$pth_dir" ]] || pth_dir="/"
     while IFS= read -r line || [[ -n "$line" ]]; do
       [[ -n "$line" ]] || continue
       [[ "$line" != \#* ]] || continue
-      [[ "$line" == /* ]] || line="$pth_dir/$line"
-      [[ -d "$line" ]] || continue
-      canonical_path "$line"
-      bound_path="$CANONICAL_PATH"
-      if [[ "$bound_path" == "$target_path" || "$bound_path" == "$target_path/"* ]]; then
-        BOUND_EDITABLE_PATH="$bound_path"
+
+      # site.addpackage() executes a .pth line only when it starts with "import "
+      # or "import<tab>". A finder-style editable record is exactly that and
+      # carries no path at all, so the literal handling below cannot see it. Other
+      # import lines ship in ordinary venvs (distutils-precedence.pth) and must be
+      # ignored rather than treated as bindings or reported as errors.
+      if [[ "$line" == "import "* || "$line" == "import	"* ]]; then
+        finder_module=""
+        read -r _ finder_module _ <<<"$line"
+        finder_module="${finder_module%%[!A-Za-z0-9_]*}"
+        case "$finder_module" in
+          __editable__?*) ;;
+          *) continue ;;
+        esac
+
+        while IFS= read -r -d '' candidate; do
+          if editable_candidate_binds_target "$candidate" "$pth_dir" "$target_path"; then
+            return 0
+          fi
+        done < <(finder_record_paths "$pth_dir/$finder_module.py")
+
+        continue
+      fi
+
+      # Literal entries: Python only adds directories to sys.path. This also
+      # covers `editable_mode=compat`, which writes a literal project path rather
+      # than a finder module, verified on setuptools 84.0.0 for both a plain flat
+      # layout and a package-dir remap. A `_LinkTree` variant would instead point
+      # at a symlink tree inside site-packages, which no longer names the worktree
+      # and is deliberately out of scope here.
+      resolved="$line"
+      [[ "$resolved" == /* ]] || resolved="$pth_dir/$resolved"
+      [[ -d "$resolved" ]] || continue
+      if editable_candidate_binds_target "$resolved" "$pth_dir" "$target_path"; then
         return 0
       fi
     done <"$pth_file"
