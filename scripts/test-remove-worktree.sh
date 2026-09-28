@@ -831,6 +831,75 @@ assert_exit_code 1 "$rc" "finder-quotes exits 1"
 assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "finder-quotes reports the binding"
 assert_path_exists "$worktree_path" "finder-quotes preserves worktree"
 
+# --- repr escapes denote codepoints, so decoding must produce UTF-8 bytes ---
+# `repr` leaves printable non-ASCII alone but escapes non-printables: U+00A0 becomes
+# `\xa0` and U+200B becomes `​`. Emitting the numeric value as a single byte
+# yields `a0` where the filename holds `c2 a0`, and an unrecognized `\u` passes
+# through verbatim. Either way the candidate names a path that does not exist and
+# the binding is missed.
+nbsp_char=$' '
+working="$(setup_repo repo-finder-nbsp)"
+worktree_path="$(create_worktree "$working" "codex/225-finder-nbsp" "codex-225-finder-nbsp")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$worktree_path/nb${nbsp_char}sp/pkg"
+write_finder_record "$site_packages" "__editable___nbsp_0_1_0_finder" "__editable__.nbsp-0.1.0.pth" \
+  "'pkg': '$worktree_path/nb\\xa0sp/pkg'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/225-finder-nbsp 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "finder-nbsp exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "finder-nbsp reports the binding"
+assert_path_exists "$worktree_path" "finder-nbsp preserves worktree"
+
+zwsp_char=$'​'
+working="$(setup_repo repo-finder-zwsp)"
+worktree_path="$(create_worktree "$working" "codex/226-finder-zwsp" "codex-226-finder-zwsp")"
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$worktree_path/zw${zwsp_char}sp/pkg"
+write_finder_record "$site_packages" "__editable___zwsp_0_1_0_finder" "__editable__.zwsp-0.1.0.pth" \
+  "'pkg': '$worktree_path/zw\\u200bsp/pkg'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/226-finder-zwsp 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "finder-zwsp exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "finder-zwsp reports the binding"
+assert_path_exists "$worktree_path" "finder-zwsp preserves worktree"
+
+# --- Splitting the candidate must not lose a trailing newline ---
+# A worktree name may legally end in a newline. Command substitution strips
+# trailing newlines from `dirname` output, so the extensionless-stem branch would
+# check the wrong parent and skip the binding. The path is built without a
+# command-substitution round-trip here, since that would strip it too.
+newline_worktree_name=$'module-wt\n'
+working="$(setup_repo repo-finder-newline)"
+mkdir -p "$tmp_root/wt"
+newline_worktree_path="$tmp_root/wt/$newline_worktree_name"
+git -C "$working" worktree add -b codex/227-finder-newline "$newline_worktree_path" main >/dev/null 2>&1
+site_packages="$working/.venv/lib/python3.10/site-packages"
+printf 'V = 1\n' >"$newline_worktree_path/mymodule.py"
+git -C "$newline_worktree_path" add mymodule.py >/dev/null
+git -C "$newline_worktree_path" commit -qm "add module" >/dev/null
+write_finder_record "$site_packages" "__editable___nl_0_1_0_finder" "__editable__.nl-0.1.0.pth" \
+  "'mymodule': '$tmp_root/wt/module-wt\\n/mymodule'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/227-finder-newline 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "finder-newline-stem exits 1"
+assert_output_contains "$output" "Refusing to remove worktree while the shared .venv editable install points inside it" "finder-newline-stem reports the binding"
+assert_path_exists "$newline_worktree_path" "finder-newline-stem preserves worktree"
+
+# Control: a package directory under the same newline-ending worktree takes the
+# existing-directory branch and must keep refusing.
+working="$(setup_repo repo-finder-newline-dir)"
+mkdir -p "$tmp_root/wt"
+newline_dir_worktree_path="$tmp_root/wt/pkg-wt"$'\n'
+git -C "$working" worktree add -b codex/228-finder-newline-dir "$newline_dir_worktree_path" main >/dev/null 2>&1
+site_packages="$working/.venv/lib/python3.10/site-packages"
+mkdir -p "$newline_dir_worktree_path/pkg"
+write_finder_record "$site_packages" "__editable___nld_0_1_0_finder" "__editable__.nld-0.1.0.pth" \
+  "'pkg': '$tmp_root/wt/pkg-wt\\n/pkg'" ""
+rc=0
+output="$(cd "$working" && "$helper_bash" scripts/remove-worktree.sh --branch codex/228-finder-newline-dir 2>&1)" || rc=$?
+assert_exit_code 1 "$rc" "finder-newline-dir exits 1"
+assert_path_exists "$newline_dir_worktree_path" "finder-newline-dir preserves worktree"
+
 echo ""
 echo "Results: $passed passed, $failed failed"
 if [[ "$failed" -gt 0 ]]; then

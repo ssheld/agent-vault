@@ -277,7 +277,7 @@ finder_record_paths() {
 
   [[ -f "$finder_module_file" ]] || return 0
 
-  awk '
+  LC_ALL=C awk '
     BEGIN { SQ = sprintf("%c", 39); DQ = "\"" }
 
     function hexval(c,   position) {
@@ -285,7 +285,45 @@ finder_record_paths() {
       return position - 1
     }
 
-    function decode(raw,   out, i, n, c, high, low) {
+    function hexnum(s, count,   i, value, digit) {
+      if (length(s) < count) {
+        return -1
+      }
+      value = 0
+      for (i = 1; i <= count; i++) {
+        digit = hexval(substr(s, i, 1))
+        if (digit < 0) {
+          return -1
+        }
+        value = value * 16 + digit
+      }
+      return value
+    }
+
+    # A repr escape names a codepoint; the filename holds its UTF-8 encoding. Emit
+    # the bytes explicitly so the result does not depend on the locale awk runs in.
+    # Lone surrogates in DC80..DCFF are Python surrogateescape placeholders for
+    # bytes that would not decode, so they map back to that single byte.
+    function utf8(code) {
+      if (code >= 56448 && code <= 56575) {
+        return sprintf("%c", code - 56320)
+      }
+      if (code < 128) {
+        return sprintf("%c", code)
+      }
+      if (code < 2048) {
+        return sprintf("%c%c", 192 + int(code / 64), 128 + (code % 64))
+      }
+      if (code < 65536) {
+        return sprintf("%c%c%c", 224 + int(code / 4096), \
+          128 + int((code % 4096) / 64), 128 + (code % 64))
+      }
+      return sprintf("%c%c%c%c", 240 + int(code / 262144), \
+        128 + int((code % 262144) / 4096), 128 + int((code % 4096) / 64), \
+        128 + (code % 64))
+    }
+
+    function decode(raw,   out, i, n, c, width, code) {
       out = ""
       i = 1
       n = length(raw)
@@ -306,14 +344,14 @@ finder_record_paths() {
           out = out "\r"
         } else if (c == "\\" || c == SQ || c == DQ) {
           out = out c
-        } else if (c == "x") {
-          high = hexval(substr(raw, i + 1, 1))
-          low = hexval(substr(raw, i + 2, 1))
-          if (high >= 0 && low >= 0 && (high * 16 + low) > 0) {
-            out = out sprintf("%c", high * 16 + low)
-            i += 2
+        } else if (c == "x" || c == "u" || c == "U") {
+          width = (c == "x") ? 2 : ((c == "u") ? 4 : 8)
+          code = hexnum(substr(raw, i + 1, width), width)
+          if (code > 0) {
+            out = out utf8(code)
+            i += width
           } else {
-            out = out "\\x"
+            out = out "\\" c
           }
         } else {
           # Python keeps the backslash for an unrecognized escape.
@@ -385,8 +423,13 @@ editable_candidate_binds_target() {
     canonical_path "$candidate"
     candidate="$CANONICAL_PATH"
   else
-    candidate_dir="$(dirname "$candidate")"
-    candidate_base="$(basename "$candidate")"
+    # Split with parameter expansion, as canonical_path does. `$(dirname ...)`
+    # strips trailing newlines from its output, so a component ending in one would
+    # resolve against the wrong parent and the binding would be skipped.
+    candidate_base="${candidate##*/}"
+    candidate_dir="${candidate%/*}"
+    [[ -n "$candidate_dir" ]] || candidate_dir="/"
+    [[ -n "$candidate_base" ]] || return 1
     [[ -d "$candidate_dir" ]] || return 1
     canonical_path "$candidate_dir"
     candidate="${CANONICAL_PATH%/}/$candidate_base"
@@ -423,7 +466,8 @@ find_shared_editable_binding() {
     # .pth file, not the caller's working directory. Resolve first, then test:
     # checking the raw entry against $PWD skips a live binding whenever this
     # helper runs from anywhere other than that site-packages directory.
-    pth_dir="$(dirname "$pth_file")"
+    pth_dir="${pth_file%/*}"
+    [[ -n "$pth_dir" ]] || pth_dir="/"
     while IFS= read -r line || [[ -n "$line" ]]; do
       [[ -n "$line" ]] || continue
       [[ "$line" != \#* ]] || continue
