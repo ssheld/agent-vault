@@ -346,8 +346,11 @@ including branch-deletion guardrails and cleanup for done-but-unmerged work.
 - Existing sibling or custom worktree roots keep working with `--root` or
   `AGENT_VAULT_WORKTREE_ROOT`; no automatic relocation is attempted.
 - The remove helper checks whether the main checkout's `.venv` has an editable
-  install path pointing inside the target worktree. If so, it refuses removal so
-  local tools do not keep importing from a deleted path.
+  install pointing inside the target worktree. Both shapes count: a literal path
+  written into a `.pth` file, and a PEP 660 finder record whose `.pth` only imports
+  a generated module that holds the paths. If so, it refuses removal so local tools
+  do not keep importing from a deleted path. Records whose `.pth` name begins with
+  a dot are disabled and ignored, matching Python.
 - Parallel branches often conflict in `agent-vault/context-log.md`,
   same-day daily notes, and nearby design-log notes. Resolve those conflicts by
   keeping all valid entries and preserving the ordering rules from

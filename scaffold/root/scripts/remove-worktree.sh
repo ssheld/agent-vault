@@ -259,13 +259,64 @@ ensure_deletable_branch() {
   fi
 }
 
+# Extract the directories a setuptools finder-style (PEP 660) editable record maps.
+# The generated module is metadata, not configuration, and this runs inside a
+# destructive cleanup path, so it is parsed statically: sourcing it or handing it to
+# an interpreter here would execute whatever the file happens to contain.
+# `MAPPING` holds package directories and `NAMESPACES` holds lists of them, both on
+# a single line, annotated on newer setuptools and bare on older releases. Every
+# quoted literal on those lines is emitted and the caller filters; a dict key is a
+# package name, which cannot resolve to a path inside the target worktree.
+finder_record_paths() {
+  local finder_module_file="$1"
+
+  [[ -f "$finder_module_file" ]] || return 0
+
+  awk '
+    /^[[:space:]]*(MAPPING|NAMESPACES)[[:space:]]*(:[^=]*)?=/ {
+      rest = $0
+      while (match(rest, /\047[^\047]*\047|"[^"]*"/)) {
+        token = substr(rest, RSTART + 1, RLENGTH - 2)
+        if (token != "") {
+          print token
+        }
+        rest = substr(rest, RSTART + RLENGTH)
+      }
+    }
+  ' "$finder_module_file" 2>/dev/null
+}
+
+# Record the binding and succeed when one candidate resolves inside the target.
+# Relative candidates resolve against the .pth directory, matching Python. Finder
+# values may name a file rather than a directory, so existence is the test here;
+# literal .pth entries keep their stricter directory check at the call site.
+editable_candidate_binds_target() {
+  local candidate="$1"
+  local pth_dir="$2"
+  local target_path="$3"
+
+  [[ -n "$candidate" ]] || return 1
+  [[ "$candidate" == /* ]] || candidate="$pth_dir/$candidate"
+  [[ -e "$candidate" ]] || return 1
+
+  canonical_path "$candidate"
+  if [[ "$CANONICAL_PATH" == "$target_path" || "$CANONICAL_PATH" == "$target_path/"* ]]; then
+    BOUND_EDITABLE_PATH="$CANONICAL_PATH"
+    return 0
+  fi
+
+  return 1
+}
+
 find_shared_editable_binding() {
   local target_path="$1"
   local venv_dir="$PROJECT_DIR/.venv"
   local pth_file=""
   local pth_dir=""
-  local bound_path=""
   local line=""
+  local resolved=""
+  local finder_module=""
+  local candidate=""
 
   BOUND_EDITABLE_PATH=""
   [[ -d "$venv_dir" ]] || return 0
@@ -284,12 +335,40 @@ find_shared_editable_binding() {
     while IFS= read -r line || [[ -n "$line" ]]; do
       [[ -n "$line" ]] || continue
       [[ "$line" != \#* ]] || continue
-      [[ "$line" == /* ]] || line="$pth_dir/$line"
-      [[ -d "$line" ]] || continue
-      canonical_path "$line"
-      bound_path="$CANONICAL_PATH"
-      if [[ "$bound_path" == "$target_path" || "$bound_path" == "$target_path/"* ]]; then
-        BOUND_EDITABLE_PATH="$bound_path"
+
+      # site.addpackage() executes a .pth line only when it starts with "import "
+      # or "import<tab>". A finder-style editable record is exactly that and
+      # carries no path at all, so the literal handling below cannot see it. Other
+      # import lines ship in ordinary venvs (distutils-precedence.pth) and must be
+      # ignored rather than treated as bindings or reported as errors.
+      if [[ "$line" == "import "* || "$line" == "import	"* ]]; then
+        finder_module=""
+        read -r _ finder_module _ <<<"$line"
+        finder_module="${finder_module%%[!A-Za-z0-9_]*}"
+        case "$finder_module" in
+          __editable__?*) ;;
+          *) continue ;;
+        esac
+
+        while IFS= read -r candidate; do
+          if editable_candidate_binds_target "$candidate" "$pth_dir" "$target_path"; then
+            return 0
+          fi
+        done < <(finder_record_paths "$pth_dir/$finder_module.py")
+
+        continue
+      fi
+
+      # Literal entries: Python only adds directories to sys.path. This also
+      # covers `editable_mode=compat`, which writes a literal project path rather
+      # than a finder module, verified on setuptools 84.0.0 for both a plain flat
+      # layout and a package-dir remap. A `_LinkTree` variant would instead point
+      # at a symlink tree inside site-packages, which no longer names the worktree
+      # and is deliberately out of scope here.
+      resolved="$line"
+      [[ "$resolved" == /* ]] || resolved="$pth_dir/$resolved"
+      [[ -d "$resolved" ]] || continue
+      if editable_candidate_binds_target "$resolved" "$pth_dir" "$target_path"; then
         return 0
       fi
     done <"$pth_file"
