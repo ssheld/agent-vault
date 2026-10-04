@@ -75,7 +75,7 @@ run 2 "${common[@]}" --to-budget --context-log-budget 3000 --context-log-target 
 
 # Use the established count renderer as an independent small-fixture oracle.
 # Exercise rendered bytes, not a second implementation of the prefix formula.
-for variant in ordinary crlf suffix existing out-of-order same-minute explicit blank-lines multi-blank-lines unicode-blank long-topic fences; do
+for variant in ordinary crlf suffix existing out-of-order same-minute explicit blank-lines multi-blank-lines unicode-blank long-topic fences mixed-offsets mixed-offsets-existing; do
   seed="$tmp_root/seed-$variant"
   make_log "$seed/log.md"
   extra=()
@@ -97,6 +97,23 @@ for variant in ordinary crlf suffix existing out-of-order same-minute explicit b
         mv "$seed/log.next" "$seed/log.md"
         sed 's/12:49/12:00/' "$seed/archive.md" >"$seed/archive.next"
         mv "$seed/archive.next" "$seed/archive.md"
+      fi
+      ;;
+    mixed-offsets | mixed-offsets-existing)
+      # Instants descend down the log while the clock digits ascend, and the
+      # topics differ in length, so a wall-clock comparison picks another
+      # newest entry and predicts another pointer size (issue #181).
+      awk '
+        / - entry 2$/ { print "### 2026-09-06 10:00 -0200 - codex - entry 2"; next }
+        / - entry 3$/ { print "### 2026-09-06 11:30 +0000 - codex - entry 3 with a longer topic"; next }
+        / - entry 4$/ { print "### 2026-09-06 12:30 +0200 - codex - entry 4"; next }
+        / - entry 5$/ { print "### 2026-09-06 13:00 +0400 - codex - entry 5 with the longest topic of all"; next }
+        { print }
+      ' "$seed/log.md" >"$seed/log.next"
+      mv "$seed/log.next" "$seed/log.md"
+      if [[ "$variant" == mixed-offsets-existing ]]; then
+        # 23:00 +1400 is 09:00 UTC: older than every moved entry.
+        printf '### 2026-09-06 23:00 +1400 - codex - existing archive with late clock digits\nbody\n' >"$seed/archive.md"
       fi
       ;;
     explicit) extra=(--boundary 'through mémoire `entry`' --anchors 'entry') ;;
@@ -129,6 +146,11 @@ for variant in ordinary crlf suffix existing out-of-order same-minute explicit b
     args
     run 0 "${common[@]}" --keep "$keep" "${extra[@]}"
     sizes[$keep]="$(bytes "$d/log.md")"
+    if [[ "$variant" == mixed-offsets* ]]; then
+      # The newest archived entry is the top-most moved one, by instant.
+      newest_moved=("" 'entry 2' 'entry 3 with a longer topic' 'entry 4' 'entry 5 with the longest topic of all')
+      check grep -Fq "boundary: through ${newest_moved[$keep]}" "$d/log.md"
+    fi
     if [[ "$variant" == explicit && "$keep" -gt 1 ]]; then
       check test "${sizes[$keep]}" -ge "${sizes[$((keep - 1))]}"
     fi

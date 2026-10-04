@@ -8,7 +8,7 @@ last_updated:
 
 ## Usage Rules
 - Newest entry at top.
-- Entry headings must start with `YYYY-MM-DD HH:MM local - <agent> - <topic>`. A timezone abbreviation such as `EDT` or `ChST`, or a numeric UTC offset such as `+0545`, may replace `local`.
+- Entry headings must start with `YYYY-MM-DD HH:MM ±HHMM - <agent> - <topic>`: the writer's local time and its numeric UTC offset, as printed by `date '+%Y-%m-%d %H:%M %z'`. Older headings that use `local` or a timezone abbreviation such as `EDT` stay valid, but they cannot be ordered reliably against entries from another zone.
 - Keep entries short and concrete.
 - Reference files and PRs instead of pasting long diffs.
 - Prefer repo-relative paths where possible.
@@ -26,7 +26,7 @@ last_updated:
 
 ## Entries
 
-### YYYY-MM-DD HH:MM local - <agent> - <topic>
+### YYYY-MM-DD HH:MM ±HHMM - <agent> - <topic>
 #### Goal
 <What this work is trying to achieve>
 

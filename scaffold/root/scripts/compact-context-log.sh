@@ -52,6 +52,75 @@ markdown_fences='
 '
 # END markdown fences
 
+# Keep this trusted, static awk source identical in the pre-commit hook, the
+# compactor, and the rollover checker, so all three order entries the same way.
+# Tests check marker integrity, equality, and the conversion table.
+# BEGIN entry timestamps
+entry_timestamps='
+    function days_in_month(y, m) {
+      if (m == 2) return ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) ? 29 : 28
+      if (m == 4 || m == 6 || m == 9 || m == 11) return 30
+      return 31
+    }
+    # 1 when "YYYY-MM-DD HH:MM" names a real calendar minute. Anything else is
+    # compared as written, never shifted.
+    function real_minute(ts, y, mo, d) {
+      y = substr(ts, 1, 4) + 0; mo = substr(ts, 6, 2) + 0; d = substr(ts, 9, 2) + 0
+      if (mo < 1 || mo > 12 || d < 1 || d > days_in_month(y, mo)) return 0
+      return (substr(ts, 12, 2) + 0 <= 23 && substr(ts, 15, 2) + 0 <= 59)
+    }
+    # Shift a real "YYYY-MM-DD HH:MM" minute by delta minutes, |delta| < 1440.
+    function shift_minute(ts, delta, y, mo, d, total) {
+      y = substr(ts, 1, 4) + 0; mo = substr(ts, 6, 2) + 0; d = substr(ts, 9, 2) + 0
+      total = substr(ts, 12, 2) * 60 + substr(ts, 15, 2) + delta
+      if (total < 0) {
+        total += 1440; d--
+        if (d < 1) { mo--; if (mo < 1) { mo = 12; y-- }; d = days_in_month(y, mo) }
+      } else if (total >= 1440) {
+        total -= 1440; d++
+        if (d > days_in_month(y, mo)) { d = 1; mo++; if (mo > 12) { mo = 1; y++ } }
+      }
+      return sprintf("%04d-%02d-%02d %02d:%02d", y, mo, d, int(total / 60), total % 60)
+    }
+    # Zone token of an entry heading with its leading "### " removed.
+    function entry_zone(heading, zone) {
+      zone = substr(heading, 18)
+      sub(/ .*$/, "", zone)
+      return zone
+    }
+    # Minutes east of UTC for a usable numeric offset (-1200 through +1400), or
+    # "unknown" for local, an abbreviation, or a numeric token outside that range.
+    function offset_minutes(zone, hh, mm, total) {
+      if (zone !~ /^[+-][0-9][0-9]([0-9][0-9])?$/) return "unknown"
+      hh = substr(zone, 2, 2) + 0
+      mm = (length(zone) == 5) ? substr(zone, 4, 2) + 0 : 0
+      if (mm > 59) return "unknown"
+      total = hh * 60 + mm
+      if (substr(zone, 1, 1) == "-") total = -total
+      if (total < -720 || total > 840) return "unknown"
+      return total
+    }
+    # Earliest (which = -1) or latest (which = 1) UTC minute the heading can
+    # name. A numeric offset gives one instant; an unknown offset spans every
+    # usable offset, from 14:00 behind the written minute to 12:00 ahead of it.
+    function entry_bound(heading, which, ts, off) {
+      ts = substr(heading, 1, 16)
+      if (!real_minute(ts)) return ts
+      off = offset_minutes(entry_zone(heading))
+      if (off == "unknown") return shift_minute(ts, (which < 0) ? -840 : 720)
+      return shift_minute(ts, -off)
+    }
+    # Sort key for newest/oldest selection: the UTC minute for a numeric offset,
+    # the written minute otherwise.
+    function entry_key(heading, ts, off) {
+      ts = substr(heading, 1, 16)
+      off = offset_minutes(entry_zone(heading))
+      if (off == "unknown" || !real_minute(ts)) return ts
+      return shift_minute(ts, -off)
+    }
+'
+# END entry timestamps
+
 # Roll over agent-vault/context-log.md: keep the single Current Snapshot plus the
 # most recent --keep entries, move older entries into a dated archive, update the
 # live "Context-log rollover" pointer, and prepend a record to the rollover
@@ -97,6 +166,13 @@ section remains live byte-for-byte. Canonical headings outside Entries warn
 with count/line numbers, including on no-op/dry-run and under --quiet; fix
 unintentionally stranded entries before rollover. Top-level (Suggested) Next
 Prompt sections after Entries still refuse writes; nest prompts under entries.
+
+newest_archived, oldest_archived, and the default "through <topic>" boundary
+order entries with a numeric UTC offset (-1200 through +1400) by instant.
+"local", an abbreviation, or a numeric token outside that range has an unknown
+offset and is ordered by its written minute, so in an archive that mixes the two
+it can be misplaced by up to its real offset. Ties are broken by position
+(top-most is newest). The checker selects with the same rule.
 
 All structural scans use the checker's delimiter-aware fence rules, including
 pointer rewriting, manifest record discovery, and default-ID sequencing.
@@ -533,16 +609,19 @@ require_closed_insertion() {
 }
 
 # Newest/oldest archive entry headings, selected exactly as the checker does:
-# max/min normalized timestamp, ties broken by newest-at-top position (newest =
-# top-most at the max minute, oldest = bottom-most at the min minute).
+# max/min sort key (entry_key: the UTC minute for a numeric-offset heading, the
+# written minute otherwise), ties broken by newest-at-top position (newest =
+# top-most at the max key, oldest = bottom-most at the min key). An entry with
+# an unknown offset can be misplaced against a numeric-offset entry by up to its
+# real offset; the rollover checker uses the same key, so the two always agree.
 select_boundaries() {
-  awk "$markdown_fences"'
+  awk "$markdown_fences$entry_timestamps"'
     { if (fenced($0)) next }
     {
       line = $0; sub(/\r$/, "", line)
       if (line !~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] (local|[A-Z][A-Za-z][A-Za-z]*|[+-][0-9][0-9]([0-9][0-9])?) - /) next
       sub(/^### /, "", line)
-      ts = substr(line, 1, 16); n++
+      ts = entry_key(line); n++
       if (n == 1 || ts > max_ts) { max_ts = ts; max_h = line }
       if (n == 1 || ts <= min_ts) { min_ts = ts; min_h = line }
     }
@@ -932,6 +1011,8 @@ resolve_byte_config() {
 # Calculate every split without rendering each candidate. The prefix accounting
 # mirrors strip_trailing_blanks (including its legacy one-final-blank removal)
 # and inject_pointer. Only headings/prefix byte totals are retained, not bodies.
+# Timestamps are the same entry_key sort keys select_boundaries compares, so the
+# predicted boundary is the one it later selects.
 # Archive max ties favor the first rendered heading: prepending a moved heading
 # therefore replaces an equal-timestamp maximum, including existing history.
 # Deliberately scan every split without assuming monotonic sizes: this remains
@@ -964,10 +1045,10 @@ select_byte_keep() {
     }
   ' "$log_input" |
     BYTE_NEWEST="$existing_newest" BYTE_BOUNDARY="$boundary" BYTE_ID="$rollover_id" \
-      LC_ALL=C awk -v target="$context_log_target" -v suffix="$suffix_bytes" '
+      LC_ALL=C awk -v target="$context_log_target" -v suffix="$suffix_bytes" "$entry_timestamps"'
     BEGIN {
       newest = ENVIRON["BYTE_NEWEST"]; have_max = (newest != "")
-      max_ts = substr(newest, 1, 16)
+      max_ts = entry_key(newest)
       boundary = ENVIRON["BYTE_BOUNDARY"]; automatic = (boundary == "")
       boundary_bytes = length(boundary)
       if (automatic) { sub(/^.* - /, "", newest); boundary_bytes = length("through ") + length(newest) }
@@ -981,7 +1062,7 @@ select_byte_keep() {
         prefix[k - 1] = bytes - last_blank
         heading = line
         sub(/\r$/, "", heading); sub(/^### /, "", heading)
-        timestamps[k] = substr(heading, 1, 16)
+        timestamps[k] = entry_key(heading)
         sub(/^.* - /, "", heading); topic_bytes[k] = length(heading)
       }
       last_blank = substr($0, 1, 1) + 0

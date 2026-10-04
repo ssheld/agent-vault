@@ -194,6 +194,7 @@ Run the scaffold regression scripts locally when changing bootstrap, sync, or tr
 - `bash scripts/test-remove-worktree.sh`
 - `bash scripts/test-worktree-helper-sync.sh`
 - `bash scripts/test-markdown-fences.sh`
+- `bash scripts/test-entry-timestamps.sh`
 - `bash scripts/test-memory-import-discovery.sh` (also run by the budget suite)
 - `bash scripts/test-context-log-size-budget.sh`
 - `bash scripts/test-byte-context-log-retention.sh`
@@ -402,6 +403,7 @@ for triggers, partial-staging guidance, and suppression commands.
 
 When syncing older generated repos, `update-project.sh` now auto-migrates recognized legacy `agent-vault/context-log.md` layouts into the validator-compatible top-level `## Current Snapshot` / `## Entries` shape before syncing the stricter hook. If the layout is not recognized, the script leaves the file unchanged and prints a manual-remediation warning instead of guessing.
 It also inserts the review-only / external-feedback usage rule (issue #129) into an existing runtime `agent-vault/context-log.md` when its active `## Usage Rules` section predates the rule: the rule line is copied verbatim from the scaffold context log, the previous file is backed up under `agent-vault/context/updates/<timestamp>/`, and the insert is idempotent. When no active `## Usage Rules` section sits above `## Current Snapshot`, the script prints a skip notice instead of editing archived or unrecognized content.
+In the same pass it updates the entry-heading usage rule (issue #181): a line that still carries an earlier scaffold wording is replaced with the current one, which asks for local time and a numeric UTC offset (`date '+%Y-%m-%d %H:%M %z'`). A customized or missing heading rule is left unchanged and reported with a skip notice. Existing entries are never rewritten: headings that use `local` or an abbreviation stay valid.
 
 Both scripts also ensure root `.gitignore` includes managed local-only ignore entries (added only when missing):
 - `.obsidian/workspace.json`

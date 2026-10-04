@@ -8,6 +8,13 @@ tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/agent-vault-context-log-policy-test.XXXXX
 scaffold_context_log="$repo_root/scaffold/agent-vault/context-log.md"
 scaffold_context_log_template="$repo_root/scaffold/agent-vault/Templates/Context Log.md"
 rule_marker="- Review-only / external-feedback exception:"
+heading_marker="- Entry headings must start with"
+# Every wording of the entry-heading rule the scaffold shipped before the
+# current one (issue #181), oldest first.
+earlier_heading_rules=(
+  '- Entry headings must start with `YYYY-MM-DD HH:MM local - <agent> - <topic>`.'
+  '- Entry headings must start with `YYYY-MM-DD HH:MM local - <agent> - <topic>`. A timezone abbreviation such as `EDT` or `ChST`, or a numeric UTC offset such as `+0545`, may replace `local`.'
+)
 
 cleanup() {
   rm -rf "$tmp_root"
@@ -106,6 +113,30 @@ init_repo() {
 
   mkdir -p "$repo_path"
   git -C "$repo_path" init >/dev/null
+}
+
+# Replace the entry-heading usage rule in a runtime log with another wording.
+set_heading_rule() {
+  local file_path="$1"
+
+  HEADING_MARKER="$heading_marker" HEADING_RULE="$2" awk '
+    index($0, ENVIRON["HEADING_MARKER"]) == 1 && !done { print ENVIRON["HEADING_RULE"]; done = 1; next }
+    { print }
+  ' "$file_path" >"$file_path.heading"
+  mv "$file_path.heading" "$file_path"
+}
+
+assert_heading_rule_count() {
+  local file_path="$1"
+  local wording="$2"
+  local expected_count="$3"
+  local actual_count
+
+  actual_count="$(grep -cFx -- "$wording" "$file_path" || true)"
+  if [[ "$actual_count" != "$expected_count" ]]; then
+    echo "Expected $expected_count line(s) reading [$wording] in $file_path; found $actual_count" >&2
+    exit 1
+  fi
 }
 
 strip_rule_line() {
@@ -283,5 +314,125 @@ if [[ -d "$symlink_repo/agent-vault/context/updates" ]]; then
   echo "Expected no backup directory after a failed preflight" >&2
   exit 1
 fi
+
+# --- Entry-heading usage rule migration (issue #181) --------------------------
+current_heading_rule="$(grep -m1 -F -- "$heading_marker" "$scaffold_context_log")"
+if [[ "$current_heading_rule" != *"date '+%Y-%m-%d %H:%M %z'"* ]]; then
+  echo "Expected the scaffold entry-heading rule to give the numeric-offset date command" >&2
+  exit 1
+fi
+assert_heading_rule_count "$scaffold_context_log_template" "$current_heading_rule" 1
+for earlier_rule in "${earlier_heading_rules[@]}"; do
+  if [[ "$earlier_rule" == "$current_heading_rule" ]]; then
+    echo "An earlier heading rule must differ from the current scaffold rule" >&2
+    exit 1
+  fi
+done
+
+# Case 9: each earlier scaffold wording is replaced, in a project that already
+# carries the review-only rule (the state that used to end the migration early).
+# The rest of the log is untouched, and a second run changes nothing.
+earlier_index=0
+for earlier_rule in "${earlier_heading_rules[@]}"; do
+  earlier_index=$((earlier_index + 1))
+  heading_repo="$tmp_root/heading-rule-$earlier_index"
+  init_repo "$heading_repo"
+  "$repo_root/scripts/new-project.sh" "heading-rule-test" "$heading_repo" >/dev/null
+  cp "$heading_repo/agent-vault/context-log.md" "$tmp_root/heading-rule-fresh.md"
+  set_heading_rule "$heading_repo/agent-vault/context-log.md" "$earlier_rule"
+  assert_heading_rule_count "$heading_repo/agent-vault/context-log.md" "$earlier_rule" 1
+  assert_rule_count "$heading_repo/agent-vault/context-log.md" 1
+  cp "$heading_repo/agent-vault/context-log.md" "$tmp_root/heading-rule-before.md"
+
+  heading_dry_run_output="$("$repo_root/scripts/update-project.sh" "$heading_repo" --dry-run 2>&1)"
+  assert_output_contains "$heading_dry_run_output" "Update: agent-vault/context-log.md (backup -> agent-vault/context/updates/"
+  assert_files_equal "$heading_repo/agent-vault/context-log.md" "$tmp_root/heading-rule-before.md"
+
+  heading_output="$("$repo_root/scripts/update-project.sh" "$heading_repo" 2>&1)"
+  assert_output_contains "$heading_output" "Updated: agent-vault/context-log.md"
+  assert_files_equal "$heading_repo/agent-vault/context-log.md" "$tmp_root/heading-rule-fresh.md"
+  assert_rule_count "$heading_repo/agent-vault/context-log.md" 1
+  heading_backup="$(find "$heading_repo/agent-vault/context/updates" -type f -path '*/agent-vault/context-log.md' | head -n1)"
+  assert_files_equal "$heading_backup" "$tmp_root/heading-rule-before.md"
+
+  heading_second_output="$("$repo_root/scripts/update-project.sh" "$heading_repo" 2>&1)"
+  assert_output_not_contains "$heading_second_output" "agent-vault/context-log.md"
+  assert_files_equal "$heading_repo/agent-vault/context-log.md" "$tmp_root/heading-rule-fresh.md"
+done
+
+# Case 10: both edits land in one replacement, so the backup is the original
+# file, not a half-migrated one.
+both_repo="$tmp_root/heading-and-review-rules"
+init_repo "$both_repo"
+"$repo_root/scripts/new-project.sh" "heading-rule-test" "$both_repo" >/dev/null
+cp "$both_repo/agent-vault/context-log.md" "$tmp_root/both-rules-fresh.md"
+set_heading_rule "$both_repo/agent-vault/context-log.md" "${earlier_heading_rules[0]}"
+strip_rule_line "$both_repo/agent-vault/context-log.md" "$both_repo/agent-vault/context-log.md.stripped"
+mv "$both_repo/agent-vault/context-log.md.stripped" "$both_repo/agent-vault/context-log.md"
+cp "$both_repo/agent-vault/context-log.md" "$tmp_root/both-rules-before.md"
+both_output="$("$repo_root/scripts/update-project.sh" "$both_repo" 2>&1)"
+both_update_count="$(printf '%s\n' "$both_output" | grep -cF "Updated: agent-vault/context-log.md" || true)"
+if [[ "$both_update_count" != "1" ]]; then
+  echo "Expected exactly 1 update of agent-vault/context-log.md; found $both_update_count" >&2
+  printf '%s\n' "$both_output" >&2
+  exit 1
+fi
+assert_files_equal "$both_repo/agent-vault/context-log.md" "$tmp_root/both-rules-fresh.md"
+both_backup="$(find "$both_repo/agent-vault/context/updates" -type f -path '*/agent-vault/context-log.md' | head -n1)"
+assert_files_equal "$both_backup" "$tmp_root/both-rules-before.md"
+
+# Case 11: a customized heading rule is left alone and reported, on every run.
+custom_repo="$tmp_root/heading-rule-custom"
+init_repo "$custom_repo"
+"$repo_root/scripts/new-project.sh" "heading-rule-test" "$custom_repo" >/dev/null
+set_heading_rule "$custom_repo/agent-vault/context-log.md" \
+  '- Entry headings must start with `YYYY-MM-DD HH:MM local - <agent> - <topic>`, and name the ticket.'
+cp "$custom_repo/agent-vault/context-log.md" "$tmp_root/heading-rule-custom-before.md"
+assert_custom_heading_rule_kept() {
+  custom_output="$("$repo_root/scripts/update-project.sh" "$custom_repo" 2>&1)"
+  assert_output_contains "$custom_output" "Skip: agent-vault/context-log.md entry-heading usage rule (customized wording left unchanged"
+  assert_output_not_contains "$custom_output" "Updated: agent-vault/context-log.md"
+  assert_files_equal "$custom_repo/agent-vault/context-log.md" "$tmp_root/heading-rule-custom-before.md"
+}
+assert_custom_heading_rule_kept
+assert_custom_heading_rule_kept
+
+# Case 12: a customized heading rule does not hold back the review-only rule.
+strip_rule_line "$custom_repo/agent-vault/context-log.md" "$custom_repo/agent-vault/context-log.md.stripped"
+mv "$custom_repo/agent-vault/context-log.md.stripped" "$custom_repo/agent-vault/context-log.md"
+custom_review_output="$("$repo_root/scripts/update-project.sh" "$custom_repo" 2>&1)"
+assert_output_contains "$custom_review_output" "Skip: agent-vault/context-log.md entry-heading usage rule (customized wording left unchanged"
+assert_output_contains "$custom_review_output" "Updated: agent-vault/context-log.md"
+assert_rule_count "$custom_repo/agent-vault/context-log.md" 1
+assert_files_equal "$custom_repo/agent-vault/context-log.md" "$tmp_root/heading-rule-custom-before.md"
+
+# Case 13: a log with no entry-heading rule is reported and left unchanged.
+missing_rule_repo="$tmp_root/heading-rule-missing"
+init_repo "$missing_rule_repo"
+"$repo_root/scripts/new-project.sh" "heading-rule-test" "$missing_rule_repo" >/dev/null
+grep -vF -- "$heading_marker" "$missing_rule_repo/agent-vault/context-log.md" >"$tmp_root/heading-rule-missing-before.md"
+cp "$tmp_root/heading-rule-missing-before.md" "$missing_rule_repo/agent-vault/context-log.md"
+missing_rule_output="$("$repo_root/scripts/update-project.sh" "$missing_rule_repo" 2>&1)"
+assert_output_contains "$missing_rule_output" "Skip: agent-vault/context-log.md entry-heading usage rule (no entry-heading rule in the active"
+assert_files_equal "$missing_rule_repo/agent-vault/context-log.md" "$tmp_root/heading-rule-missing-before.md"
+
+# Case 14: only the ACTIVE usage rules are edited. An earlier wording quoted in
+# an entry body, or sitting in a historical section below the snapshot, stays.
+historical_repo="$tmp_root/heading-rule-historical"
+init_repo "$historical_repo"
+"$repo_root/scripts/new-project.sh" "heading-rule-test" "$historical_repo" >/dev/null
+set_heading_rule "$historical_repo/agent-vault/context-log.md" "${earlier_heading_rules[1]}"
+{
+  printf '\n#### Notes\n%s\n' "${earlier_heading_rules[0]}"
+  printf '\n## Historical Usage Rules\n%s\n' "${earlier_heading_rules[1]}"
+} >>"$historical_repo/agent-vault/context-log.md"
+"$repo_root/scripts/update-project.sh" "$historical_repo" >/dev/null 2>&1
+assert_heading_rule_count "$historical_repo/agent-vault/context-log.md" "$current_heading_rule" 1
+assert_heading_rule_count "$historical_repo/agent-vault/context-log.md" "${earlier_heading_rules[0]}" 1
+assert_heading_rule_count "$historical_repo/agent-vault/context-log.md" "${earlier_heading_rules[1]}" 1
+
+# Case 15: the legacy-layout log from case 6 has its only `## Usage Rules`
+# below the new snapshot. Its heading-rule line, if any, is historical too.
+assert_output_not_contains "$legacy_output" "entry-heading usage rule"
 
 echo "context-log policy sync regression checks passed."

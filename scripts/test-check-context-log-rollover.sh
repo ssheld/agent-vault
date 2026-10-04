@@ -660,6 +660,76 @@ EOF
 expect_result 0 "passed" \
   "$tmp_root/good-rollover-live.md" --archive "$tmp_root/context-log-tie.md" --manifest "$tmp_root/manifest-tie-good.md"
 
+# Numeric offsets are ordered by instant, not by their clock digits (issue #181).
+# This is the end of daylight saving: 01:15 -0500 is 06:15 UTC, after 01:45 -0400
+# at 05:45 UTC, so the top entry is the newest although its digits are smaller.
+cat >"$tmp_root/context-log-instants.md" <<'EOF'
+# Context Log Archive (2026)
+
+### 2026-11-01 01:15 -0500 - claude - instant newest entry
+- Body.
+
+### 2026-11-01 01:45 -0400 - codex - instant oldest entry
+- Body.
+EOF
+cat >"$tmp_root/manifest-instants-good.md" <<'EOF'
+# Context Log Rollover Manifest
+
+## rollover: 2026-05-29-1
+- archive_file: agent-vault/context/archive/context-log-instants.md
+- boundary: through PR-A net-of-excepted (recent-window top before rollover)
+- newest_archived: 2026-11-01 01:15 -0500 - claude - instant newest entry
+- oldest_archived: 2026-11-01 01:45 -0400 - codex - instant oldest entry
+- kept: 5
+- archived: 2
+- anchors: instant newest entry; instant oldest entry
+EOF
+expect_result 0 "passed" "$tmp_root/good-rollover-live.md" \
+  --archive "$tmp_root/context-log-instants.md" --manifest "$tmp_root/manifest-instants-good.md"
+
+# The record a wall-clock comparison used to write names them the other way
+# round. Both fields are findings, and each says how to repair such a record.
+sed -e 's/^- newest_archived: .*/- newest_archived: 2026-11-01 01:45 -0400 - codex - instant oldest entry/' \
+  -e 's/^- oldest_archived: .*/- oldest_archived: 2026-11-01 01:15 -0500 - claude - instant newest entry/' \
+  "$tmp_root/manifest-instants-good.md" >"$tmp_root/manifest-instants-swapped.md"
+for expected_finding in \
+  "is not the archive's newest entry -- the newest archived entry is: \"2026-11-01 01:15 -0500 - claude - instant newest entry\" (entries with a numeric UTC offset are ordered by instant" \
+  "is not the archive's oldest entry -- the oldest archived entry is: \"2026-11-01 01:45 -0400 - codex - instant oldest entry\" (entries with a numeric UTC offset are ordered by instant"; do
+  expect_result 1 "$expected_finding" "$tmp_root/good-rollover-live.md" \
+    --archive "$tmp_root/context-log-instants.md" --manifest "$tmp_root/manifest-instants-swapped.md"
+done
+
+# Entries at one instant written with different offsets tie, and the tie is
+# broken by position: the top-most is the newest and the bottom-most the oldest.
+cat >"$tmp_root/context-log-instant-tie.md" <<'EOF'
+# Context Log Archive (2026)
+
+### 2026-06-10 05:00 +0000 - claude - instant tie top
+- Body.
+
+### 2026-06-10 10:00 +0500 - codex - instant tie bottom
+- Body.
+EOF
+sed -e 's/context-log-instants.md/context-log-instant-tie.md/' \
+  -e 's/^- newest_archived: .*/- newest_archived: 2026-06-10 05:00 +0000 - claude - instant tie top/' \
+  -e 's/^- oldest_archived: .*/- oldest_archived: 2026-06-10 10:00 +0500 - codex - instant tie bottom/' \
+  -e 's/^- anchors: .*/- anchors: instant tie top; instant tie bottom/' \
+  "$tmp_root/manifest-instants-good.md" >"$tmp_root/manifest-instant-tie.md"
+expect_result 0 "passed" "$tmp_root/good-rollover-live.md" \
+  --archive "$tmp_root/context-log-instant-tie.md" --manifest "$tmp_root/manifest-instant-tie.md"
+
+# An archive with no numeric offsets keeps its findings exactly as before: the
+# repair note is only for archives the instant ordering can affect.
+set +e
+local_only_output="$("$checker" "$tmp_root/good-rollover-live.md" \
+  --archive "$tmp_root/context-log-tie.md" --manifest "$tmp_root/manifest-tie-stale.md" 2>&1)"
+set -e
+if [[ "$local_only_output" == *"ordered by instant"* ]]; then
+  echo "FAIL: an archive without numeric offsets must not get the instant-ordering note" >&2
+  printf '%s\n' "$local_only_output" >&2
+  exit 1
+fi
+
 # newest_archived names a heading absent from the archive.
 cat >"$tmp_root/manifest-missing-newest.md" <<'EOF'
 # Context Log Rollover Manifest

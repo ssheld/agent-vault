@@ -175,7 +175,8 @@ done
 
 timestamp="$(date '+%Y%m%d-%H%M%S')"
 today="$(date '+%Y-%m-%d')"
-now_local="$(date '+%Y-%m-%d %H:%M')"
+# Local time plus its numeric UTC offset: the canonical entry-heading zone.
+now_with_offset="$(date '+%Y-%m-%d %H:%M %z')"
 backup_dir="$project_dir/context/updates/$timestamp"
 
 created=0
@@ -508,7 +509,7 @@ migrate_legacy_context_log_if_needed() {
     printf -- '- Active branch: `%s`\n' "$active_branch"
     printf -- '- Last updated: %s\n\n' "$today"
     printf '## Entries\n\n'
-    printf '### %s local - update-project - context-log-layout-migration\n' "$now_local"
+    printf '### %s - update-project - context-log-layout-migration\n' "$now_with_offset"
     printf '#### Goal\n'
     printf 'Migrate this context log into the validator-compatible layout while preserving existing historical content.\n\n'
     printf '#### State\n'
@@ -556,14 +557,31 @@ migrate_legacy_context_log_if_needed() {
   rm -f "$tmp_file"
 }
 
-# Insert the review-only / external-feedback usage rule (issue #129) into an
-# existing runtime context log that predates it. The rule line is read from the
-# scaffold context log so the migrated text cannot drift from the scaffold.
+# Bring the usage rules of an existing runtime context log up to date. The
+# section is project-owned, so only two targeted edits are made, both inside the
+# ACTIVE section, and both written in one replacement so the backup keeps the
+# original file:
+#   - Entry-heading rule (issue #181): a line that still carries a known earlier
+#     scaffold wording is replaced with the current one. A customized or missing
+#     line is left alone and reported.
+#   - Review-only / external-feedback rule (issue #129): inserted when missing.
+# Rule lines are read from the scaffold context log so the migrated text cannot
+# drift from the scaffold. Each edit is independent: a log that already carries
+# one rule still gets the other.
 migrate_context_log_usage_rules_if_needed() {
   local file_path="$project_dir/context-log.md"
   local rel="agent-vault/context-log.md"
   local rule_marker="- Review-only / external-feedback exception:"
+  local heading_marker="- Entry headings must start with"
+  # Every wording the scaffold shipped before the current one, oldest first.
+  local -a earlier_heading_rules=(
+    '- Entry headings must start with `YYYY-MM-DD HH:MM local - <agent> - <topic>`.'
+    '- Entry headings must start with `YYYY-MM-DD HH:MM local - <agent> - <topic>`. A timezone abbreviation such as `EDT` or `ChST`, or a numeric UTC offset such as `+0545`, may replace `local`.'
+  )
+  local needs_review_rule="true"
   local rule_line=""
+  local heading_rule_line=""
+  local heading_status=""
   local usage_rules_line=""
   local snapshot_line=""
   local next_heading_offset=""
@@ -571,19 +589,21 @@ migrate_context_log_usage_rules_if_needed() {
   local last_bullet_offset=""
   local insert_after_line=""
   local tmp_file=""
+  local work_file=""
 
   [[ -f "$file_path" ]] || return 0
 
   if grep -Fq -- "$rule_marker" "$file_path"; then
-    return 0
+    needs_review_rule="false"
+  else
+    rule_line="$(grep -m1 -F -- "$rule_marker" "$vault_scaffold_dir/context-log.md" || true)"
+    if [[ -z "$rule_line" ]]; then
+      echo "Skip: $rel review-only usage rule (scaffold context log does not carry the rule line)"
+      skipped=$((skipped + 1))
+      needs_review_rule="false"
+    fi
   fi
-
-  rule_line="$(grep -m1 -F -- "$rule_marker" "$vault_scaffold_dir/context-log.md" || true)"
-  if [[ -z "$rule_line" ]]; then
-    echo "Skip: $rel review-only usage rule (scaffold context log does not carry the rule line)"
-    skipped=$((skipped + 1))
-    return
-  fi
+  heading_rule_line="$(grep -m1 -F -- "$heading_marker" "$vault_scaffold_dir/context-log.md" || true)"
 
   # Only edit an ACTIVE usage-rules section: it must sit above the current
   # snapshot. A `## Usage Rules` heading below the snapshot belongs to archived
@@ -592,8 +612,10 @@ migrate_context_log_usage_rules_if_needed() {
   usage_rules_line="$(first_matching_line_number "$file_path" '^## Usage Rules$')"
   snapshot_line="$(first_matching_line_number "$file_path" '^## Current Snapshot$')"
   if [[ -z "$usage_rules_line" || -z "$snapshot_line" || "$usage_rules_line" -gt "$snapshot_line" ]]; then
-    echo "Skip: $rel review-only usage rule (no active \`## Usage Rules\` section above \`## Current Snapshot\`; copy the rule manually from the scaffold context log)"
-    skipped=$((skipped + 1))
+    if [[ "$needs_review_rule" == "true" ]]; then
+      echo "Skip: $rel review-only usage rule (no active \`## Usage Rules\` section above \`## Current Snapshot\`; copy the rule manually from the scaffold context log)"
+      skipped=$((skipped + 1))
+    fi
     return
   fi
 
@@ -604,27 +626,69 @@ migrate_context_log_usage_rules_if_needed() {
     section_end_line="$(wc -l <"$file_path")"
   fi
 
-  last_bullet_offset="$(sed -n "$((usage_rules_line + 1)),${section_end_line}p" "$file_path" | grep -nE '^- ' | tail -n1 | cut -d: -f1 || true)"
-  if [[ -z "$last_bullet_offset" ]]; then
-    echo "Skip: $rel review-only usage rule (no usage-rule bullets found; copy the rule manually from the scaffold context log)"
-    skipped=$((skipped + 1))
-    return
-  fi
-  insert_after_line=$((usage_rules_line + last_bullet_offset))
-
   tmp_file="$(mktemp "${TMPDIR:-/tmp}/agent-vault-usage-rules-migration.XXXXXX")"
-  trap 'rm -f "$tmp_file"; trap - RETURN' RETURN
+  work_file="$(mktemp "${TMPDIR:-/tmp}/agent-vault-usage-rules-migration.XXXXXX")"
+  trap 'rm -f "$tmp_file" "$work_file"; trap - RETURN' RETURN
 
-  {
-    sed -n "1,${insert_after_line}p" "$file_path"
-    printf '%s\n' "$rule_line"
-    sed -n "$((insert_after_line + 1)),\$p" "$file_path"
-  } >"$tmp_file"
+  # Entry-heading rule: an in-place, line-for-line replacement, so the line
+  # numbers computed above stay valid for the insert below.
+  cp "$file_path" "$work_file"
+  if [[ -n "$heading_rule_line" ]]; then
+    heading_status="$(
+      HEADING_RULE="$heading_rule_line" HEADING_MARKER="$heading_marker" \
+        EARLIER_RULE_1="${earlier_heading_rules[0]}" EARLIER_RULE_2="${earlier_heading_rules[1]}" \
+        awk -v first="$usage_rules_line" -v last="$section_end_line" -v out="$work_file" '
+        BEGIN { current = ENVIRON["HEADING_RULE"]; marker = ENVIRON["HEADING_MARKER"] }
+        NR > first && NR <= last && index($0, marker) == 1 {
+          if ($0 == current) kept++
+          else if ($0 == ENVIRON["EARLIER_RULE_1"] || $0 == ENVIRON["EARLIER_RULE_2"]) { $0 = current; replaced++ }
+          else custom++
+        }
+        { print >out }
+        END {
+          if (custom) print "custom"
+          else if (replaced) print "replaced"
+          else if (kept) print "current"
+          else print "missing"
+        }
+      ' "$file_path"
+    )"
+    case "$heading_status" in
+      custom)
+        echo "Skip: $rel entry-heading usage rule (customized wording left unchanged; compare it with the scaffold context log, which now asks for a numeric UTC offset)"
+        skipped=$((skipped + 1))
+        cp "$file_path" "$work_file"
+        ;;
+      missing)
+        echo "Skip: $rel entry-heading usage rule (no entry-heading rule in the active \`## Usage Rules\` section; copy the rule manually from the scaffold context log)"
+        skipped=$((skipped + 1))
+        ;;
+    esac
+  fi
 
-  replace_file_from_tmp "$tmp_file" "$file_path"
+  if [[ "$needs_review_rule" == "true" ]]; then
+    last_bullet_offset="$(sed -n "$((usage_rules_line + 1)),${section_end_line}p" "$work_file" | grep -nE '^- ' | tail -n1 | cut -d: -f1 || true)"
+    if [[ -z "$last_bullet_offset" ]]; then
+      echo "Skip: $rel review-only usage rule (no usage-rule bullets found; copy the rule manually from the scaffold context log)"
+      skipped=$((skipped + 1))
+    else
+      insert_after_line=$((usage_rules_line + last_bullet_offset))
+      {
+        sed -n "1,${insert_after_line}p" "$work_file"
+        printf '%s\n' "$rule_line"
+        sed -n "$((insert_after_line + 1)),\$p" "$work_file"
+      } >"$tmp_file"
+      cp "$tmp_file" "$work_file"
+    fi
+  fi
+
+  # Stay silent when nothing changed, as before.
+  if ! cmp -s "$work_file" "$file_path"; then
+    replace_file_from_tmp "$work_file" "$file_path"
+  fi
 
   trap - RETURN
-  rm -f "$tmp_file"
+  rm -f "$tmp_file" "$work_file"
 }
 
 gitignore_has_line() {
