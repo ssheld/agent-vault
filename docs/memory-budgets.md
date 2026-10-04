@@ -560,11 +560,24 @@ With `--manifest`, the checker parses the newest manifest record and asserts:
 - the live pointer references that record's id and repeats its `boundary`
   verbatim (a stale or absent pointer is flagged);
 - `newest_archived` / `oldest_archived` **exactly match** the entry the checker
-  independently selects as newest / oldest. Entry timestamps normalize to
-  `YYYY-MM-DD HH:MM`; among entries sharing a minute the archive's newest-at-top
-  order breaks the tie (top-most is newest, bottom-most is oldest), so naming a
-  wrong same-minute heading is caught — not just an older timestamp (the
-  cite-then-mutate catch);
+  independently selects as newest / oldest. Each entry gets a
+  `YYYY-MM-DD HH:MM` sort key: a heading with a numeric UTC offset (`-1200`
+  through `+1400`) is converted to its UTC minute, so those entries are ordered
+  by instant; a heading that uses `local`, an abbreviation, or a numeric token
+  outside that range has an unknown offset and keeps its written minute. Among
+  entries sharing a key the archive's newest-at-top order breaks the tie
+  (top-most is newest, bottom-most is oldest), so naming a wrong same-key
+  heading is caught — not just an older timestamp (the cite-then-mutate catch).
+  The compactor selects with the same key, so the two tools agree. Two limits
+  follow:
+  - in an archive that mixes numeric-offset and unknown-offset headings, an
+    unknown-offset entry can be misplaced against a numeric-offset entry by up
+    to its real offset. The selection is still deterministic, and the limit
+    shrinks as logs adopt numeric offsets;
+  - a record written before numeric offsets were ordered by instant can name
+    the wrong entries for an archive whose entries carry different offsets. The
+    checker reports the mismatch; correct `newest_archived`, `oldest_archived`,
+    and the boundary in the manifest and the live pointer by hand;
 - every nonempty normalized `anchor` appears on an archive line, with at least
   one such anchor required. Both sides remove backticks/asterisks and collapse
   and trim whitespace; matching remains case-sensitive, literal, and line-local.

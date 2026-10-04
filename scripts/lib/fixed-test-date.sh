@@ -15,6 +15,7 @@ time_of_day="${fixed_instant#* }"
 case "$1" in
   '+%Y-%m-%d') printf '%s\n' "$day" ;;
   '+%Y-%m-%d %H:%M') printf '%s\n' "${fixed_instant%:*}" ;;
+  '+%Y-%m-%d %H:%M %z') printf '%s +0000\n' "${fixed_instant%:*}" ;;
   '+%Y%m%d-%H%M%S') printf '%s-%s\n' "${day//-/}" "${time_of_day//:/}" ;;
   *)
     printf 'Unsupported fixed test clock date format (argc=%s; args=[%s]).\n' "$#" "$*" >&2

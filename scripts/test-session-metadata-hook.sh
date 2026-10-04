@@ -31,6 +31,18 @@ assert_output_contains() {
   fi
 }
 
+assert_output_not_contains() {
+  local output="$1"
+  local unexpected_text="$2"
+
+  if [[ "$output" == *"$unexpected_text"* ]]; then
+    echo "Unexpected text found in command output: $unexpected_text" >&2
+    echo "Actual output:" >&2
+    printf '%s\n' "$output" >&2
+    exit 1
+  fi
+}
+
 assert_file_exists() {
   local file_path="$1"
 
@@ -88,6 +100,10 @@ run_hook_expect_success() {
   (cd "$repo_path" && "$hook_bash" agent-vault/_assets/hooks/pre-commit)
 }
 
+# The zone field of an entry heading: `local`, an abbreviation, or a numeric
+# offset. The seeded bootstrap entry carries a numeric offset.
+zone_pattern='(?:local|[A-Z][A-Za-z]+|[+-][0-9]{2}(?:[0-9]{2})?)'
+
 replace_first_match() {
   local file_path="$1"
   local search_text="$2"
@@ -100,14 +116,14 @@ replace_first_context_log_timestamp() {
   local file_path="$1"
   local replacement_timestamp="$2"
 
-  perl -0pi -e 's/^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} local - /### '"$replacement_timestamp"' local - /m' "$file_path"
+  perl -0pi -e 's/^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} '"$zone_pattern"' - /### '"$replacement_timestamp"' local - /m' "$file_path"
 }
 
 replace_first_context_log_heading() {
   local file_path="$1"
   local replacement_heading="$2"
 
-  perl -0pi -e 's/^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} local - .*$/### '"$replacement_heading"'/m' "$file_path"
+  perl -0pi -e 's/^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} '"$zone_pattern"' - .*$/### '"$replacement_heading"'/m' "$file_path"
 }
 
 # Swap the zone field only, leaving the timestamp and topic intact so the
@@ -116,7 +132,7 @@ replace_first_context_log_zone() {
   local file_path="$1"
   local replacement_zone="$2"
 
-  perl -0pi -e 's/^(### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}) local - /$1 '"$replacement_zone"' - /m' "$file_path"
+  perl -0pi -e 's/^(### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}) '"$zone_pattern"' - /$1 '"$replacement_zone"' - /m' "$file_path"
 }
 
 # Insert a fenced block holding one arbitrary line just after the newest entry
@@ -200,7 +216,7 @@ init_repo "$hook_repo"
 seeded_context_log="$(cat "$hook_repo/agent-vault/context-log.md")"
 assert_output_contains "$seeded_context_log" "last_updated: $today"
 assert_output_contains "$seeded_context_log" "- Last updated: $today"
-assert_output_contains "$seeded_context_log" "### $FIXED_TEST_CLOCK_MINUTE local - bootstrap - initial project setup"
+assert_output_contains "$seeded_context_log" "### $FIXED_TEST_CLOCK_ZONED_MINUTE - bootstrap - initial project setup"
 assert_file_exists "$hook_repo/agent-vault/_assets/hooks/pre-commit"
 assert_file_exists "$hook_repo/agent-vault/_assets/hooks/pre-push"
 assert_file_exists "$hook_repo/agent-vault/_assets/hooks/lib/runtime-note.sh"
@@ -309,7 +325,7 @@ init_repo "$legacy_known_repo"
 cp "$legacy_context_log_fixture" "$legacy_known_repo/agent-vault/context-log.md"
 "$repo_root/scripts/update-project.sh" "$legacy_known_repo" --sync-templates >/dev/null
 assert_output_contains "$(sed -n '1,80p' "$legacy_known_repo/agent-vault/context-log.md")" "## Current Snapshot"
-assert_output_contains "$(sed -n '1,80p' "$legacy_known_repo/agent-vault/context-log.md")" "### $FIXED_TEST_CLOCK_MINUTE local - update-project - context-log-layout-migration"
+assert_output_contains "$(sed -n '1,80p' "$legacy_known_repo/agent-vault/context-log.md")" "### $FIXED_TEST_CLOCK_ZONED_MINUTE - update-project - context-log-layout-migration"
 assert_files_equal "$legacy_context_log_fixture" "$legacy_known_repo/agent-vault/context/updates/$FIXED_TEST_CLOCK_STAMP/agent-vault/context-log.md"
 assert_output_contains "$(cat "$legacy_known_repo/agent-vault/context-log.md")" "## Legacy Unindexed Entries"
 assert_output_contains "$(cat "$legacy_known_repo/agent-vault/context-log.md")" "## Historical Snapshot"
@@ -519,7 +535,7 @@ init_repo "$invalid_heading_repo"
 replace_first_context_log_heading "$invalid_heading_repo/agent-vault/context-log.md" "bad heading format"
 git -C "$invalid_heading_repo" add agent-vault/context-log.md
 invalid_heading_output="$(run_hook_expect_failure "$invalid_heading_repo")"
-assert_output_contains "$invalid_heading_output" 'entry headings must start with `YYYY-MM-DD HH:MM local - <agent> - <topic>`'
+assert_output_contains "$invalid_heading_output" 'entry headings must start with `YYYY-MM-DD HH:MM ±HHMM - <agent> - <topic>`'
 
 # Real `date +%Z` output is accepted in place of the literal `local`, so an agent
 # validates without rewriting project history whatever zone it runs in. The cases
@@ -545,7 +561,7 @@ init_repo "$lowercase_zone_repo"
 replace_first_context_log_zone "$lowercase_zone_repo/agent-vault/context-log.md" "edt"
 git -C "$lowercase_zone_repo" add agent-vault/context-log.md
 lowercase_zone_output="$(run_hook_expect_failure "$lowercase_zone_repo")"
-assert_output_contains "$lowercase_zone_output" 'entry headings must start with `YYYY-MM-DD HH:MM local - <agent> - <topic>`'
+assert_output_contains "$lowercase_zone_output" 'entry headings must start with `YYYY-MM-DD HH:MM ±HHMM - <agent> - <topic>`'
 
 # A fenced block inside an entry is documentation, not structure. The scanners
 # must apply the same fence rules as the rollover checker and the compactor.
@@ -599,6 +615,169 @@ clear_context_log_entries "$empty_entries_repo/agent-vault/context-log.md"
 git -C "$empty_entries_repo" add agent-vault/context-log.md
 empty_entries_output="$(run_hook_expect_failure "$empty_entries_repo")"
 assert_output_contains "$empty_entries_output" 'must include at least one entry under `## Entries`'
+
+# --- Zoned entry ordering (issue #181) ---------------------------------------
+# One generated repo, with the log rewritten per case. Frontmatter and snapshot
+# dates follow the written date of the top heading, so only ordering varies.
+zoned_repo="$tmp_root/context-log-zoned-ordering"
+init_repo "$zoned_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$zoned_repo" >/dev/null
+git -C "$zoned_repo" add .
+(cd "$zoned_repo" && AGENT_VAULT_SKIP_METADATA_GATE=1 git commit -m "Bootstrap zoned ordering fixture" >/dev/null)
+
+write_zoned_log() {
+  local repo_path="$1" log_date="$2" heading
+  shift 2
+  {
+    printf -- '---\ntype: context-log\nproject: hook-test\nlast_updated: %s\n---\n\n' "$log_date"
+    printf '# Context Log\n\n## Usage Rules\n- Newest entry at top.\n\n'
+    printf '## Current Snapshot\n- Project: hook-test\n- Last updated: %s\n\n## Entries\n' "$log_date"
+    for heading in "$@"; do
+      printf '\n### %s\n#### State\n- Fixture.\n' "$heading"
+    done
+  } >"$repo_path/agent-vault/context-log.md"
+  git -C "$repo_path" add agent-vault/context-log.md
+}
+
+# zoned_case <accept|reject> <heading>... (top entry first). Leaves the hook
+# output in zoned_output.
+zoned_case() {
+  local expectation="$1" rc=0
+  shift
+  write_zoned_log "$zoned_repo" "${1%% *}" "$@"
+  zoned_output="$(cd "$zoned_repo" && "$hook_bash" agent-vault/_assets/hooks/pre-commit 2>&1)" || rc=$?
+  if [[ "$expectation" == accept && "$rc" -ne 0 ]] || [[ "$expectation" == reject && "$rc" -eq 0 ]]; then
+    echo "Expected the hook to $expectation this entry order (exit $rc):" >&2
+    printf '  %s\n' "$@" >&2
+    printf '%s\n' "$zoned_output" >&2
+    exit 1
+  fi
+  if [[ "$expectation" == reject ]]; then
+    assert_output_contains "$zoned_output" 'must keep entries newest-first'
+  fi
+}
+
+# Both orders of a pair: the first heading is the newer instant.
+zoned_pair() {
+  zoned_case accept "$1" "$2"
+  zoned_case reject "$2" "$1"
+  assert_output_contains "$zoned_output" "found newer entry \`$1\` below older entry \`$2\`"
+}
+
+assert_order_error_count() {
+  local expected="$1" actual
+  actual="$(printf '%s\n' "$zoned_output" | grep -c 'must keep entries newest-first' || true)"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "Expected $expected newest-first error(s); found $actual:" >&2
+    printf '%s\n' "$zoned_output" >&2
+    exit 1
+  fi
+}
+
+# Numeric offsets are ordered by instant, not by their clock digits. The first
+# pair is the end of daylight saving: 01:15 -0500 is 06:15 UTC, after 05:45 UTC.
+zoned_pair '2026-11-01 01:15 -0500 - fixture - newer' '2026-11-01 01:45 -0400 - fixture - older'
+zoned_pair '2026-06-10 10:00 -0700 - fixture - newer' '2026-06-10 12:00 +0000 - fixture - older'
+# An offset can move an entry across a date, a year, and a leap day.
+zoned_pair '2025-12-31 23:00 -1200 - fixture - newer' '2026-01-01 00:30 +1400 - fixture - older'
+zoned_pair '2028-02-29 23:30 -0100 - fixture - newer' '2028-03-01 00:15 +0100 - fixture - older'
+# The bounds of the usable range are numeric offsets.
+zoned_pair '2026-06-10 00:00 -1200 - fixture - newer' '2026-06-10 10:00 +0000 - fixture - older'
+zoned_pair '2026-06-10 10:00 +0000 - fixture - newer' '2026-06-10 23:00 +1400 - fixture - older'
+
+# Equal instants are valid in either order, and +05 is +0500.
+zoned_case accept '2026-06-10 10:00 +0500 - fixture - a' '2026-06-10 05:00 +0000 - fixture - b'
+zoned_case accept '2026-06-10 05:00 +0000 - fixture - b' '2026-06-10 10:00 +0500 - fixture - a'
+zoned_case accept '2026-06-10 10:00 +05 - fixture - a' '2026-06-10 10:00 +0500 - fixture - b'
+zoned_case accept '2026-06-10 10:00 +0500 - fixture - b' '2026-06-10 10:00 +05 - fixture - a'
+zoned_case accept '2026-06-10 10:00 -0000 - fixture - a' '2026-06-10 10:00 +0000 - fixture - b'
+
+# A numeric token outside -1200..+1400, or with minutes above 59, is an unknown
+# offset: read as a number each lower entry here would be newer and rejected.
+zoned_case accept '2026-06-10 10:00 +0000 - fixture - a' '2026-06-10 00:00 -1201 - fixture - b'
+zoned_case accept '2026-06-10 10:00 +0000 - fixture - a' '2026-06-10 12:00 -1300 - fixture - b'
+zoned_case accept '2026-06-10 23:00 +1401 - fixture - a' '2026-06-10 10:00 +0000 - fixture - b'
+zoned_case accept '2026-06-10 10:00 +0000 - fixture - a' '2026-06-10 10:30 -0160 - fixture - b'
+
+# A known and an unknown offset a few hours apart could be in either order, so
+# both are accepted. Days apart, only one order is possible.
+zoned_case accept '2026-06-10 10:00 +0000 - fixture - a' '2026-06-10 08:00 local - fixture - b'
+zoned_case accept '2026-06-10 08:00 local - fixture - b' '2026-06-10 10:00 +0000 - fixture - a'
+zoned_pair '2026-06-10 10:00 +0000 - fixture - newer' '2026-06-01 10:00 local - fixture - older'
+zoned_pair '2026-06-10 10:00 EDT - fixture - newer' '2026-06-01 10:00 -0400 - fixture - older'
+# Different abbreviations are different unknown offsets: this is the repeated
+# hour at the end of daylight saving, written with abbreviations.
+zoned_case accept '2026-11-01 01:15 EST - fixture - a' '2026-11-01 01:45 EDT - fixture - b'
+
+# Legacy exception: adjacent entries with the same non-numeric token keep the
+# wall-clock comparison, including where it cannot tell the repeated hour apart.
+zoned_pair '2026-06-10 10:00 local - fixture - newer' '2026-06-10 09:00 local - fixture - older'
+zoned_pair '2026-06-10 10:00 EDT - fixture - newer' '2026-06-10 09:00 EDT - fixture - older'
+zoned_case reject '2026-11-01 01:15 local - fixture - a' '2026-11-01 01:45 local - fixture - b'
+# Each adjacent violation is still reported, as before.
+zoned_case reject '2026-06-10 08:00 local - fixture - a' '2026-06-10 09:00 local - fixture - b' \
+  '2026-06-10 10:00 local - fixture - c'
+assert_order_error_count 2
+
+# The check reaches past the adjacent entry: an unknown-offset entry between two
+# numeric-offset entries cannot hide a certain misordering.
+zoned_case reject '2026-06-10 10:00 +0000 - fixture - top' '2026-06-10 09:00 local - fixture - middle' \
+  '2026-06-10 12:00 +0000 - fixture - bottom'
+assert_output_contains "$zoned_output" \
+  'found newer entry `2026-06-10 12:00 +0000 - fixture - bottom` below older entry `2026-06-10 10:00 +0000 - fixture - top`'
+assert_order_error_count 1
+zoned_case accept '2026-06-10 12:00 +0000 - fixture - bottom' '2026-06-10 09:00 local - fixture - middle' \
+  '2026-06-10 10:00 +0000 - fixture - top'
+
+# A pair that fails both checks is one error, and so is a run of entries below
+# one stale entry.
+zoned_case reject '2026-06-01 10:00 local - fixture - a' '2026-06-10 10:00 local - fixture - b'
+assert_order_error_count 1
+zoned_case reject '2026-01-01 10:00 +0000 - fixture - stale' '2026-03-03 10:00 -0500 - fixture - a' \
+  '2026-03-02 10:00 local - fixture - b' '2026-03-01 10:00 +0100 - fixture - c'
+assert_order_error_count 1
+
+# The date checks use the written date of the top entry, not its UTC date:
+# 23:30 -0500 is already the next day in UTC.
+zoned_case accept '2026-06-10 23:30 -0500 - fixture - late evening'
+replace_first_match "$zoned_repo/agent-vault/context-log.md" "last_updated: 2026-06-10" "last_updated: 2026-06-11"
+git -C "$zoned_repo" add agent-vault/context-log.md
+zoned_date_output="$(run_hook_expect_failure "$zoned_repo")"
+assert_output_contains "$zoned_date_output" 'frontmatter `last_updated` must match the top entry date `2026-06-10`'
+
+# Non-blocking offset warning: only for a top entry that is new in this commit
+# and has no usable numeric offset.
+offset_warning='agent-vault context-log offset warning (non-blocking'
+zoned_case accept '2026-06-10 10:00 local - fixture - new without an offset'
+assert_output_contains "$zoned_output" "$offset_warning"
+assert_output_contains "$zoned_output" 'New top entry has no numeric UTC offset: `2026-06-10 10:00 local - fixture - new without an offset`'
+assert_output_contains "$zoned_output" "date '+%Y-%m-%d %H:%M %z'"
+zoned_case accept '2026-06-10 10:00 EDT - fixture - new with an abbreviation'
+assert_output_contains "$zoned_output" "$offset_warning"
+zoned_case accept '2026-06-10 10:00 +1500 - fixture - new with an unusable offset'
+assert_output_contains "$zoned_output" "$offset_warning"
+zoned_case accept '2026-06-10 10:00 -0400 - fixture - new with an offset'
+assert_output_not_contains "$zoned_output" "$offset_warning"
+write_zoned_log "$zoned_repo" 2026-06-10 '2026-06-10 10:00 local - fixture - silenced'
+zoned_output="$(cd "$zoned_repo" && AGENT_VAULT_SKIP_OFFSET_WARNING=1 "$hook_bash" agent-vault/_assets/hooks/pre-commit 2>&1)"
+assert_output_not_contains "$zoned_output" "$offset_warning"
+# History is left alone: a top entry already in HEAD does not warn again, even
+# when the log changes below it.
+(cd "$zoned_repo" && AGENT_VAULT_SKIP_METADATA_GATE=1 git commit -m "Commit a top entry without an offset" >/dev/null)
+printf '\nLater note under the same top entry.\n' >>"$zoned_repo/agent-vault/context-log.md"
+git -C "$zoned_repo" add agent-vault/context-log.md
+zoned_output="$(cd "$zoned_repo" && "$hook_bash" agent-vault/_assets/hooks/pre-commit 2>&1)"
+assert_output_not_contains "$zoned_output" "$offset_warning"
+# An initial commit has no HEAD, so every entry is new.
+initial_commit_repo="$tmp_root/context-log-offset-initial-commit"
+init_repo "$initial_commit_repo"
+"$repo_root/scripts/new-project.sh" "hook-test" "$initial_commit_repo" >/dev/null
+git -C "$initial_commit_repo" add agent-vault/context-log.md
+initial_commit_output="$(cd "$initial_commit_repo" && "$hook_bash" agent-vault/_assets/hooks/pre-commit 2>&1)"
+assert_output_not_contains "$initial_commit_output" "$offset_warning"
+write_zoned_log "$initial_commit_repo" 2026-06-10 '2026-06-10 10:00 local - fixture - first commit'
+initial_commit_output="$(cd "$initial_commit_repo" && "$hook_bash" agent-vault/_assets/hooks/pre-commit 2>&1)"
+assert_output_contains "$initial_commit_output" "$offset_warning"
 
 # shellcheck source=./lib/tracked-hooks.sh
 source "$script_dir/lib/tracked-hooks.sh"

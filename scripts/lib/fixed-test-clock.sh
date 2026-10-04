@@ -9,6 +9,7 @@
 
 FIXED_TEST_CLOCK_DAY='2026-09-06'
 FIXED_TEST_CLOCK_MINUTE='2026-09-06 12:00'
+FIXED_TEST_CLOCK_ZONED_MINUTE='2026-09-06 12:00 +0000'
 FIXED_TEST_CLOCK_STAMP='20260906-120000'
 # Capture the source location now, before a caller can change directories.
 fixed_test_clock_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
@@ -68,6 +69,7 @@ assert_fixed_test_clock() {
 
   assert_fixed_test_clock_output "$FIXED_TEST_CLOCK_DAY" '+%Y-%m-%d'
   assert_fixed_test_clock_output "$FIXED_TEST_CLOCK_MINUTE" '+%Y-%m-%d %H:%M'
+  assert_fixed_test_clock_output "$FIXED_TEST_CLOCK_ZONED_MINUTE" '+%Y-%m-%d %H:%M %z'
   assert_fixed_test_clock_output "$FIXED_TEST_CLOCK_STAMP" '+%Y%m%d-%H%M%S'
 
   assert_clock_rejects "$clock_bin" 'Unsupported fixed test clock date format' '+%F'

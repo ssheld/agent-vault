@@ -193,6 +193,75 @@ markdown_fences='
 '
 # END markdown fences
 
+# Keep this trusted, static awk source identical in the pre-commit hook, the
+# compactor, and the rollover checker, so all three order entries the same way.
+# Tests check marker integrity, equality, and the conversion table.
+# BEGIN entry timestamps
+entry_timestamps='
+    function days_in_month(y, m) {
+      if (m == 2) return ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) ? 29 : 28
+      if (m == 4 || m == 6 || m == 9 || m == 11) return 30
+      return 31
+    }
+    # 1 when "YYYY-MM-DD HH:MM" names a real calendar minute. Anything else is
+    # compared as written, never shifted.
+    function real_minute(ts, y, mo, d) {
+      y = substr(ts, 1, 4) + 0; mo = substr(ts, 6, 2) + 0; d = substr(ts, 9, 2) + 0
+      if (mo < 1 || mo > 12 || d < 1 || d > days_in_month(y, mo)) return 0
+      return (substr(ts, 12, 2) + 0 <= 23 && substr(ts, 15, 2) + 0 <= 59)
+    }
+    # Shift a real "YYYY-MM-DD HH:MM" minute by delta minutes, |delta| < 1440.
+    function shift_minute(ts, delta, y, mo, d, total) {
+      y = substr(ts, 1, 4) + 0; mo = substr(ts, 6, 2) + 0; d = substr(ts, 9, 2) + 0
+      total = substr(ts, 12, 2) * 60 + substr(ts, 15, 2) + delta
+      if (total < 0) {
+        total += 1440; d--
+        if (d < 1) { mo--; if (mo < 1) { mo = 12; y-- }; d = days_in_month(y, mo) }
+      } else if (total >= 1440) {
+        total -= 1440; d++
+        if (d > days_in_month(y, mo)) { d = 1; mo++; if (mo > 12) { mo = 1; y++ } }
+      }
+      return sprintf("%04d-%02d-%02d %02d:%02d", y, mo, d, int(total / 60), total % 60)
+    }
+    # Zone token of an entry heading with its leading "### " removed.
+    function entry_zone(heading, zone) {
+      zone = substr(heading, 18)
+      sub(/ .*$/, "", zone)
+      return zone
+    }
+    # Minutes east of UTC for a usable numeric offset (-1200 through +1400), or
+    # "unknown" for local, an abbreviation, or a numeric token outside that range.
+    function offset_minutes(zone, hh, mm, total) {
+      if (zone !~ /^[+-][0-9][0-9]([0-9][0-9])?$/) return "unknown"
+      hh = substr(zone, 2, 2) + 0
+      mm = (length(zone) == 5) ? substr(zone, 4, 2) + 0 : 0
+      if (mm > 59) return "unknown"
+      total = hh * 60 + mm
+      if (substr(zone, 1, 1) == "-") total = -total
+      if (total < -720 || total > 840) return "unknown"
+      return total
+    }
+    # Earliest (which = -1) or latest (which = 1) UTC minute the heading can
+    # name. A numeric offset gives one instant; an unknown offset spans every
+    # usable offset, from 14:00 behind the written minute to 12:00 ahead of it.
+    function entry_bound(heading, which, ts, off) {
+      ts = substr(heading, 1, 16)
+      if (!real_minute(ts)) return ts
+      off = offset_minutes(entry_zone(heading))
+      if (off == "unknown") return shift_minute(ts, (which < 0) ? -840 : 720)
+      return shift_minute(ts, -off)
+    }
+    # Sort key for newest/oldest selection: the UTC minute for a numeric offset,
+    # the written minute otherwise.
+    function entry_key(heading, ts, off) {
+      ts = substr(heading, 1, 16)
+      off = offset_minutes(entry_zone(heading))
+      if (off == "unknown" || !real_minute(ts)) return ts
+      return shift_minute(ts, -off)
+    }
+'
+# END entry timestamps
+
 extract_context_log_frontmatter_value() {
   local file_path="$1"
   local field_name="$2"
@@ -240,10 +309,24 @@ extract_context_log_snapshot_last_updated() {
   ' "$file_path"
 }
 
+# Emit one line per entry under "## Entries": the written "YYYY-MM-DD HH:MM" for
+# a valid heading, or a tagged line for a problem.
+#
+# Ordering runs two checks on each entry:
+#   - Adjacent: against the entry directly above, when both carry a numeric
+#     offset (compared by instant) or the same non-numeric token (compared by
+#     written minute, the legacy rule; it cannot tell apart the repeated hour at
+#     the end of daylight saving or two machines that both write `local`).
+#   - Running bound: against every entry above. An entry is misordered when its
+#     earliest possible instant is later than the lowest latest-possible instant
+#     seen so far. This never rejects an order that could be valid, and it sees
+#     past an unknown-offset entry sitting between two numeric-offset entries.
+# A bound failure directly below another failure is the same misplacement seen
+# again, so only the first of a run is reported.
 collect_context_log_entry_timestamps() {
   local file_path="$1"
 
-  awk "$markdown_fences"'
+  awk "$markdown_fences$entry_timestamps"'
     { if (fenced($0)) next }
     /^## Entries$/ {
       in_entries = 1
@@ -254,10 +337,42 @@ collect_context_log_entry_timestamps() {
     }
     in_entries && /^### / {
       if (match($0, /^### ([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]) (local|[A-Z][A-Za-z][A-Za-z]*|[+-][0-9][0-9]([0-9][0-9])?) - /)) {
-        timestamp = $0
-        sub(/^### /, "", timestamp)
-        sub(/ (local|[A-Z][A-Za-z][A-Za-z]*|[+-][0-9][0-9]([0-9][0-9])?) - .*$/, "", timestamp)
-        print timestamp
+        heading = $0
+        sub(/^### /, "", heading)
+        gsub(/\t/, " ", heading)
+        written = substr(heading, 1, 16)
+        zone = entry_zone(heading)
+        numeric = (offset_minutes(zone) != "unknown")
+        earliest = entry_bound(heading, -1)
+        latest = entry_bound(heading, 1)
+
+        adjacent_failure = 0
+        bound_failure = 0
+        if (entries > 0) {
+          if (numeric && previous_numeric) adjacent_failure = (earliest > previous_latest)
+          else if (!numeric && zone == previous_zone) adjacent_failure = (written > previous_written)
+          bound_failure = (earliest > bound_latest)
+        }
+        if (adjacent_failure) {
+          printf "__ORDER__\t%s\t%s\n", heading, previous_heading
+        } else if (bound_failure && !previous_failed) {
+          printf "__ORDER__\t%s\t%s\n", heading, bound_heading
+        }
+        previous_failed = (adjacent_failure || bound_failure)
+
+        if (entries == 0 || latest < bound_latest) {
+          bound_latest = latest
+          bound_heading = heading
+        }
+        previous_heading = heading
+        previous_written = written
+        previous_zone = zone
+        previous_numeric = numeric
+        previous_latest = latest
+        entries++
+
+        if (entries == 1) printf "__TOP__\t%s\n", heading
+        print written
         next
       }
 
@@ -271,15 +386,47 @@ collect_context_log_entry_timestamps() {
   ' "$file_path"
 }
 
+# Non-blocking: a newly added top entry should carry a numeric UTC offset, the
+# only zone form the ordering checks can place exactly. History is left alone:
+# a top entry already present in HEAD is never reported. Silence with
+# AGENT_VAULT_SKIP_OFFSET_WARNING=1.
+warn_context_log_entry_offset() {
+  local file_path="$1"
+  local top_heading="$2"
+  local zone=""
+  local head_log=""
+
+  if [[ "${AGENT_VAULT_SKIP_OFFSET_WARNING:-}" == "1" || -z "$top_heading" ]]; then
+    return 0
+  fi
+
+  zone="$(printf '%s\n' "$top_heading" | awk "$entry_timestamps"'
+    { print (offset_minutes(entry_zone($0)) == "unknown") ? "unknown" : "numeric"; exit }
+  ')" || return 0
+  [[ "$zone" == "unknown" ]] || return 0
+
+  # No HEAD (initial commit) or no log in HEAD means every entry is new. Read
+  # the blob first: a pipeline would report an early grep exit as a failure.
+  head_log="$(git show "HEAD:$file_path" 2>/dev/null)" || head_log=""
+  if grep -Fqx -- "### $top_heading" <<<"$head_log"; then
+    return 0
+  fi
+
+  echo "agent-vault context-log offset warning (non-blocking; set AGENT_VAULT_SKIP_OFFSET_WARNING=1 to silence):" >&2
+  echo "  New top entry has no numeric UTC offset: \`$top_heading\`" >&2
+  echo "  Entries from other zones cannot be ordered reliably against it. Write new headings with:" >&2
+  echo "    date '+%Y-%m-%d %H:%M %z'" >&2
+  return 0
+}
+
 validate_staged_context_log() {
   local file_path="$1"
   local tmp_file=""
-  local first_timestamp=""
   local first_date=""
+  local top_heading=""
+  local order_fields=""
   local last_updated=""
   local snapshot_last_updated=""
-  local previous_timestamp=""
-  local current_timestamp=""
   local current_entry_line=""
   local has_entries="false"
   local -a errors=()
@@ -299,23 +446,27 @@ validate_staged_context_log() {
       continue
     fi
 
-    has_entries="true"
-
-    if [[ "$current_entry_line" == __INVALID__* ]]; then
-      errors+=("$file_path entry headings must start with \`YYYY-MM-DD HH:MM local - <agent> - <topic>\` (\`local\` may instead be a zone such as \`EDT\`, \`ChST\`, or \`+0545\`); found: ${current_entry_line#*$'\t'}")
+    if [[ "$current_entry_line" == __ORDER__* ]]; then
+      order_fields="${current_entry_line#*$'\t'}"
+      errors+=("$file_path must keep entries newest-first; found newer entry \`${order_fields%%$'\t'*}\` below older entry \`${order_fields#*$'\t'}\`.")
       continue
     fi
 
-    current_timestamp="$current_entry_line"
-
-    if [[ -z "$first_timestamp" ]]; then
-      first_timestamp="$current_timestamp"
-      first_date="${current_timestamp%% *}"
-    elif [[ "$current_timestamp" > "$previous_timestamp" ]]; then
-      errors+=("$file_path must keep entries newest-first; found newer entry \`$current_timestamp\` below older entry \`$previous_timestamp\`.")
+    if [[ "$current_entry_line" == __TOP__* ]]; then
+      top_heading="${current_entry_line#*$'\t'}"
+      continue
     fi
 
-    previous_timestamp="$current_timestamp"
+    has_entries="true"
+
+    if [[ "$current_entry_line" == __INVALID__* ]]; then
+      errors+=("$file_path entry headings must start with \`YYYY-MM-DD HH:MM ±HHMM - <agent> - <topic>\` (local time and its numeric UTC offset, from \`date '+%Y-%m-%d %H:%M %z'\`; \`local\` or an abbreviation such as \`EDT\` is still accepted in place of the offset); found: ${current_entry_line#*$'\t'}")
+      continue
+    fi
+
+    if [[ -z "$first_date" ]]; then
+      first_date="${current_entry_line%% *}"
+    fi
   done < <(collect_context_log_entry_timestamps "$tmp_file")
 
   if [[ "$has_entries" != "true" ]]; then
@@ -337,6 +488,7 @@ validate_staged_context_log() {
   rm -f "$tmp_file"
 
   if [[ "${#errors[@]}" -eq 0 ]]; then
+    warn_context_log_entry_offset "$file_path" "$top_heading"
     return 0
   fi
 
@@ -376,6 +528,11 @@ if [[ "$context_log_validation_failed" == "true" ]]; then
     echo "- $line" >&2
   done <<<"$context_log_validation_output"
   exit 1
+fi
+
+# A passing validation can still carry a non-blocking warning.
+if [[ -n "$context_log_validation_output" ]]; then
+  printf '%s\n' "$context_log_validation_output" >&2
 fi
 
 requires_metadata_gate="false"

@@ -47,9 +47,27 @@ git config core.hooksPath agent-vault/_assets/hooks
   - Rejects staged `agent-vault/` path changes when the generated `agent-vault/`
     directory or shared runtime metadata classifier is missing.
   - Validates staged `agent-vault/context-log.md` content:
-    - entry headings must use `YYYY-MM-DD HH:MM local - <agent> - <topic>`, where `local` may instead be a zone such as `EDT`, `ChST`, or `+0545`
-    - entries must remain newest-first
+    - entry headings must use `YYYY-MM-DD HH:MM ±HHMM - <agent> - <topic>`: local time and its numeric UTC offset, as printed by `date '+%Y-%m-%d %H:%M %z'`. `local` or an abbreviation such as `EDT` or `ChST` is still accepted in place of the offset.
+    - entries must remain newest-first. Two checks run on each entry:
+      - against the entry directly above it, when both carry a numeric offset
+        (compared by instant) or the same non-numeric token (compared by written
+        time). The second case is a legacy rule: it cannot tell apart the
+        repeated hour at the end of daylight saving, or two machines in
+        different zones that both write `local`, so it can reject a valid order.
+        Use numeric offsets to avoid that.
+      - against every entry above it, by the range of instants it could name.
+        A numeric offset from `-1200` through `+1400` names one instant. `local`,
+        an abbreviation, or a numeric token outside that range has an unknown
+        offset and could be anywhere from 14 hours before to 12 hours after its
+        written time. An entry is rejected only when it is certainly newer than
+        an entry above it, so this check never rejects an order that could be
+        valid, and an unknown-offset entry between two numeric-offset entries
+        cannot hide a misordering.
     - frontmatter and Current Snapshot `Last updated` must match the top entry date
+  - Emits a **non-blocking** offset warning when the top entry of the staged
+    `agent-vault/context-log.md` is new in this commit (its heading is not in
+    `HEAD`'s copy of the log) and has no usable numeric offset. Earlier entries
+    are never reported. Silence it with `AGENT_VAULT_SKIP_OFFSET_WARNING=1`.
   - This is a baseline gate only. Conditional artifacts such as `open-questions.md`, decision records, handoff notes, and `lessons.md` still depend on the actual session outcome.
   - Emits a **non-blocking** memory-budget warning when the staged commit touches
     memory files (`agent-vault/`, `CLAUDE.md`, `GEMINI.md`, or any `AGENTS.md`)

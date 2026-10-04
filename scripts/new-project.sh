@@ -366,7 +366,8 @@ done
 cp -R "$scaffold_dir" "$project_dir"
 
 today="$(date '+%Y-%m-%d')"
-now="$(date '+%Y-%m-%d %H:%M')"
+# Local time plus its numeric UTC offset: the canonical entry-heading zone.
+now="$(date '+%Y-%m-%d %H:%M %z')"
 migration_timestamp="$(date '+%Y%m%d-%H%M%S')"
 migration_backup_dir="$project_dir/context/updates/$migration_timestamp"
 

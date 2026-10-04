@@ -1777,4 +1777,105 @@ assert_rc 0 "$COMPACT_RC" 'dry-run validates nested missing destinations'
 assert_not_exists "$d/new" 'dry-run does not create destination parents'
 assert_no_transaction_artifacts 'dry-run does not create recovery state'
 
+# --- Zoned boundaries (issue #181) -------------------------------------------
+# Numeric offsets are ordered by instant. 01:15 -0500 is 06:15 UTC, after
+# 01:45 -0400 at 05:45 UTC, so "newer" is the newest archived entry although its
+# clock digits are smaller.
+make_zoned_log() {
+  local heading
+  {
+    printf '# Context Log\n\n## Usage Rules\n- Newest entry at top.\n\n'
+    printf '## Current Snapshot\n- Active branch: `main`\n\n## Entries\n'
+    for heading in "$@"; do printf '\n### %s\n- Body.\n' "$heading"; done
+  } >"$d/log.md"
+}
+zoned_checker() {
+  set +e
+  CHECK_OUT="$("$checker" "$d/log.md" --archive "$d/archive.md" --manifest "$d/manifest.md" 2>&1)"
+  CHECK_RC=$?
+  set -e
+}
+
+d="$tmp_root/zoned-boundaries"
+mkdir -p "$d"
+make_zoned_log '2026-11-01 09:00 -0500 - fixture - rollover session' \
+  '2026-11-01 01:15 -0500 - fixture - newer' \
+  '2026-11-01 01:45 -0400 - fixture - older'
+run_compact "$d/log.md" --keep 1 --archive "$d/archive.md" --manifest "$d/manifest.md" \
+  --rollover-id zoned-1 --require-top-entry 'rollover session'
+assert_rc 0 "$COMPACT_RC" 'mixed-offset rollover succeeds'
+assert_file_contains "$d/log.md" 'boundary: through newer' 'default boundary names the newest instant'
+assert_file_contains "$d/manifest.md" '- newest_archived: 2026-11-01 01:15 -0500 - fixture - newer' 'newest_archived by instant'
+assert_file_contains "$d/manifest.md" '- oldest_archived: 2026-11-01 01:45 -0400 - fixture - older' 'oldest_archived by instant'
+zoned_checker
+[[ "$CHECK_RC" -eq 0 ]] || fail "checker rejected the mixed-offset rollover: $CHECK_OUT"
+pass=$((pass + 1))
+
+# The checker rejects the record a wall-clock comparison would have written.
+cp "$d/manifest.md" "$d/manifest.good"
+sed -e 's/^- newest_archived: .*/- newest_archived: 2026-11-01 01:45 -0400 - fixture - older/' \
+  -e 's/^- oldest_archived: .*/- oldest_archived: 2026-11-01 01:15 -0500 - fixture - newer/' \
+  "$d/manifest.good" >"$d/manifest.md"
+zoned_checker
+[[ "$CHECK_RC" -eq 1 ]] || fail "checker accepted swapped mixed-offset boundaries: $CHECK_OUT"
+assert_contains "$CHECK_OUT" "is not the archive's newest entry" 'swapped newest_archived is a finding'
+assert_contains "$CHECK_OUT" "is not the archive's oldest entry" 'swapped oldest_archived is a finding'
+cp "$d/manifest.good" "$d/manifest.md"
+
+# A second rollover compares newly moved entries with the existing archive by
+# instant too: 08:30 -0800 is 16:30 UTC, after the archived 09:00 -0500 at
+# 14:00 UTC, although its clock digits are smaller.
+awk '
+  { print }
+  /^## Entries$/ {
+    print ""
+    print "### 2026-11-02 09:00 -0500 - fixture - second rollover"
+    print "- Body."
+    print ""
+    print "### 2026-11-01 08:30 -0800 - fixture - west coast"
+    print "- Body."
+  }
+' "$d/log.md" >"$d/log.next"
+mv "$d/log.next" "$d/log.md"
+run_compact "$d/log.md" --keep 1 --archive "$d/archive.md" --manifest "$d/manifest.md" \
+  --rollover-id zoned-2 --require-top-entry 'second rollover'
+assert_rc 0 "$COMPACT_RC" 'second mixed-offset rollover succeeds'
+assert_file_contains "$d/log.md" 'boundary: through west coast' 'second boundary names the newest instant'
+assert_file_contains "$d/manifest.md" '- newest_archived: 2026-11-01 08:30 -0800 - fixture - west coast' 'second newest_archived by instant'
+assert_file_contains "$d/manifest.md" '- oldest_archived: 2026-11-01 01:45 -0400 - fixture - older' 'second oldest_archived by instant'
+zoned_checker
+[[ "$CHECK_RC" -eq 0 ]] || fail "checker rejected the second mixed-offset rollover: $CHECK_OUT"
+pass=$((pass + 1))
+
+# One instant written with two offsets is a tie, broken by position.
+d="$tmp_root/zoned-tie"
+mkdir -p "$d"
+make_zoned_log '2026-06-10 09:00 +0000 - fixture - rollover session' \
+  '2026-06-10 05:00 +0000 - fixture - tie top' \
+  '2026-06-10 10:00 +0500 - fixture - tie bottom'
+run_compact "$d/log.md" --keep 1 --archive "$d/archive.md" --manifest "$d/manifest.md" \
+  --rollover-id zoned-tie --require-top-entry 'rollover session'
+assert_rc 0 "$COMPACT_RC" 'same-instant rollover succeeds'
+assert_file_contains "$d/manifest.md" '- newest_archived: 2026-06-10 05:00 +0000 - fixture - tie top' 'same-instant newest is the top-most'
+assert_file_contains "$d/manifest.md" '- oldest_archived: 2026-06-10 10:00 +0500 - fixture - tie bottom' 'same-instant oldest is the bottom-most'
+zoned_checker
+[[ "$CHECK_RC" -eq 0 ]] || fail "checker rejected the same-instant rollover: $CHECK_OUT"
+pass=$((pass + 1))
+
+# An unknown offset keeps its written minute as the key, next to a numeric
+# offset: deterministic, and the compactor and checker agree.
+d="$tmp_root/zoned-mixed-unknown"
+mkdir -p "$d"
+make_zoned_log '2026-06-10 20:00 +0000 - fixture - rollover session' \
+  '2026-06-10 10:00 -0700 - fixture - numeric' \
+  '2026-06-10 12:00 local - fixture - unknown'
+run_compact "$d/log.md" --keep 1 --archive "$d/archive.md" --manifest "$d/manifest.md" \
+  --rollover-id zoned-mixed --require-top-entry 'rollover session'
+assert_rc 0 "$COMPACT_RC" 'mixed known and unknown rollover succeeds'
+assert_file_contains "$d/manifest.md" '- newest_archived: 2026-06-10 10:00 -0700 - fixture - numeric' 'numeric entry keyed by its UTC minute'
+assert_file_contains "$d/manifest.md" '- oldest_archived: 2026-06-10 12:00 local - fixture - unknown' 'unknown entry keyed by its written minute'
+zoned_checker
+[[ "$CHECK_RC" -eq 0 ]] || fail "checker disagreed on the mixed known and unknown rollover: $CHECK_OUT"
+pass=$((pass + 1))
+
 echo "compact-context-log compactor regression checks passed ($pass assertions)."

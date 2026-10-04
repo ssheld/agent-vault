@@ -52,6 +52,75 @@ markdown_fences='
 '
 # END markdown fences
 
+# Keep this trusted, static awk source identical in the pre-commit hook, the
+# compactor, and the rollover checker, so all three order entries the same way.
+# Tests check marker integrity, equality, and the conversion table.
+# BEGIN entry timestamps
+entry_timestamps='
+    function days_in_month(y, m) {
+      if (m == 2) return ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) ? 29 : 28
+      if (m == 4 || m == 6 || m == 9 || m == 11) return 30
+      return 31
+    }
+    # 1 when "YYYY-MM-DD HH:MM" names a real calendar minute. Anything else is
+    # compared as written, never shifted.
+    function real_minute(ts, y, mo, d) {
+      y = substr(ts, 1, 4) + 0; mo = substr(ts, 6, 2) + 0; d = substr(ts, 9, 2) + 0
+      if (mo < 1 || mo > 12 || d < 1 || d > days_in_month(y, mo)) return 0
+      return (substr(ts, 12, 2) + 0 <= 23 && substr(ts, 15, 2) + 0 <= 59)
+    }
+    # Shift a real "YYYY-MM-DD HH:MM" minute by delta minutes, |delta| < 1440.
+    function shift_minute(ts, delta, y, mo, d, total) {
+      y = substr(ts, 1, 4) + 0; mo = substr(ts, 6, 2) + 0; d = substr(ts, 9, 2) + 0
+      total = substr(ts, 12, 2) * 60 + substr(ts, 15, 2) + delta
+      if (total < 0) {
+        total += 1440; d--
+        if (d < 1) { mo--; if (mo < 1) { mo = 12; y-- }; d = days_in_month(y, mo) }
+      } else if (total >= 1440) {
+        total -= 1440; d++
+        if (d > days_in_month(y, mo)) { d = 1; mo++; if (mo > 12) { mo = 1; y++ } }
+      }
+      return sprintf("%04d-%02d-%02d %02d:%02d", y, mo, d, int(total / 60), total % 60)
+    }
+    # Zone token of an entry heading with its leading "### " removed.
+    function entry_zone(heading, zone) {
+      zone = substr(heading, 18)
+      sub(/ .*$/, "", zone)
+      return zone
+    }
+    # Minutes east of UTC for a usable numeric offset (-1200 through +1400), or
+    # "unknown" for local, an abbreviation, or a numeric token outside that range.
+    function offset_minutes(zone, hh, mm, total) {
+      if (zone !~ /^[+-][0-9][0-9]([0-9][0-9])?$/) return "unknown"
+      hh = substr(zone, 2, 2) + 0
+      mm = (length(zone) == 5) ? substr(zone, 4, 2) + 0 : 0
+      if (mm > 59) return "unknown"
+      total = hh * 60 + mm
+      if (substr(zone, 1, 1) == "-") total = -total
+      if (total < -720 || total > 840) return "unknown"
+      return total
+    }
+    # Earliest (which = -1) or latest (which = 1) UTC minute the heading can
+    # name. A numeric offset gives one instant; an unknown offset spans every
+    # usable offset, from 14:00 behind the written minute to 12:00 ahead of it.
+    function entry_bound(heading, which, ts, off) {
+      ts = substr(heading, 1, 16)
+      if (!real_minute(ts)) return ts
+      off = offset_minutes(entry_zone(heading))
+      if (off == "unknown") return shift_minute(ts, (which < 0) ? -840 : 720)
+      return shift_minute(ts, -off)
+    }
+    # Sort key for newest/oldest selection: the UTC minute for a numeric offset,
+    # the written minute otherwise.
+    function entry_key(heading, ts, off) {
+      ts = substr(heading, 1, 16)
+      off = offset_minutes(entry_zone(heading))
+      if (off == "unknown" || !real_minute(ts)) return ts
+      return shift_minute(ts, -off)
+    }
+'
+# END entry timestamps
+
 # Validate the structure of an agent-vault context log after a rollover /
 # compaction. This is a CHECKER only: it never edits, moves, or rewrites the
 # log. It catches the failure modes a manual or scripted rollover can leave
@@ -111,8 +180,18 @@ Section headings are matched exactly (a distinct heading such as
 "## Current Snapshot Format Notes" is not a duplicate), and CRLF line endings
 are tolerated. Live entry-heading style is enforced by the pre-commit hook, not
 here; archive boundary verification counts only canonical
-"### YYYY-MM-DD HH:MM local - <agent> - <topic>" entry headings, where
-"local" may instead be a zone such as "EDT", "ChST", or "+0545".
+"### YYYY-MM-DD HH:MM <zone> - <agent> - <topic>" entry headings, where <zone>
+is a numeric UTC offset such as "-0400" or "+0545", "local", or an abbreviation
+such as "EDT" or "ChST".
+
+Newest / oldest selection orders entries with a numeric offset (-1200 through
++1400) by instant. "local", an abbreviation, or a numeric token outside that
+range has an unknown offset and is ordered by its written minute, so in an
+archive that mixes the two it can be misplaced by up to its real offset. Ties
+are broken by position (top-most is newest). The compactor selects with the same
+rule. A record written before numeric offsets were ordered by instant can name
+the wrong entries: correct newest_archived, oldest_archived, and the boundary in
+the manifest and the live pointer by hand.
 
 All structural scans ignore fenced examples, including pointer and manifest
 fields. Fences open with 3+ backticks or tildes and 0-3 leading spaces; only the
@@ -477,10 +556,14 @@ EOF
   # <topic>" heading outside a fence, where "local" may instead be a zone such
   # as "EDT", "ChST", or "+0545" (the shape the pre-commit hook enforces and
   # the compactor splits on); a nested sub-heading that merely starts with a date
-  # is body text, not a boundary. The leading "YYYY-MM-DD HH:MM" is the timestamp,
-  # so lexical compare gives chronological order and a shared minute is unambiguous.
+  # is body text, not a boundary. Entries are compared by entry_key: the UTC
+  # minute for a numeric-offset heading and the written minute otherwise, so
+  # lexical compare orders numeric-offset entries by instant and a shared key is
+  # unambiguous. An entry with an unknown offset can be misplaced against a
+  # numeric-offset entry by up to its real offset; the compactor uses the same
+  # key, so the two always agree.
   verify_archive_boundaries() {
-    ROLLOVER_NEWEST="$1" ROLLOVER_OLDEST="$2" awk "$markdown_fences"'
+    ROLLOVER_NEWEST="$1" ROLLOVER_OLDEST="$2" awk "$markdown_fences$entry_timestamps"'
     BEGIN { newest = ENVIRON["ROLLOVER_NEWEST"]; oldest = ENVIRON["ROLLOVER_OLDEST"] }
     function strip(s) {
       sub(/\r$/, "", s)
@@ -494,11 +577,12 @@ EOF
       # mawk has no interval expressions ({4}), so digits are spelled out.
       if (line !~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9] (local|[A-Z][A-Za-z][A-Za-z]*|[+-][0-9][0-9]([0-9][0-9])?) - /) next
       sub(/^### /, "", line)
-      ts = substr(line, 1, 16)
+      ts = entry_key(line)
+      if (offset_minutes(entry_zone(line)) != "unknown") numeric = 1
       n++
-      # The newest entry is the top-most at the max timestamp and the oldest is
-      # the bottom-most at the min timestamp (archives are newest-at-top). Ties
-      # on a shared minute are broken by position, so max_h/min_h name one
+      # The newest entry is the top-most at the max key and the oldest is the
+      # bottom-most at the min key (archives are newest-at-top). Ties on a
+      # shared key are broken by position, so max_h/min_h name one
       # specific heading and a same-minute mismatch is still caught.
       if (n == 1 || ts > max_ts) { max_ts = ts; max_h = line }
       if (n == 1 || ts <= min_ts) { min_ts = ts; min_h = line }
@@ -511,6 +595,7 @@ EOF
       printf "min\t%s\t%s\n", min_ts, min_h
       printf "newest_found\t%d\n", newest_found + 0
       printf "oldest_found\t%d\n", oldest_found + 0
+      printf "numeric\t%d\n", numeric + 0
     }
   ' "$3"
   }
@@ -678,8 +763,16 @@ EOF
             oldest_found) boundary[of]="$col_a" ;;
             max) boundary[maxh]="$col_b" ;;
             min) boundary[minh]="$col_b" ;;
+            numeric) boundary[numeric]="$col_a" ;;
           esac
         done <<<"$boundary_output"
+
+        # Records written before numeric-offset entries were ordered by instant
+        # can name the wrong extremes; say how to repair them.
+        instant_note=""
+        if [[ "${boundary[numeric]:-0}" == "1" ]]; then
+          instant_note=" (entries with a numeric UTC offset are ordered by instant; if this record predates that ordering, correct newest_archived, oldest_archived, and the boundary in the manifest and the live pointer by hand)"
+        fi
 
         # Require an exact heading match against the entry the checker independently
         # selects as newest/oldest (max/min timestamp, ties broken by position), so
@@ -688,14 +781,14 @@ EOF
           if [[ "${boundary[nf]:-0}" != "1" ]]; then
             findings+=("manifest newest_archived heading not found in the archive: \"${manifest[newest_archived]}\"")
           elif [[ "${manifest[newest_archived]}" != "${boundary[maxh]:-}" ]]; then
-            findings+=("manifest newest_archived is not the archive's newest entry -- the newest archived entry is: \"${boundary[maxh]}\"")
+            findings+=("manifest newest_archived is not the archive's newest entry -- the newest archived entry is: \"${boundary[maxh]}\"$instant_note")
           fi
         fi
         if [[ -n "${manifest[oldest_archived]:-}" ]]; then
           if [[ "${boundary[of]:-0}" != "1" ]]; then
             findings+=("manifest oldest_archived heading not found in the archive: \"${manifest[oldest_archived]}\"")
           elif [[ "${manifest[oldest_archived]}" != "${boundary[minh]:-}" ]]; then
-            findings+=("manifest oldest_archived is not the archive's oldest entry -- the oldest archived entry is: \"${boundary[minh]}\"")
+            findings+=("manifest oldest_archived is not the archive's oldest entry -- the oldest archived entry is: \"${boundary[minh]}\"$instant_note")
           fi
         fi
 

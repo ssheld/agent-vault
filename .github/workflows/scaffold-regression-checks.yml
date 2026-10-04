@@ -39,6 +39,7 @@ on:
       - "scripts/test-check-lessons-archive.sh"
       - "scripts/test-compact-context-log.sh"
       - "scripts/test-markdown-fences.sh"
+      - "scripts/test-entry-timestamps.sh"
       - ".github/workflows/scaffold-regression-checks.yml"
   push:
     branches:
@@ -80,6 +81,7 @@ on:
       - "scripts/test-check-lessons-archive.sh"
       - "scripts/test-compact-context-log.sh"
       - "scripts/test-markdown-fences.sh"
+      - "scripts/test-entry-timestamps.sh"
       - ".github/workflows/scaffold-regression-checks.yml"
   workflow_dispatch:
 
@@ -238,3 +240,5 @@ jobs:
         run: bash scripts/test-compact-context-log.sh
       - name: Verify standalone Markdown fence contract
         run: bash scripts/test-markdown-fences.sh
+      - name: Verify shared entry-timestamp contract
+        run: bash scripts/test-entry-timestamps.sh
